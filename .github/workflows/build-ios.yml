@@ -17,12 +17,16 @@ jobs:
 
       - name: Install XcodeGen
         run: |
+          set -e
           brew install xcodegen
           xcodebuild -version
           xcodegen --version
 
-      - name: Create project files
+      - name: Create native project
         run: |
+          set -e
+
+          rm -rf Postal2Native
           mkdir -p Postal2Native/Sources
 
           cat > project.yml <<'EOF'
@@ -44,120 +48,483 @@ jobs:
                 base:
                   PRODUCT_BUNDLE_IDENTIFIER: com.postal2ios.native
                   PRODUCT_NAME: Postal2Native
+
                   GENERATE_INFOPLIST_FILE: YES
                   INFOPLIST_KEY_CFBundleDisplayName: "POSTAL 2 iOS"
                   INFOPLIST_KEY_UILaunchScreen_Generation: YES
+
                   TARGETED_DEVICE_FAMILY: "1"
+
                   ARCHS: arm64
                   ONLY_ACTIVE_ARCH: NO
+
                   CODE_SIGNING_ALLOWED: NO
                   CODE_SIGNING_REQUIRED: NO
+                  CODE_SIGN_IDENTITY: ""
           EOF
 
           cat > Postal2Native/Sources/Postal2NativeApp.swift <<'EOF'
           import SwiftUI
+          import UIKit
+          import UniformTypeIdentifiers
           import MetalKit
+          import Combine
+
+          extension Notification.Name {
+              static let postalFPSUpdate =
+                  Notification.Name("postalFPSUpdate")
+          }
 
           @main
           struct Postal2NativeApp: App {
               var body: some Scene {
                   WindowGroup {
-                      GameView()
-                          .ignoresSafeArea()
+                      GameRootView()
+                          .preferredColorScheme(.dark)
                   }
               }
           }
 
-          struct GameView: View {
+          struct ImportedFile: Identifiable {
+              let id = UUID()
+              let name: String
+              let size: Int64
+              let path: URL
+
+              var sizeText: String {
+                  ByteCountFormatter.string(
+                      fromByteCount: size,
+                      countStyle: .file
+                  )
+              }
+          }
+
+          struct GameRootView: View {
+              @State private var showImporter = false
+              @State private var importedFiles: [ImportedFile] = []
+              @State private var fps: Double = 0
+
               var body: some View {
                   ZStack {
-                      MetalView()
+                      MetalGameView()
                           .ignoresSafeArea()
 
                       VStack {
-                          Text("POSTAL 2 iOS")
-                              .font(.title)
-                              .bold()
+                          HStack {
+                              VStack(alignment: .leading, spacing: 4) {
+                                  Text("POSTAL 2 iOS")
+                                      .font(.headline)
 
-                          Text("Native ARM64 • Metal • 60 FPS")
+                                  Text("Native ARM64 • Metal")
+                                      .font(.caption)
+
+                                  Text(
+                                      String(
+                                          format: "FPS %.0f",
+                                          fps
+                                      )
+                                  )
+                                  .font(.caption.monospacedDigit())
+                              }
+
+                              Spacer()
+
+                              Button {
+                                  showImporter = true
+                              } label: {
+                                  Text("Import POSTAL 2 Files")
+                                      .bold()
+                                      .padding(.horizontal, 14)
+                                      .padding(.vertical, 10)
+                                      .background(
+                                          Color.white.opacity(0.18)
+                                      )
+                                      .clipShape(
+                                          RoundedRectangle(
+                                              cornerRadius: 10
+                                          )
+                                      )
+                              }
+                          }
+                          .foregroundStyle(.white)
+                          .padding()
+
+                          Spacer()
+
+                          if !importedFiles.isEmpty {
+                              VStack(
+                                  alignment: .leading,
+                                  spacing: 5
+                              ) {
+                                  Text("Imported game files")
+                                      .bold()
+
+                                  ForEach(importedFiles) { file in
+                                      HStack {
+                                          Text("✓")
+                                              .foregroundStyle(.green)
+
+                                          Text(file.name)
+
+                                          Spacer()
+
+                                          Text(file.sizeText)
+                                              .foregroundStyle(
+                                                  .secondary
+                                              )
+                                      }
+                                  }
+                              }
                               .font(.caption)
+                              .padding(12)
+                              .background(
+                                  Color.black.opacity(0.70)
+                              )
+                              .clipShape(
+                                  RoundedRectangle(
+                                      cornerRadius: 12
+                                  )
+                              )
+                              .foregroundStyle(.white)
+                              .padding()
+                          }
                       }
-                      .foregroundColor(.white)
+                  }
+                  .onAppear {
+                      loadExistingFiles()
+                  }
+                  .onReceive(
+                      NotificationCenter.default.publisher(
+                          for: .postalFPSUpdate
+                      )
+                  ) { notification in
+                      if let value =
+                          notification.object as? Double {
+                          fps = value
+                      }
+                  }
+                  .sheet(isPresented: $showImporter) {
+                      PostalFileImporter {
+                          urls in
+
+                          importFiles(urls)
+                          showImporter = false
+                      }
+                  }
+              }
+
+              private func dataDirectory() throws -> URL {
+                  let documents =
+                      FileManager.default.urls(
+                          for: .documentDirectory,
+                          in: .userDomainMask
+                      )[0]
+
+                  let folder =
+                      documents.appendingPathComponent(
+                          "Postal2Data",
+                          isDirectory: true
+                      )
+
+                  try FileManager.default.createDirectory(
+                      at: folder,
+                      withIntermediateDirectories: true
+                  )
+
+                  return folder
+              }
+
+              private func importFiles(_ urls: [URL]) {
+                  do {
+                      let folder = try dataDirectory()
+
+                      for source in urls {
+                          let access =
+                              source.startAccessingSecurityScopedResource()
+
+                          defer {
+                              if access {
+                                  source.stopAccessingSecurityScopedResource()
+                              }
+                          }
+
+                          let destination =
+                              folder.appendingPathComponent(
+                                  source.lastPathComponent
+                              )
+
+                          if FileManager.default.fileExists(
+                              atPath: destination.path
+                          ) {
+                              try FileManager.default.removeItem(
+                                  at: destination
+                              )
+                          }
+
+                          try FileManager.default.copyItem(
+                              at: source,
+                              to: destination
+                          )
+                      }
+
+                      loadExistingFiles()
+
+                  } catch {
+                      print(
+                          "Import error:",
+                          error.localizedDescription
+                      )
+                  }
+              }
+
+              private func loadExistingFiles() {
+                  do {
+                      let folder = try dataDirectory()
+
+                      let urls =
+                          try FileManager.default.contentsOfDirectory(
+                              at: folder,
+                              includingPropertiesForKeys: [
+                                  .fileSizeKey
+                              ]
+                          )
+
+                      importedFiles = urls.map { url in
+                          let values =
+                              try? url.resourceValues(
+                                  forKeys: [.fileSizeKey]
+                              )
+
+                          return ImportedFile(
+                              name: url.lastPathComponent,
+                              size: Int64(
+                                  values?.fileSize ?? 0
+                              ),
+                              path: url
+                          )
+                      }
+                      .sorted {
+                          $0.name.lowercased()
+                              < $1.name.lowercased()
+                      }
+
+                  } catch {
+                      print(
+                          "Load files error:",
+                          error.localizedDescription
+                      )
                   }
               }
           }
 
-          struct MetalView: UIViewRepresentable {
+          struct PostalFileImporter:
+              UIViewControllerRepresentable {
+
+              let completion: ([URL]) -> Void
+
+              func makeCoordinator() -> Coordinator {
+                  Coordinator(completion: completion)
+              }
+
+              func makeUIViewController(
+                  context: Context
+              ) -> UIDocumentPickerViewController {
+
+                  let picker =
+                      UIDocumentPickerViewController(
+                          forOpeningContentTypes: [
+                              .data,
+                              .item
+                          ],
+                          asCopy: true
+                      )
+
+                  picker.allowsMultipleSelection = true
+                  picker.delegate = context.coordinator
+
+                  return picker
+              }
+
+              func updateUIViewController(
+                  _ uiViewController:
+                      UIDocumentPickerViewController,
+                  context: Context
+              ) {}
+
+              final class Coordinator:
+                  NSObject,
+                  UIDocumentPickerDelegate {
+
+                  let completion: ([URL]) -> Void
+
+                  init(
+                      completion:
+                          @escaping ([URL]) -> Void
+                  ) {
+                      self.completion = completion
+                  }
+
+                  func documentPicker(
+                      _ controller:
+                          UIDocumentPickerViewController,
+                      didPickDocumentsAt urls: [URL]
+                  ) {
+                      completion(urls)
+                  }
+
+                  func documentPickerWasCancelled(
+                      _ controller:
+                          UIDocumentPickerViewController
+                  ) {
+                      completion([])
+                  }
+              }
+          }
+
+          struct MetalGameView:
+              UIViewRepresentable {
+
               func makeCoordinator() -> Renderer {
                   Renderer()
               }
 
-              func makeUIView(context: Context) -> MTKView {
-                  let device = MTLCreateSystemDefaultDevice()!
-                  let view = MTKView(frame: .zero, device: device)
+              func makeUIView(
+                  context: Context
+              ) -> MTKView {
+
+                  guard let device =
+                      MTLCreateSystemDefaultDevice()
+                  else {
+                      fatalError(
+                          "Metal unavailable"
+                      )
+                  }
+
+                  let view =
+                      MTKView(
+                          frame: .zero,
+                          device: device
+                      )
+
+                  view.delegate =
+                      context.coordinator
 
                   view.preferredFramesPerSecond = 60
                   view.enableSetNeedsDisplay = false
                   view.isPaused = false
+                  view.framebufferOnly = true
                   view.colorPixelFormat = .bgra8Unorm
 
-                  context.coordinator.setup(device: device)
-                  view.delegate = context.coordinator
+                  context.coordinator.setup(
+                      device: device
+                  )
 
                   return view
               }
 
-              func updateUIView(_ uiView: MTKView, context: Context) {}
+              func updateUIView(
+                  _ uiView: MTKView,
+                  context: Context
+              ) {}
           }
 
-          final class Renderer: NSObject, MTKViewDelegate {
-              var queue: MTLCommandQueue?
+          final class Renderer:
+              NSObject,
+              MTKViewDelegate {
 
-              func setup(device: MTLDevice) {
-                  queue = device.makeCommandQueue()
+              private var queue:
+                  MTLCommandQueue?
+
+              private var frameCount = 0
+              private var lastFPSUpdate =
+                  CACurrentMediaTime()
+
+              func setup(
+                  device: MTLDevice
+              ) {
+                  queue =
+                      device.makeCommandQueue()
               }
 
               func mtkView(
                   _ view: MTKView,
-                  drawableSizeWillChange size: CGSize
+                  drawableSizeWillChange size:
+                      CGSize
               ) {}
 
-              func draw(in view: MTKView) {
+              func draw(
+                  in view: MTKView
+              ) {
                   guard
-                      let descriptor = view.currentRenderPassDescriptor,
-                      let drawable = view.currentDrawable,
+                      let descriptor =
+                          view.currentRenderPassDescriptor,
+                      let drawable =
+                          view.currentDrawable,
                       let queue = queue,
-                      let commandBuffer = queue.makeCommandBuffer()
+                      let commandBuffer =
+                          queue.makeCommandBuffer()
                   else {
                       return
                   }
 
-                  descriptor.colorAttachments[0].clearColor =
+                  descriptor
+                      .colorAttachments[0]
+                      .clearColor =
                       MTLClearColor(
-                          red: 0.03,
-                          green: 0.03,
-                          blue: 0.03,
-                          alpha: 1.0
+                          red: 0.025,
+                          green: 0.025,
+                          blue: 0.025,
+                          alpha: 1
                       )
 
                   if let encoder =
-                      commandBuffer.makeRenderCommandEncoder(
-                          descriptor: descriptor
-                      ) {
+                      commandBuffer
+                          .makeRenderCommandEncoder(
+                              descriptor: descriptor
+                          ) {
                       encoder.endEncoding()
                   }
 
-                  commandBuffer.present(drawable)
+                  commandBuffer.present(
+                      drawable
+                  )
+
                   commandBuffer.commit()
+
+                  frameCount += 1
+
+                  let now =
+                      CACurrentMediaTime()
+
+                  let elapsed =
+                      now - lastFPSUpdate
+
+                  if elapsed >= 1.0 {
+                      let currentFPS =
+                          Double(frameCount)
+                          / elapsed
+
+                      frameCount = 0
+                      lastFPSUpdate = now
+
+                      DispatchQueue.main.async {
+                          NotificationCenter
+                              .default
+                              .post(
+                                  name:
+                                      .postalFPSUpdate,
+                                  object:
+                                      currentFPS
+                              )
+                      }
+                  }
               }
           }
           EOF
 
-          echo "===== PROJECT FILES ====="
-          find . -maxdepth 4 -type f -print
-
       - name: Generate Xcode project
         run: |
+          set -e
           xcodegen generate
           ls -la
           ls -la Postal2Native.xcodeproj
@@ -165,6 +532,8 @@ jobs:
       - name: Build native ARM64 app
         run: |
           set -euo pipefail
+
+          rm -rf build
 
           xcodebuild \
             -project Postal2Native.xcodeproj \
@@ -178,34 +547,41 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             build
 
-      - name: Create IPA
+      - name: Create unsigned IPA
         run: |
           set -euo pipefail
 
-          APP_PATH="$(find build/Build/Products/Release-iphoneos \
-            -maxdepth 1 \
-            -name '*.app' \
-            -print \
-            -quit)"
+          APP_PATH="$(
+            find build/Build/Products/Release-iphoneos \
+              -maxdepth 1 \
+              -name '*.app' \
+              -print \
+              -quit
+          )"
 
-          echo "APP: $APP_PATH"
+          echo "APP_PATH=$APP_PATH"
 
           if [ -z "$APP_PATH" ]; then
-            echo "APP NOT FOUND"
+            echo "ERROR: app not found"
             exit 1
           fi
 
           rm -rf Payload
-          mkdir Payload
+          mkdir -p Payload
+
           cp -R "$APP_PATH" Payload/
 
-          zip -qry Postal2Native-unsigned.ipa Payload
+          /usr/bin/zip \
+            -qry \
+            Postal2Native-unsigned.ipa \
+            Payload
 
-          ls -lh Postal2Native-unsigned.ipa
+          ls -lh \
+            Postal2Native-unsigned.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Postal2Native-unsigned-IPA
+          name: Postal2Native-ImportFiles-IPA
           path: Postal2Native-unsigned.ipa
           if-no-files-found: error
