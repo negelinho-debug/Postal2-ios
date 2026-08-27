@@ -8,7 +8,6 @@ permissions:
 
 jobs:
   build:
-    name: build
     runs-on: macos-latest
     timeout-minutes: 30
 
@@ -18,20 +17,154 @@ jobs:
 
       - name: Install XcodeGen
         run: |
-          set -e
           brew install xcodegen
           xcodebuild -version
           xcodegen --version
 
+      - name: Create project files
+        run: |
+          mkdir -p Postal2Native/Sources
+
+          cat > project.yml <<'EOF'
+          name: Postal2Native
+
+          options:
+            bundleIdPrefix: com.postal2ios
+
+          targets:
+            Postal2Native:
+              type: application
+              platform: iOS
+              deploymentTarget: "17.0"
+
+              sources:
+                - path: Postal2Native/Sources
+
+              settings:
+                base:
+                  PRODUCT_BUNDLE_IDENTIFIER: com.postal2ios.native
+                  PRODUCT_NAME: Postal2Native
+                  GENERATE_INFOPLIST_FILE: YES
+                  INFOPLIST_KEY_CFBundleDisplayName: "POSTAL 2 iOS"
+                  INFOPLIST_KEY_UILaunchScreen_Generation: YES
+                  TARGETED_DEVICE_FAMILY: "1"
+                  ARCHS: arm64
+                  ONLY_ACTIVE_ARCH: NO
+                  CODE_SIGNING_ALLOWED: NO
+                  CODE_SIGNING_REQUIRED: NO
+          EOF
+
+          cat > Postal2Native/Sources/Postal2NativeApp.swift <<'EOF'
+          import SwiftUI
+          import MetalKit
+
+          @main
+          struct Postal2NativeApp: App {
+              var body: some Scene {
+                  WindowGroup {
+                      GameView()
+                          .ignoresSafeArea()
+                  }
+              }
+          }
+
+          struct GameView: View {
+              var body: some View {
+                  ZStack {
+                      MetalView()
+                          .ignoresSafeArea()
+
+                      VStack {
+                          Text("POSTAL 2 iOS")
+                              .font(.title)
+                              .bold()
+
+                          Text("Native ARM64 • Metal • 60 FPS")
+                              .font(.caption)
+                      }
+                      .foregroundColor(.white)
+                  }
+              }
+          }
+
+          struct MetalView: UIViewRepresentable {
+              func makeCoordinator() -> Renderer {
+                  Renderer()
+              }
+
+              func makeUIView(context: Context) -> MTKView {
+                  let device = MTLCreateSystemDefaultDevice()!
+                  let view = MTKView(frame: .zero, device: device)
+
+                  view.preferredFramesPerSecond = 60
+                  view.enableSetNeedsDisplay = false
+                  view.isPaused = false
+                  view.colorPixelFormat = .bgra8Unorm
+
+                  context.coordinator.setup(device: device)
+                  view.delegate = context.coordinator
+
+                  return view
+              }
+
+              func updateUIView(_ uiView: MTKView, context: Context) {}
+          }
+
+          final class Renderer: NSObject, MTKViewDelegate {
+              var queue: MTLCommandQueue?
+
+              func setup(device: MTLDevice) {
+                  queue = device.makeCommandQueue()
+              }
+
+              func mtkView(
+                  _ view: MTKView,
+                  drawableSizeWillChange size: CGSize
+              ) {}
+
+              func draw(in view: MTKView) {
+                  guard
+                      let descriptor = view.currentRenderPassDescriptor,
+                      let drawable = view.currentDrawable,
+                      let queue = queue,
+                      let commandBuffer = queue.makeCommandBuffer()
+                  else {
+                      return
+                  }
+
+                  descriptor.colorAttachments[0].clearColor =
+                      MTLClearColor(
+                          red: 0.03,
+                          green: 0.03,
+                          blue: 0.03,
+                          alpha: 1.0
+                      )
+
+                  if let encoder =
+                      commandBuffer.makeRenderCommandEncoder(
+                          descriptor: descriptor
+                      ) {
+                      encoder.endEncoding()
+                  }
+
+                  commandBuffer.present(drawable)
+                  commandBuffer.commit()
+              }
+          }
+          EOF
+
+          echo "===== PROJECT FILES ====="
+          find . -maxdepth 4 -type f -print
+
       - name: Generate Xcode project
         run: |
-          set -e
           xcodegen generate
+          ls -la
+          ls -la Postal2Native.xcodeproj
 
       - name: Build native ARM64 app
         run: |
           set -euo pipefail
-          rm -rf build
 
           xcodebuild \
             -project Postal2Native.xcodeproj \
@@ -45,22 +178,30 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             build
 
-      - name: Create unsigned IPA
+      - name: Create IPA
         run: |
           set -euo pipefail
 
-          APP_PATH="$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' -print -quit)"
+          APP_PATH="$(find build/Build/Products/Release-iphoneos \
+            -maxdepth 1 \
+            -name '*.app' \
+            -print \
+            -quit)"
+
+          echo "APP: $APP_PATH"
 
           if [ -z "$APP_PATH" ]; then
-            echo "ERROR: .app not found"
+            echo "APP NOT FOUND"
             exit 1
           fi
 
           rm -rf Payload
-          mkdir -p Payload
+          mkdir Payload
           cp -R "$APP_PATH" Payload/
 
-          /usr/bin/zip -qry Postal2Native-unsigned.ipa Payload
+          zip -qry Postal2Native-unsigned.ipa Payload
+
+          ls -lh Postal2Native-unsigned.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
