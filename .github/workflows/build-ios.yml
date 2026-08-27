@@ -1,0 +1,68 @@
+name: Build POSTAL 2 Native iOS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: |
+          set -e
+          brew install xcodegen
+          xcodebuild -version
+          xcodegen --version
+
+      - name: Generate Xcode project
+        run: |
+          set -e
+          xcodegen generate
+
+      - name: Build native ARM64 app
+        run: |
+          set -euo pipefail
+          rm -rf build
+
+          xcodebuild \
+            -project Postal2Native.xcodeproj \
+            -scheme Postal2Native \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Create unsigned IPA
+        run: |
+          set -euo pipefail
+
+          APP_PATH="$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' -print -quit)"
+
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: .app not found"
+            exit 1
+          fi
+
+          rm -rf Payload
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+
+          /usr/bin/zip -qry Postal2Native-unsigned.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Postal2Native-unsigned-IPA
+          path: Postal2Native-unsigned.ipa
