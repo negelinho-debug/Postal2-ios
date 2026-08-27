@@ -48,32 +48,26 @@ jobs:
                 base:
                   PRODUCT_BUNDLE_IDENTIFIER: com.postal2ios.native
                   PRODUCT_NAME: Postal2Native
-
                   GENERATE_INFOPLIST_FILE: YES
                   INFOPLIST_KEY_CFBundleDisplayName: "POSTAL 2 iOS"
                   INFOPLIST_KEY_UILaunchScreen_Generation: YES
-
                   TARGETED_DEVICE_FAMILY: "1"
-
                   ARCHS: arm64
                   ONLY_ACTIVE_ARCH: NO
-
                   CODE_SIGNING_ALLOWED: NO
                   CODE_SIGNING_REQUIRED: NO
                   CODE_SIGN_IDENTITY: ""
           EOF
 
           cat > Postal2Native/Sources/Postal2NativeApp.swift <<'EOF'
+          import Foundation
           import SwiftUI
           import UIKit
           import UniformTypeIdentifiers
           import MetalKit
           import QuartzCore
+          import Combine
           import simd
-
-          // ============================================================
-          // MARK: - NOTIFICATIONS
-          // ============================================================
 
           extension Notification.Name {
               static let postalFPS =
@@ -89,10 +83,6 @@ jobs:
                   Notification.Name("postalNextMesh")
           }
 
-          // ============================================================
-          // MARK: - APP
-          // ============================================================
-
           @main
           struct Postal2NativeApp: App {
               var body: some Scene {
@@ -103,36 +93,21 @@ jobs:
               }
           }
 
-          // ============================================================
-          // MARK: - STATUS
-          // ============================================================
-
           struct MeshStatus {
               let title: String
               let detail: String
               let success: Bool
           }
 
-          // ============================================================
-          // MARK: - MAIN UI
-          // ============================================================
-
           struct ContentView: View {
 
               @State private var fps: Double = 0
-
               @State private var status =
                   "Loading original POSTAL 2 StaticMesh..."
-
-              @State private var meshName =
-                  "Waiting..."
-
+              @State private var meshName = "Waiting..."
               @State private var detail = ""
-
               @State private var success = false
-
               @State private var showImporter = false
-
               @State private var files: [String] = []
 
               var body: some View {
@@ -156,10 +131,8 @@ jobs:
                                       Text("POSTAL 2 iOS")
                                           .font(.title2.bold())
 
-                                      Text(
-                                          "Native ARM64 • Metal"
-                                      )
-                                      .font(.caption)
+                                      Text("Native ARM64 • Metal")
+                                          .font(.caption)
 
                                       Text(
                                           String(
@@ -181,17 +154,10 @@ jobs:
 
                                       Text("Import Files")
                                           .bold()
-                                          .padding(
-                                              .horizontal,
-                                              14
-                                          )
-                                          .padding(
-                                              .vertical,
-                                              10
-                                          )
+                                          .padding(.horizontal, 14)
+                                          .padding(.vertical, 10)
                                           .background(
-                                              Color.white
-                                                  .opacity(0.18)
+                                              Color.white.opacity(0.18)
                                           )
                                           .clipShape(
                                               RoundedRectangle(
@@ -208,8 +174,7 @@ jobs:
                                       NotificationCenter
                                           .default
                                           .post(
-                                              name:
-                                                  .postalReloadMesh,
+                                              name: .postalReloadMesh,
                                               object: nil
                                           )
 
@@ -218,16 +183,11 @@ jobs:
                                       Text("Reload Mesh")
                                           .bold()
                                           .frame(
-                                              maxWidth:
-                                                  .infinity
+                                              maxWidth: .infinity
                                           )
-                                          .padding(
-                                              .vertical,
-                                              11
-                                          )
+                                          .padding(.vertical, 11)
                                           .background(
-                                              Color.white
-                                                  .opacity(0.16)
+                                              Color.white.opacity(0.16)
                                           )
                                           .clipShape(
                                               RoundedRectangle(
@@ -241,8 +201,7 @@ jobs:
                                       NotificationCenter
                                           .default
                                           .post(
-                                              name:
-                                                  .postalNextMesh,
+                                              name: .postalNextMesh,
                                               object: nil
                                           )
 
@@ -251,16 +210,11 @@ jobs:
                                       Text("Next Mesh")
                                           .bold()
                                           .frame(
-                                              maxWidth:
-                                                  .infinity
+                                              maxWidth: .infinity
                                           )
-                                          .padding(
-                                              .vertical,
-                                              11
-                                          )
+                                          .padding(.vertical, 11)
                                           .background(
-                                              Color.white
-                                                  .opacity(0.16)
+                                              Color.white.opacity(0.16)
                                           )
                                           .clipShape(
                                               RoundedRectangle(
@@ -277,16 +231,12 @@ jobs:
 
                                   HStack {
 
-                                      Text(
-                                          success
-                                              ? "✓"
-                                              : "•"
-                                      )
-                                      .foregroundStyle(
-                                          success
-                                              ? .green
-                                              : .yellow
-                                      )
+                                      Text(success ? "✓" : "•")
+                                          .foregroundStyle(
+                                              success
+                                                  ? Color.green
+                                                  : Color.yellow
+                                          )
 
                                       Text(meshName)
                                           .bold()
@@ -297,7 +247,7 @@ jobs:
                                   if !detail.isEmpty {
                                       Text(detail)
                                           .foregroundStyle(
-                                              .secondary
+                                              Color.secondary
                                           )
                                   }
                               }
@@ -307,7 +257,7 @@ jobs:
                                   alignment: .leading
                               )
                           }
-                          .foregroundStyle(.white)
+                          .foregroundStyle(Color.white)
                           .padding()
                           .background(
                               Color.black.opacity(0.72)
@@ -321,12 +271,10 @@ jobs:
                                   "Drag = rotate • Pinch = zoom"
                               )
 
-                              Text(
-                                  fileStatusText
-                              )
+                              Text(fileStatusText)
                           }
                           .font(.caption)
-                          .foregroundStyle(.white)
+                          .foregroundStyle(Color.white)
                           .padding(10)
                           .background(
                               Color.black.opacity(0.65)
@@ -360,74 +308,61 @@ jobs:
                       NotificationCenter
                           .default
                           .publisher(
-                              for:
-                                  .postalMeshStatus
+                              for: .postalMeshStatus
                           )
                   ) { note in
 
                       if let value =
-                          note.object
-                              as? MeshStatus {
+                          note.object as? MeshStatus {
 
-                          meshName =
-                              value.title
-
-                          status =
-                              value.detail
-
-                          success =
-                              value.success
+                          meshName = value.title
+                          status = value.detail
+                          success = value.success
 
                           detail =
-                              success
+                              value.success
                                   ? "Original UE2 geometry from Zo_BridgeMeshes.usx"
                                   : ""
                       }
                   }
                   .sheet(
-                      isPresented:
-                          $showImporter
+                      isPresented: $showImporter
                   ) {
 
                       PostalFileImporter {
                           urls in
 
                           importFiles(urls)
-
                           showImporter = false
                       }
                   }
               }
 
-              private var fileStatusText:
-                  String {
+              private var fileStatusText: String {
 
                   let hasUSX =
                       files.contains {
                           $0.caseInsensitiveCompare(
                               "Zo_BridgeMeshes.usx"
-                          )
-                          == .orderedSame
+                          ) == .orderedSame
                       }
 
                   let hasMap =
                       files.contains {
                           $0.caseInsensitiveCompare(
                               "Bridge.fuk"
-                          )
-                          == .orderedSame
+                          ) == .orderedSame
                       }
 
                   let hasTex =
                       files.contains {
                           $0.caseInsensitiveCompare(
                               "Zo_BridgeTex.utx"
-                          )
-                          == .orderedSame
+                          ) == .orderedSame
                       }
 
                   return
-                      "USX \(hasUSX ? "✓" : "✕")  •  FUK \(hasMap ? "✓" : "✕")  •  UTX \(hasTex ? "✓" : "✕")"
+                      "USX \(hasUSX ? "✓" : "✕") • FUK \(hasMap ? "✓" : "✕") • UTX \(hasTex ? "✓" : "✕")"
               }
 
               private func postalDirectory()
@@ -448,8 +383,7 @@ jobs:
                   try FileManager.default
                       .createDirectory(
                           at: folder,
-                          withIntermediateDirectories:
-                              true
+                          withIntermediateDirectories: true
                       )
 
                   return folder
@@ -465,8 +399,7 @@ jobs:
                       files =
                           try FileManager.default
                               .contentsOfDirectory(
-                                  atPath:
-                                      folder.path
+                                  atPath: folder.path
                               )
                               .sorted()
 
@@ -508,20 +441,17 @@ jobs:
                           let destination =
                               folder
                                   .appendingPathComponent(
-                                      source
-                                          .lastPathComponent
+                                      source.lastPathComponent
                                   )
 
                           if FileManager.default
                               .fileExists(
-                                  atPath:
-                                      destination.path
+                                  atPath: destination.path
                               ) {
 
                               try FileManager.default
                                   .removeItem(
-                                      at:
-                                          destination
+                                      at: destination
                                   )
                           }
 
@@ -537,8 +467,7 @@ jobs:
                       NotificationCenter
                           .default
                           .post(
-                              name:
-                                  .postalReloadMesh,
+                              name: .postalReloadMesh,
                               object: nil
                           )
 
@@ -552,10 +481,6 @@ jobs:
               }
           }
 
-          // ============================================================
-          // MARK: - FILE IMPORTER
-          // ============================================================
-
           struct PostalFileImporter:
               UIViewControllerRepresentable {
 
@@ -566,31 +491,25 @@ jobs:
                   -> Coordinator {
 
                   Coordinator(
-                      completion:
-                          completion
+                      completion: completion
                   )
               }
 
               func makeUIViewController(
                   context: Context
-              )
-                  -> UIDocumentPickerViewController {
+              ) -> UIDocumentPickerViewController {
 
                   let picker =
                       UIDocumentPickerViewController(
-                          forOpeningContentTypes:
-                              [
-                                  .data,
-                                  .item
-                              ],
+                          forOpeningContentTypes: [
+                              .data,
+                              .item
+                          ],
                           asCopy: true
                       )
 
-                  picker.allowsMultipleSelection =
-                      true
-
-                  picker.delegate =
-                      context.coordinator
+                  picker.allowsMultipleSelection = true
+                  picker.delegate = context.coordinator
 
                   return picker
               }
@@ -610,19 +529,16 @@ jobs:
 
                   init(
                       completion:
-                          @escaping
-                          ([URL]) -> Void
+                          @escaping ([URL]) -> Void
                   ) {
 
-                      self.completion =
-                          completion
+                      self.completion = completion
                   }
 
                   func documentPicker(
                       _ controller:
                           UIDocumentPickerViewController,
-                      didPickDocumentsAt
-                          urls: [URL]
+                      didPickDocumentsAt urls: [URL]
                   ) {
 
                       completion(urls)
@@ -637,10 +553,6 @@ jobs:
                   }
               }
           }
-
-          // ============================================================
-          // MARK: - ERRORS
-          // ============================================================
 
           enum PostalError:
               LocalizedError {
@@ -657,14 +569,9 @@ jobs:
               }
           }
 
-          // ============================================================
-          // MARK: - BINARY READER
-          // ============================================================
-
           struct BinaryReader {
 
               let data: Data
-
               var offset: Int = 0
 
               mutating func ensure(
@@ -674,8 +581,7 @@ jobs:
                   guard
                       count >= 0,
                       offset >= 0,
-                      offset + count
-                          <= data.count
+                      offset + count <= data.count
                   else {
 
                       throw PostalError.bad(
@@ -691,8 +597,7 @@ jobs:
 
                   let value =
                       data[
-                          data.startIndex
-                          + offset
+                          data.startIndex + offset
                       ]
 
                   offset += 1
@@ -770,11 +675,8 @@ jobs:
 
                   try ensure(count)
 
-                  let start =
-                      offset
-
-                  let end =
-                      offset + count
+                  let start = offset
+                  let end = offset + count
 
                   offset = end
 
@@ -806,11 +708,9 @@ jobs:
                       )
                   }
 
-                  offset =
-                      position
+                  offset = position
               }
 
-              // Unreal Engine 1/2 CompactIndex
               mutating func readCompactIndex()
                   throws -> Int {
 
@@ -818,16 +718,12 @@ jobs:
                       try readUInt8()
 
                   let negative =
-                      (first & 0x80)
-                          != 0
+                      (first & 0x80) != 0
 
                   var value =
-                      Int(
-                          first & 0x3F
-                      )
+                      Int(first & 0x3F)
 
-                  if (first & 0x40)
-                      != 0 {
+                  if (first & 0x40) != 0 {
 
                       var shift = 6
                       var steps = 0
@@ -838,16 +734,13 @@ jobs:
                               try readUInt8()
 
                           value |=
-                              Int(
-                                  next & 0x7F
-                              ) << shift
+                              Int(next & 0x7F)
+                              << shift
 
                           shift += 7
                           steps += 1
 
-                          if (next & 0x80)
-                              == 0 {
-
+                          if (next & 0x80) == 0 {
                               break
                           }
 
@@ -865,10 +758,6 @@ jobs:
                       : value
               }
           }
-
-          // ============================================================
-          // MARK: - PACKAGE TABLES
-          // ============================================================
 
           struct UEImport {
               let classPackage: Int
@@ -897,10 +786,6 @@ jobs:
               let vertices: [RawVertex]
               let indices: [UInt16]
           }
-
-          // ============================================================
-          // MARK: - UE2 PACKAGE
-          // ============================================================
 
           final class UE2Package {
 
@@ -941,8 +826,7 @@ jobs:
                       try reader.readUInt32()
 
                   guard
-                      magic
-                          == 0x9E2A83C1
+                      magic == 0x9E2A83C1
                   else {
 
                       throw PostalError.bad(
@@ -952,14 +836,12 @@ jobs:
 
                   version =
                       Int(
-                          try reader
-                              .readUInt16()
+                          try reader.readUInt16()
                       )
 
                   licensee =
                       Int(
-                          try reader
-                              .readUInt16()
+                          try reader.readUInt16()
                       )
 
                   _ =
@@ -998,10 +880,8 @@ jobs:
                   guard
                       nameCount >= 0,
                       nameCount < 100000,
-
                       exportCount >= 0,
                       exportCount < 1000000,
-
                       importCount >= 0,
                       importCount < 1000000
                   else {
@@ -1010,10 +890,6 @@ jobs:
                           "Invalid package tables"
                       )
                   }
-
-                  // --------------------------
-                  // NAMES
-                  // --------------------------
 
                   try reader.seek(
                       nameOffset
@@ -1054,8 +930,7 @@ jobs:
                           value =
                               String(
                                   data: bytes,
-                                  encoding:
-                                      .isoLatin1
+                                  encoding: .isoLatin1
                               ) ?? ""
 
                       } else if length < 0 {
@@ -1095,20 +970,14 @@ jobs:
                               )
 
                       _ =
-                          try reader
-                              .readUInt32()
+                          try reader.readUInt32()
 
                       parsedNames.append(
                           value
                       )
                   }
 
-                  names =
-                      parsedNames
-
-                  // --------------------------
-                  // IMPORTS
-                  // --------------------------
+                  names = parsedNames
 
                   try reader.seek(
                       importOffset
@@ -1117,10 +986,9 @@ jobs:
                   var parsedImports:
                       [UEImport] = []
 
-                  parsedImports
-                      .reserveCapacity(
-                          importCount
-                      )
+                  parsedImports.reserveCapacity(
+                      importCount
+                  )
 
                   for _ in 0..<importCount {
 
@@ -1145,12 +1013,7 @@ jobs:
                       )
                   }
 
-                  imports =
-                      parsedImports
-
-                  // --------------------------
-                  // EXPORTS
-                  // --------------------------
+                  imports = parsedImports
 
                   try reader.seek(
                       exportOffset
@@ -1159,10 +1022,9 @@ jobs:
                   var parsedExports:
                       [UEExport] = []
 
-                  parsedExports
-                      .reserveCapacity(
-                          exportCount
-                      )
+                  parsedExports.reserveCapacity(
+                      exportCount
+                  )
 
                   for _ in 0..<exportCount {
 
@@ -1225,8 +1087,7 @@ jobs:
                       )
                   }
 
-                  exports =
-                      parsedExports
+                  exports = parsedExports
               }
 
               private func name(
@@ -1237,6 +1098,7 @@ jobs:
                       index >= 0,
                       index < names.count
                   else {
+
                       return "Unknown"
                   }
 
@@ -1260,12 +1122,12 @@ jobs:
                           index >= 0,
                           index < imports.count
                       else {
+
                           return "Unknown"
                       }
 
                       return name(
-                          imports[index]
-                              .objectName
+                          imports[index].objectName
                       )
                   }
 
@@ -1276,18 +1138,17 @@ jobs:
                       index >= 0,
                       index < exports.count
                   else {
+
                       return "Unknown"
                   }
 
                   return name(
-                      exports[index]
-                          .objectName
+                      exports[index].objectName
                   )
               }
 
               private func className(
-                  _ export:
-                      UEExport
+                  _ export: UEExport
               ) -> String {
 
                   objectName(
@@ -1305,6 +1166,7 @@ jobs:
                           className(item)
                               == "StaticMesh"
                       else {
+
                           return nil
                       }
 
@@ -1315,10 +1177,8 @@ jobs:
               }
 
               func loadStaticMesh(
-                  named wantedName:
-                      String
-              ) throws
-                  -> MeshGeometry {
+                  named wantedName: String
+              ) throws -> MeshGeometry {
 
                   guard
                       let export =
@@ -1349,8 +1209,7 @@ jobs:
               }
 
               private func skipPropertyTable(
-                  _ reader:
-                      inout BinaryReader
+                  _ reader: inout BinaryReader
               ) throws {
 
                   while true {
@@ -1361,8 +1220,7 @@ jobs:
 
                       guard
                           nameIndex >= 0,
-                          nameIndex
-                              < names.count
+                          nameIndex < names.count
                       else {
 
                           throw PostalError.bad(
@@ -1373,26 +1231,19 @@ jobs:
                       let propertyName =
                           names[nameIndex]
 
-                      if propertyName
-                          == "None" {
-
+                      if propertyName == "None" {
                           break
                       }
 
                       let info =
-                          try reader
-                              .readUInt8()
+                          try reader.readUInt8()
 
                       let type =
-                          Int(
-                              info & 0x0F
-                          )
+                          Int(info & 0x0F)
 
                       let isArray =
-                          (info & 0x80)
-                              != 0
+                          (info & 0x80) != 0
 
-                      // StructProperty
                       if type == 10 {
 
                           _ =
@@ -1402,8 +1253,7 @@ jobs:
 
                       let sizeCode =
                           Int(
-                              (info >> 4)
-                              & 7
+                              (info >> 4) & 7
                           )
 
                       var dataSize = 0
@@ -1447,12 +1297,10 @@ jobs:
                               )
 
                       default:
-                          break
+                          dataSize = 0
                       }
 
-                      // Array index
-                      if type != 3
-                          && isArray {
+                      if type != 3 && isArray {
 
                           let first =
                               try reader
@@ -1478,8 +1326,7 @@ jobs:
                           }
                       }
 
-                      guard
-                          dataSize >= 0
+                      guard dataSize >= 0
                       else {
 
                           throw PostalError.bad(
@@ -1487,7 +1334,6 @@ jobs:
                           )
                       }
 
-                      // Bool is stored in the tag itself.
                       if type != 3 {
 
                           try reader.skip(
@@ -1498,18 +1344,12 @@ jobs:
               }
 
               private func parseStaticMesh(
-                  _ export:
-                      UEExport
-              ) throws
-                  -> MeshGeometry {
+                  _ export: UEExport
+              ) throws -> MeshGeometry {
 
                   guard
-                      export.serialOffset
-                          >= 0,
-
-                      export.serialSize
-                          > 0,
-
+                      export.serialOffset >= 0,
+                      export.serialSize > 0,
                       export.serialOffset
                           + export.serialSize
                           <= data.count
@@ -1527,16 +1367,9 @@ jobs:
                               export.serialOffset
                       )
 
-                  // UObject tagged properties
                   try skipPropertyTable(
                       &reader
                   )
-
-                  // --------------------------------------------------
-                  // UPrimitive:
-                  // BoundingBox = 6 floats + valid byte
-                  // BoundingSphere = 4 floats
-                  // --------------------------------------------------
 
                   for _ in 0..<6 {
                       _ =
@@ -1551,15 +1384,8 @@ jobs:
                           try reader.readFloat()
                   }
 
-                  // --------------------------------------------------
-                  // StaticMesh Sections
-                  // each:
-                  // int32 + 5 x uint16
-                  // --------------------------------------------------
-
                   let sectionCount =
-                      try reader
-                          .readCompactIndex()
+                      try reader.readCompactIndex()
 
                   guard
                       sectionCount >= 0,
@@ -1592,7 +1418,6 @@ jobs:
                           try reader.readUInt16()
                   }
 
-                  // StaticMesh BoundingBox
                   for _ in 0..<6 {
                       _ =
                           try reader.readFloat()
@@ -1601,15 +1426,8 @@ jobs:
                   _ =
                       try reader.readUInt8()
 
-                  // --------------------------------------------------
-                  // VertexStream
-                  // FVector Position
-                  // FVector Normal
-                  // --------------------------------------------------
-
                   let vertexCount =
-                      try reader
-                          .readCompactIndex()
+                      try reader.readCompactIndex()
 
                   guard
                       vertexCount > 0,
@@ -1656,7 +1474,6 @@ jobs:
                                       py,
                                       pz
                                   ),
-
                               normal:
                                   SIMD3<Float>(
                                       nx,
@@ -1667,22 +1484,15 @@ jobs:
                       )
                   }
 
-                  // Vertex stream revision
                   _ =
                       try reader.readInt32()
 
-                  // --------------------------------------------------
-                  // ColorStream
-                  // --------------------------------------------------
-
                   let colorCount =
-                      try reader
-                          .readCompactIndex()
+                      try reader.readCompactIndex()
 
                   guard
                       colorCount >= 0,
-                      colorCount
-                          < 1_000_000
+                      colorCount < 1_000_000
                   else {
 
                       throw PostalError.bad(
@@ -1697,18 +1507,12 @@ jobs:
                   _ =
                       try reader.readInt32()
 
-                  // --------------------------------------------------
-                  // AlphaStream
-                  // --------------------------------------------------
-
                   let alphaCount =
-                      try reader
-                          .readCompactIndex()
+                      try reader.readCompactIndex()
 
                   guard
                       alphaCount >= 0,
-                      alphaCount
-                          < 1_000_000
+                      alphaCount < 1_000_000
                   else {
 
                       throw PostalError.bad(
@@ -1723,13 +1527,8 @@ jobs:
                   _ =
                       try reader.readInt32()
 
-                  // --------------------------------------------------
-                  // UV streams
-                  // --------------------------------------------------
-
                   let uvStreamCount =
-                      try reader
-                          .readCompactIndex()
+                      try reader.readCompactIndex()
 
                   guard
                       uvStreamCount >= 0,
@@ -1749,8 +1548,7 @@ jobs:
 
                       guard
                           uvCount >= 0,
-                          uvCount
-                              < 1_000_000
+                          uvCount < 1_000_000
                       else {
 
                           throw PostalError.bad(
@@ -1761,36 +1559,25 @@ jobs:
                       for _ in 0..<uvCount {
 
                           _ =
-                              try reader
-                                  .readFloat()
+                              try reader.readFloat()
 
                           _ =
-                              try reader
-                                  .readFloat()
+                              try reader.readFloat()
                       }
 
                       _ =
-                          try reader
-                              .readInt32()
+                          try reader.readInt32()
 
                       _ =
-                          try reader
-                              .readInt32()
+                          try reader.readInt32()
                   }
 
-                  // --------------------------------------------------
-                  // IndexStream1
-                  // UE Viewer uses this for the rendered mesh.
-                  // --------------------------------------------------
-
                   let indexCount =
-                      try reader
-                          .readCompactIndex()
+                      try reader.readCompactIndex()
 
                   guard
                       indexCount >= 3,
-                      indexCount
-                          < 3_000_000
+                      indexCount < 3_000_000
                   else {
 
                       throw PostalError.bad(
@@ -1801,31 +1588,26 @@ jobs:
                   var rawIndices:
                       [UInt16] = []
 
-                  rawIndices
-                      .reserveCapacity(
-                          indexCount
-                      )
+                  rawIndices.reserveCapacity(
+                      indexCount
+                  )
 
                   for _ in 0..<indexCount {
 
                       rawIndices.append(
-                          try reader
-                              .readUInt16()
+                          try reader.readUInt16()
                       )
                   }
 
                   _ =
                       try reader.readInt32()
 
-                  // IndexStream2 — read/skip it too.
                   let secondCount =
-                      try reader
-                          .readCompactIndex()
+                      try reader.readCompactIndex()
 
                   guard
                       secondCount >= 0,
-                      secondCount
-                          < 3_000_000
+                      secondCount < 3_000_000
                   else {
 
                       throw PostalError.bad(
@@ -1840,7 +1622,6 @@ jobs:
                   _ =
                       try reader.readInt32()
 
-                  // Keep only complete valid triangles.
                   var validIndices:
                       [UInt16] = []
 
@@ -1853,23 +1634,14 @@ jobs:
                   while i + 2
                       < rawIndices.count {
 
-                      let a =
-                          rawIndices[i]
+                      let a = rawIndices[i]
+                      let b = rawIndices[i + 1]
+                      let c = rawIndices[i + 2]
 
-                      let b =
-                          rawIndices[i + 1]
-
-                      let c =
-                          rawIndices[i + 2]
-
-                      if Int(a)
-                          < vertices.count
-                          &&
-                          Int(b)
-                              < vertices.count
-                          &&
-                          Int(c)
-                              < vertices.count {
+                      if
+                          Int(a) < vertices.count,
+                          Int(b) < vertices.count,
+                          Int(c) < vertices.count {
 
                           validIndices.append(a)
                           validIndices.append(b)
@@ -1901,10 +1673,6 @@ jobs:
               }
           }
 
-          // ============================================================
-          // MARK: - GPU DATA
-          // ============================================================
-
           struct GPUVertex {
               var position:
                   SIMD4<Float>
@@ -1919,10 +1687,6 @@ jobs:
               var aspect: Float
               var zoom: Float
           }
-
-          // ============================================================
-          // MARK: - METAL VIEW
-          // ============================================================
 
           struct BridgeMetalView:
               UIViewRepresentable {
@@ -2026,10 +1790,6 @@ jobs:
               ) {}
           }
 
-          // ============================================================
-          // MARK: - METAL RENDERER
-          // ============================================================
-
           final class BridgeRenderer:
               NSObject,
               MTKViewDelegate {
@@ -2117,61 +1877,50 @@ jobs:
               }
 
               func setup(
-                  device:
-                      MTLDevice
+                  device: MTLDevice
               ) {
 
-                  self.device =
-                      device
+                  self.device = device
 
                   queue =
-                      device
-                          .makeCommandQueue()
+                      device.makeCommandQueue()
 
                   do {
 
                       pipeline =
                           try makePipeline(
-                              device:
-                                  device
+                              device: device
                           )
 
                       let descriptor =
                           MTLDepthStencilDescriptor()
 
-                      descriptor
-                          .depthCompareFunction =
+                      descriptor.depthCompareFunction =
                           .less
 
-                      descriptor
-                          .isDepthWriteEnabled =
+                      descriptor.isDepthWriteEnabled =
                           true
 
                       depthState =
-                          device
-                              .makeDepthStencilState(
-                                  descriptor:
-                                      descriptor
-                              )
+                          device.makeDepthStencilState(
+                              descriptor:
+                                  descriptor
+                          )
 
                   } catch {
 
                       postStatus(
-                          title:
-                              "Metal error",
+                          title: "Metal error",
                           detail:
                               error.localizedDescription,
-                          success:
-                              false
+                          success: false
                       )
                   }
               }
 
               private func makePipeline(
-                  device:
-                      MTLDevice
-              ) throws
-                  -> MTLRenderPipelineState {
+                  device: MTLDevice
+              ) throws -> MTLRenderPipelineState {
 
                   let source = """
                   #include <metal_stdlib>
@@ -2346,34 +2095,27 @@ jobs:
                           );
 
                       return half4(
-                          base
-                              * half(light),
+                          base * half(light),
                           1.0
                       );
                   }
                   """
 
                   let library =
-                      try device
-                          .makeLibrary(
-                              source: source,
-                              options: nil
-                          )
+                      try device.makeLibrary(
+                          source: source,
+                          options: nil
+                      )
 
                   guard
                       let vertex =
-                          library
-                              .makeFunction(
-                                  name:
-                                      "v_main"
-                              ),
-
+                          library.makeFunction(
+                              name: "v_main"
+                          ),
                       let fragment =
-                          library
-                              .makeFunction(
-                                  name:
-                                      "f_main"
-                              )
+                          library.makeFunction(
+                              name: "f_main"
+                          )
                   else {
 
                       throw PostalError.bad(
@@ -2401,8 +2143,7 @@ jobs:
 
                   return try device
                       .makeRenderPipelineState(
-                          descriptor:
-                              descriptor
+                          descriptor: descriptor
                       )
               }
 
@@ -2417,7 +2158,7 @@ jobs:
 
                   guard
                       !meshNames.isEmpty,
-                      let package
+                      let package = package
                   else {
                       return
                   }
@@ -2440,8 +2181,7 @@ jobs:
                       let geometry =
                           try package
                               .loadStaticMesh(
-                                  named:
-                                      wanted
+                                  named: wanted
                               )
 
                       try upload(
@@ -2461,8 +2201,7 @@ jobs:
 
               func reloadFromDisk() {
 
-                  guard
-                      device != nil
+                  guard device != nil
                   else {
                       return
                   }
@@ -2470,20 +2209,16 @@ jobs:
                   do {
 
                       let documents =
-                          FileManager.default
-                              .urls(
-                                  for:
-                                      .documentDirectory,
-                                  in:
-                                      .userDomainMask
-                              )[0]
+                          FileManager.default.urls(
+                              for: .documentDirectory,
+                              in: .userDomainMask
+                          )[0]
 
                       let folder =
                           documents
                               .appendingPathComponent(
                                   "Postal2Data",
-                                  isDirectory:
-                                      true
+                                  isDirectory: true
                               )
 
                       let url =
@@ -2495,8 +2230,7 @@ jobs:
                       guard
                           FileManager.default
                               .fileExists(
-                                  atPath:
-                                      url.path
+                                  atPath: url.path
                               )
                       else {
 
@@ -2534,8 +2268,7 @@ jobs:
                               where: {
                                   $0.caseInsensitiveCompare(
                                       "zo_bridge_tower"
-                                  )
-                                  == .orderedSame
+                                  ) == .orderedSame
                               }
                           ) {
 
@@ -2544,8 +2277,7 @@ jobs:
 
                       } else {
 
-                          currentMeshIndex =
-                              0
+                          currentMeshIndex = 0
                       }
 
                       let selected =
@@ -2556,8 +2288,7 @@ jobs:
                       let geometry =
                           try loadedPackage
                               .loadStaticMesh(
-                                  named:
-                                      selected
+                                  named: selected
                               )
 
                       try upload(
@@ -2571,23 +2302,19 @@ jobs:
                       indexCount = 0
 
                       postStatus(
-                          title:
-                              "Bridge mesh",
+                          title: "Bridge mesh",
                           detail:
                               error.localizedDescription,
-                          success:
-                              false
+                          success: false
                       )
                   }
               }
 
               private func upload(
-                  _ geometry:
-                      MeshGeometry
+                  _ geometry: MeshGeometry
               ) throws {
 
-                  guard
-                      let device
+                  guard let device = device
                   else {
 
                       throw PostalError.bad(
@@ -2596,11 +2323,8 @@ jobs:
                   }
 
                   guard
-                      !geometry.vertices
-                          .isEmpty,
-
-                      !geometry.indices
-                          .isEmpty
+                      !geometry.vertices.isEmpty,
+                      !geometry.indices.isEmpty
                   else {
 
                       throw PostalError.bad(
@@ -2609,12 +2333,10 @@ jobs:
                   }
 
                   var minimum =
-                      geometry.vertices[0]
-                          .position
+                      geometry.vertices[0].position
 
                   var maximum =
-                      geometry.vertices[0]
-                          .position
+                      geometry.vertices[0].position
 
                   for vertex
                       in geometry.vertices {
@@ -2633,8 +2355,7 @@ jobs:
                   }
 
                   let center =
-                      (minimum + maximum)
-                      * 0.5
+                      (minimum + maximum) * 0.5
 
                   let size =
                       maximum - minimum
@@ -2651,29 +2372,23 @@ jobs:
                   let scale:
                       Float =
                       maximumDimension > 0.0001
-                          ? 1.7
-                              / maximumDimension
+                          ? 1.7 / maximumDimension
                           : 1.0
 
                   var gpuVertices:
                       [GPUVertex] = []
 
-                  gpuVertices
-                      .reserveCapacity(
-                          geometry
-                              .vertices
-                              .count
-                      )
+                  gpuVertices.reserveCapacity(
+                      geometry.vertices.count
+                  )
 
                   for vertex
                       in geometry.vertices {
 
                       let local =
-                          (vertex.position
-                              - center)
+                          (vertex.position - center)
                           * scale
 
-                      // Unreal -> our Metal viewer coordinates
                       let convertedPosition =
                           SIMD3<Float>(
                               local.x,
@@ -2707,7 +2422,6 @@ jobs:
                                       convertedPosition.z,
                                       1
                                   ),
-
                               normal:
                                   SIMD4<Float>(
                                       convertedNormal.x,
@@ -2719,30 +2433,39 @@ jobs:
                       )
                   }
 
+                  let newVertexBuffer:
+                      MTLBuffer? =
+                      gpuVertices
+                          .withUnsafeBufferPointer {
+                              buffer in
+
+                              guard
+                                  let baseAddress =
+                                      buffer.baseAddress
+                              else {
+
+                                  return nil
+                              }
+
+                              return device
+                                  .makeBuffer(
+                                      bytes:
+                                          UnsafeRawPointer(
+                                              baseAddress
+                                          ),
+                                      length:
+                                          buffer.count
+                                          * MemoryLayout<
+                                              GPUVertex
+                                          >.stride,
+                                      options:
+                                          .storageModeShared
+                                  )
+                          }
+
                   guard
                       let newVertexBuffer =
-                          gpuVertices
-                              .withUnsafeBytes({
-                                  raw
-                                  in
-
-                                  guard
-                                      let base =
-                                          raw.baseAddress
-                                  else {
-                                      return nil
-                                  }
-
-                                  return device
-                                      .makeBuffer(
-                                          bytes:
-                                              base,
-                                          length:
-                                              raw.count,
-                                          options:
-                                              .storageModeShared
-                                      )
-                              })
+                          newVertexBuffer
                   else {
 
                       throw PostalError.bad(
@@ -2750,30 +2473,39 @@ jobs:
                       )
                   }
 
+                  let newIndexBuffer:
+                      MTLBuffer? =
+                      geometry.indices
+                          .withUnsafeBufferPointer {
+                              buffer in
+
+                              guard
+                                  let baseAddress =
+                                      buffer.baseAddress
+                              else {
+
+                                  return nil
+                              }
+
+                              return device
+                                  .makeBuffer(
+                                      bytes:
+                                          UnsafeRawPointer(
+                                              baseAddress
+                                          ),
+                                      length:
+                                          buffer.count
+                                          * MemoryLayout<
+                                              UInt16
+                                          >.stride,
+                                      options:
+                                          .storageModeShared
+                                  )
+                          }
+
                   guard
                       let newIndexBuffer =
-                          geometry.indices
-                              .withUnsafeBytes({
-                                  raw
-                                  in
-
-                                  guard
-                                      let base =
-                                          raw.baseAddress
-                                  else {
-                                      return nil
-                                  }
-
-                                  return device
-                                      .makeBuffer(
-                                          bytes:
-                                              base,
-                                          length:
-                                              raw.count,
-                                          options:
-                                              .storageModeShared
-                                      )
-                              })
+                          newIndexBuffer
                   else {
 
                       throw PostalError.bad(
@@ -2791,16 +2523,13 @@ jobs:
                       geometry.indices.count
 
                   let triangles =
-                      geometry.indices.count
-                      / 3
+                      geometry.indices.count / 3
 
                   postStatus(
-                      title:
-                          geometry.name,
+                      title: geometry.name,
                       detail:
                           "\(geometry.vertices.count) vertices • \(triangles) triangles • \(meshNames.count) Bridge meshes",
-                      success:
-                          true
+                      success: true
                   )
               }
 
@@ -2841,11 +2570,10 @@ jobs:
                           1.4
                       )
 
-                  gesture
-                      .setTranslation(
-                          .zero,
-                          in: view
-                      )
+                  gesture.setTranslation(
+                      .zero,
+                      in: view
+                  )
               }
 
               @objc
@@ -2873,8 +2601,7 @@ jobs:
 
               func mtkView(
                   _ view: MTKView,
-                  drawableSizeWillChange
-                      size: CGSize
+                  drawableSizeWillChange size: CGSize
               ) {}
 
               func draw(
@@ -2882,20 +2609,14 @@ jobs:
               ) {
 
                   guard
-                      let queue,
-                      let pipeline,
-
+                      let queue = queue,
+                      let pipeline = pipeline,
                       let descriptor =
-                          view
-                              .currentRenderPassDescriptor,
-
+                          view.currentRenderPassDescriptor,
                       let drawable =
-                          view
-                              .currentDrawable,
-
+                          view.currentDrawable,
                       let commandBuffer =
-                          queue
-                              .makeCommandBuffer()
+                          queue.makeCommandBuffer()
                   else {
 
                       return
@@ -2913,24 +2634,20 @@ jobs:
 
                   descriptor
                       .depthAttachment
-                      .clearDepth =
-                      1.0
+                      .clearDepth = 1.0
 
                   descriptor
                       .depthAttachment
-                      .loadAction =
-                      .clear
+                      .loadAction = .clear
 
                   descriptor
                       .depthAttachment
-                      .storeAction =
-                      .dontCare
+                      .storeAction = .dontCare
 
                   if let encoder =
                       commandBuffer
                           .makeRenderCommandEncoder(
-                              descriptor:
-                                  descriptor
+                              descriptor: descriptor
                           ) {
 
                       encoder
@@ -2938,7 +2655,8 @@ jobs:
                               pipeline
                           )
 
-                      if let depthState {
+                      if let depthState =
+                          depthState {
 
                           encoder
                               .setDepthStencilState(
@@ -2946,14 +2664,15 @@ jobs:
                               )
                       }
 
-                      encoder
-                          .setCullMode(
-                              .none
-                          )
+                      encoder.setCullMode(
+                          .none
+                      )
 
                       if
-                          let vertexBuffer,
-                          let indexBuffer,
+                          let vertexBuffer =
+                              vertexBuffer,
+                          let indexBuffer =
+                              indexBuffer,
                           indexCount > 0 {
 
                           encoder
@@ -2966,8 +2685,7 @@ jobs:
                           let width =
                               max(
                                   Float(
-                                      view.drawableSize
-                                          .width
+                                      view.drawableSize.width
                                   ),
                                   1
                               )
@@ -2975,8 +2693,7 @@ jobs:
                           let height =
                               max(
                                   Float(
-                                      view.drawableSize
-                                          .height
+                                      view.drawableSize.height
                                   ),
                                   1
                               )
@@ -2984,13 +2701,10 @@ jobs:
                           var uniforms =
                               GPUUniforms(
                                   yaw: yaw,
-                                  pitch:
-                                      pitch,
+                                  pitch: pitch,
                                   aspect:
-                                      width
-                                      / height,
-                                  zoom:
-                                      zoom
+                                      width / height,
+                                  zoom: zoom
                               )
 
                           encoder
@@ -2999,25 +2713,19 @@ jobs:
                                   length:
                                       MemoryLayout<
                                           GPUUniforms
-                                      >
-                                      .stride,
+                                      >.stride,
                                   index: 1
                               )
 
                           encoder
                               .drawIndexedPrimitives(
-                                  type:
-                                      .triangle,
-
+                                  type: .triangle,
                                   indexCount:
                                       indexCount,
-
                                   indexType:
                                       .uint16,
-
                                   indexBuffer:
                                       indexBuffer,
-
                                   indexBufferOffset:
                                       0
                               )
@@ -3052,19 +2760,15 @@ jobs:
                           / elapsed
 
                       frames = 0
-
-                      lastFPS =
-                          now
+                      lastFPS = now
 
                       DispatchQueue.main.async {
 
                           NotificationCenter
                               .default
                               .post(
-                                  name:
-                                      .postalFPS,
-                                  object:
-                                      fps
+                                  name: .postalFPS,
+                                  object: fps
                               )
                       }
                   }
@@ -3083,15 +2787,11 @@ jobs:
                           .post(
                               name:
                                   .postalMeshStatus,
-
                               object:
                                   MeshStatus(
-                                      title:
-                                          title,
-                                      detail:
-                                          detail,
-                                      success:
-                                          success
+                                      title: title,
+                                      detail: detail,
+                                      success: success
                                   )
                           )
                   }
@@ -3111,7 +2811,7 @@ jobs:
 
       - name: Build native ARM64 app
         run: |
-          set -euo pipefail
+          set +e
 
           rm -rf build
 
@@ -3125,7 +2825,22 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            build
+            build 2>&1 | tee xcodebuild.log
+
+          STATUS=${PIPESTATUS[0]}
+
+          if [ "$STATUS" -ne 0 ]; then
+            echo ""
+            echo "======================================"
+            echo "REAL BUILD ERRORS"
+            echo "======================================"
+
+            grep -n -E "error:|fatal error:" xcodebuild.log | tail -100 || true
+
+            echo "======================================"
+
+            exit "$STATUS"
+          fi
 
       - name: Create IPA
         run: |
@@ -3156,8 +2871,7 @@ jobs:
             Postal2Native-RealBridgeMesh.ipa \
             Payload
 
-          ls -lh \
-            Postal2Native-RealBridgeMesh.ipa
+          ls -lh Postal2Native-RealBridgeMesh.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
