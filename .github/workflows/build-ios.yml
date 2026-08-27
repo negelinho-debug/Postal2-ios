@@ -22,7 +22,7 @@ jobs:
           xcodebuild -version
           xcodegen --version
 
-      - name: Create native project
+      - name: Create project
         run: |
           set -e
 
@@ -69,27 +69,36 @@ jobs:
           import UniformTypeIdentifiers
           import MetalKit
           import Combine
+          import QuartzCore
 
           extension Notification.Name {
-              static let postalFPSUpdate =
-                  Notification.Name("postalFPSUpdate")
+              static let postalFPS =
+                  Notification.Name("postalFPS")
           }
+
+          // ============================================================
+          // MARK: - APP
+          // ============================================================
 
           @main
           struct Postal2NativeApp: App {
               var body: some Scene {
                   WindowGroup {
-                      GameRootView()
+                      ContentView()
                           .preferredColorScheme(.dark)
                   }
               }
           }
 
+          // ============================================================
+          // MARK: - IMPORTED FILE
+          // ============================================================
+
           struct ImportedFile: Identifiable {
               let id = UUID()
+              let url: URL
               let name: String
               let size: Int64
-              let path: URL
 
               var sizeText: String {
                   ByteCountFormatter.string(
@@ -99,248 +108,1667 @@ jobs:
               }
           }
 
-          struct GameRootView: View {
-              @State private var showImporter = false
-              @State private var importedFiles: [ImportedFile] = []
-              @State private var fps: Double = 0
+          // ============================================================
+          // MARK: - UNREAL PACKAGE DATA
+          // ============================================================
+
+          struct UnrealHeader {
+              let magic: UInt32
+
+              let version: Int
+              let licenseeVersion: Int
+
+              let packageFlags: UInt32
+
+              let nameCount: Int
+              let nameOffset: Int
+
+              let exportCount: Int
+              let exportOffset: Int
+
+              let importCount: Int
+              let importOffset: Int
+          }
+
+          struct UnrealImportEntry {
+              let classPackageIndex: Int
+              let classNameIndex: Int
+              let packageIndex: Int32
+              let objectNameIndex: Int
+          }
+
+          struct UnrealExportEntry {
+              let classIndex: Int
+              let superIndex: Int
+
+              let packageIndex: Int32
+
+              let objectNameIndex: Int
+
+              let objectFlags: UInt32
+
+              let serialSize: Int
+              let serialOffset: Int
+          }
+
+          struct PackageReport: Identifiable {
+              let id = UUID()
+
+              let filename: String
+
+              let version: Int
+              let licenseeVersion: Int
+
+              let nameCount: Int
+              let importCount: Int
+              let exportCount: Int
+
+              let staticMeshes: [String]
+              let textures: [String]
+
+              let classCounts: [(String, Int)]
+          }
+
+          // ============================================================
+          // MARK: - ERRORS
+          // ============================================================
+
+          enum UnrealPackageError:
+              LocalizedError {
+
+              case invalid(String)
+
+              var errorDescription: String? {
+                  switch self {
+                  case .invalid(let text):
+                      return text
+                  }
+              }
+          }
+
+          // ============================================================
+          // MARK: - BINARY READER
+          // ============================================================
+
+          struct BinaryReader {
+
+              let data: Data
+              var offset: Int = 0
+
+              var remaining: Int {
+                  data.count - offset
+              }
+
+              mutating func seek(
+                  _ newOffset: Int
+              ) throws {
+
+                  guard
+                      newOffset >= 0,
+                      newOffset <= data.count
+                  else {
+                      throw UnrealPackageError.invalid(
+                          "Invalid seek \(newOffset)"
+                      )
+                  }
+
+                  offset = newOffset
+              }
+
+              private func byte(
+                  _ position: Int
+              ) throws -> UInt8 {
+
+                  guard
+                      position >= 0,
+                      position < data.count
+                  else {
+                      throw UnrealPackageError.invalid(
+                          "Read outside file"
+                      )
+                  }
+
+                  return data[
+                      data.startIndex + position
+                  ]
+              }
+
+              mutating func readUInt8()
+                  throws -> UInt8 {
+
+                  let value = try byte(offset)
+
+                  offset += 1
+
+                  return value
+              }
+
+              mutating func readUInt16()
+                  throws -> UInt16 {
+
+                  let b0 =
+                      UInt16(try byte(offset))
+
+                  let b1 =
+                      UInt16(try byte(offset + 1))
+
+                  offset += 2
+
+                  return b0 |
+                      (b1 << 8)
+              }
+
+              mutating func readUInt32()
+                  throws -> UInt32 {
+
+                  let b0 =
+                      UInt32(try byte(offset))
+
+                  let b1 =
+                      UInt32(try byte(offset + 1))
+
+                  let b2 =
+                      UInt32(try byte(offset + 2))
+
+                  let b3 =
+                      UInt32(try byte(offset + 3))
+
+                  offset += 4
+
+                  return b0 |
+                      (b1 << 8) |
+                      (b2 << 16) |
+                      (b3 << 24)
+              }
+
+              mutating func readInt32()
+                  throws -> Int32 {
+
+                  Int32(
+                      bitPattern:
+                          try readUInt32()
+                  )
+              }
+
+              // Unreal Engine 1 / 2 CompactIndex
+              mutating func readCompactIndex()
+                  throws -> Int {
+
+                  let first =
+                      try readUInt8()
+
+                  let negative =
+                      (first & 0x80) != 0
+
+                  var value =
+                      Int(first & 0x3F)
+
+                  if (first & 0x40) != 0 {
+
+                      var shift = 6
+                      var count = 0
+
+                      while true {
+
+                          let next =
+                              try readUInt8()
+
+                          value |=
+                              Int(next & 0x7F)
+                              << shift
+
+                          shift += 7
+                          count += 1
+
+                          if (next & 0x80) == 0 {
+                              break
+                          }
+
+                          if count > 4 {
+                              throw UnrealPackageError.invalid(
+                                  "Bad CompactIndex"
+                              )
+                          }
+                      }
+                  }
+
+                  return negative
+                      ? -value
+                      : value
+              }
+
+              mutating func readData(
+                  count: Int
+              ) throws -> Data {
+
+                  guard
+                      count >= 0,
+                      offset + count <= data.count
+                  else {
+                      throw UnrealPackageError.invalid(
+                          "Read outside file"
+                      )
+                  }
+
+                  let result =
+                      data.subdata(
+                          in:
+                              offset..<(offset + count)
+                      )
+
+                  offset += count
+
+                  return result
+              }
+          }
+
+          // ============================================================
+          // MARK: - UNREAL PACKAGE PARSER
+          // ============================================================
+
+          final class UnrealPackageParser {
+
+              static let unrealMagic:
+                  UInt32 = 0x9E2A83C1
+
+              let data: Data
+
+              var header:
+                  UnrealHeader!
+
+              var names: [String] = []
+
+              var imports:
+                  [UnrealImportEntry] = []
+
+              var exports:
+                  [UnrealExportEntry] = []
+
+              init(url: URL) throws {
+
+                  data = try Data(
+                      contentsOf: url,
+                      options: .mappedIfSafe
+                  )
+
+                  try parse()
+              }
+
+              private func parse() throws {
+
+                  var reader =
+                      BinaryReader(
+                          data: data
+                      )
+
+                  // --------------------------------------------------
+                  // PACKAGE HEADER
+                  // --------------------------------------------------
+
+                  let magic =
+                      try reader.readUInt32()
+
+                  guard
+                      magic ==
+                          Self.unrealMagic
+                  else {
+                      throw UnrealPackageError.invalid(
+                          "Not an Unreal package"
+                      )
+                  }
+
+                  let version =
+                      Int(
+                          try reader.readUInt16()
+                      )
+
+                  let license =
+                      Int(
+                          try reader.readUInt16()
+                      )
+
+                  let flags =
+                      try reader.readUInt32()
+
+                  let nameCount =
+                      Int(
+                          try reader.readInt32()
+                      )
+
+                  let nameOffset =
+                      Int(
+                          try reader.readInt32()
+                      )
+
+                  let exportCount =
+                      Int(
+                          try reader.readInt32()
+                      )
+
+                  let exportOffset =
+                      Int(
+                          try reader.readInt32()
+                      )
+
+                  let importCount =
+                      Int(
+                          try reader.readInt32()
+                      )
+
+                  let importOffset =
+                      Int(
+                          try reader.readInt32()
+                      )
+
+                  guard
+                      nameCount >= 0,
+                      importCount >= 0,
+                      exportCount >= 0
+                  else {
+                      throw UnrealPackageError.invalid(
+                          "Invalid package counts"
+                      )
+                  }
+
+                  header =
+                      UnrealHeader(
+                          magic: magic,
+                          version: version,
+                          licenseeVersion:
+                              license,
+                          packageFlags:
+                              flags,
+                          nameCount:
+                              nameCount,
+                          nameOffset:
+                              nameOffset,
+                          exportCount:
+                              exportCount,
+                          exportOffset:
+                              exportOffset,
+                          importCount:
+                              importCount,
+                          importOffset:
+                              importOffset
+                      )
+
+                  // --------------------------------------------------
+                  // NAME TABLE
+                  // --------------------------------------------------
+
+                  try reader.seek(
+                      nameOffset
+                  )
+
+                  names.removeAll(
+                      keepingCapacity: true
+                  )
+
+                  for _ in 0..<nameCount {
+
+                      let length =
+                          try reader
+                              .readCompactIndex()
+
+                      var name = ""
+
+                      if length > 0 {
+
+                          guard length < 65536
+                          else {
+                              throw UnrealPackageError.invalid(
+                                  "Bad name length"
+                              )
+                          }
+
+                          let bytes =
+                              try reader.readData(
+                                  count: length
+                              )
+
+                          name =
+                              String(
+                                  data: bytes,
+                                  encoding:
+                                      .isoLatin1
+                              ) ?? ""
+
+                      } else if length < 0 {
+
+                          let characters =
+                              -length
+
+                          guard
+                              characters < 65536
+                          else {
+                              throw UnrealPackageError.invalid(
+                                  "Bad unicode name"
+                              )
+                          }
+
+                          let bytes =
+                              try reader.readData(
+                                  count:
+                                      characters * 2
+                              )
+
+                          name =
+                              String(
+                                  data: bytes,
+                                  encoding:
+                                      .utf16LittleEndian
+                              ) ?? ""
+                      }
+
+                      name =
+                          name.replacingOccurrences(
+                              of: "\0",
+                              with: ""
+                          )
+
+                      _ =
+                          try reader.readUInt32()
+
+                      names.append(name)
+                  }
+
+                  // --------------------------------------------------
+                  // IMPORT TABLE
+                  //
+                  // FName ClassPackage
+                  // FName ClassName
+                  // INT   PackageIndex
+                  // FName ObjectName
+                  // --------------------------------------------------
+
+                  try reader.seek(
+                      importOffset
+                  )
+
+                  imports.removeAll(
+                      keepingCapacity: true
+                  )
+
+                  for _ in 0..<importCount {
+
+                      let classPackage =
+                          try reader
+                              .readCompactIndex()
+
+                      let className =
+                          try reader
+                              .readCompactIndex()
+
+                      let packageIndex =
+                          try reader
+                              .readInt32()
+
+                      let objectName =
+                          try reader
+                              .readCompactIndex()
+
+                      imports.append(
+                          UnrealImportEntry(
+                              classPackageIndex:
+                                  classPackage,
+                              classNameIndex:
+                                  className,
+                              packageIndex:
+                                  packageIndex,
+                              objectNameIndex:
+                                  objectName
+                          )
+                      )
+                  }
+
+                  // --------------------------------------------------
+                  // EXPORT TABLE - UE2
+                  //
+                  // INDEX Class
+                  // INDEX Super
+                  // INT   Outer
+                  // INDEX Name
+                  // DWORD ObjectFlags
+                  // INDEX SerialSize
+                  // INDEX SerialOffset
+                  // --------------------------------------------------
+
+                  try reader.seek(
+                      exportOffset
+                  )
+
+                  exports.removeAll(
+                      keepingCapacity: true
+                  )
+
+                  for _ in 0..<exportCount {
+
+                      let classIndex =
+                          try reader
+                              .readCompactIndex()
+
+                      let superIndex =
+                          try reader
+                              .readCompactIndex()
+
+                      let packageIndex =
+                          try reader
+                              .readInt32()
+
+                      let objectName =
+                          try reader
+                              .readCompactIndex()
+
+                      let objectFlags =
+                          try reader
+                              .readUInt32()
+
+                      let serialSize =
+                          try reader
+                              .readCompactIndex()
+
+                      var serialOffset = 0
+
+                      if serialSize != 0 {
+
+                          serialOffset =
+                              try reader
+                                  .readCompactIndex()
+                      }
+
+                      exports.append(
+                          UnrealExportEntry(
+                              classIndex:
+                                  classIndex,
+                              superIndex:
+                                  superIndex,
+                              packageIndex:
+                                  packageIndex,
+                              objectNameIndex:
+                                  objectName,
+                              objectFlags:
+                                  objectFlags,
+                              serialSize:
+                                  serialSize,
+                              serialOffset:
+                                  serialOffset
+                          )
+                      )
+                  }
+              }
+
+              func name(
+                  at index: Int
+              ) -> String {
+
+                  guard
+                      index >= 0,
+                      index < names.count
+                  else {
+                      return "Unknown"
+                  }
+
+                  return names[index]
+              }
+
+              func objectName(
+                  reference: Int
+              ) -> String {
+
+                  if reference == 0 {
+                      return "Class"
+                  }
+
+                  if reference < 0 {
+
+                      let index =
+                          -reference - 1
+
+                      guard
+                          index >= 0,
+                          index < imports.count
+                      else {
+                          return "Unknown"
+                      }
+
+                      return name(
+                          at:
+                              imports[index]
+                                  .objectNameIndex
+                      )
+                  }
+
+                  let index =
+                      reference - 1
+
+                  guard
+                      index >= 0,
+                      index < exports.count
+                  else {
+                      return "Unknown"
+                  }
+
+                  return name(
+                      at:
+                          exports[index]
+                              .objectNameIndex
+                  )
+              }
+
+              func className(
+                  for export:
+                      UnrealExportEntry
+              ) -> String {
+
+                  objectName(
+                      reference:
+                          export.classIndex
+                  )
+              }
+
+              func makeReport(
+                  filename: String
+              ) -> PackageReport {
+
+                  var staticMeshes:
+                      [String] = []
+
+                  var textures:
+                      [String] = []
+
+                  var counts:
+                      [String: Int] = [:]
+
+                  let textureClasses:
+                      Set<String> = [
+                          "Texture",
+                          "Cubemap",
+                          "Shader",
+                          "TexPanner",
+                          "TexEnvMap",
+                          "ConstantColor"
+                      ]
+
+                  for entry in exports {
+
+                      let className =
+                          className(
+                              for: entry
+                          )
+
+                      let objectName =
+                          name(
+                              at:
+                                  entry
+                                      .objectNameIndex
+                          )
+
+                      counts[className,
+                             default: 0] += 1
+
+                      if className ==
+                          "StaticMesh" {
+
+                          staticMeshes.append(
+                              objectName
+                          )
+                      }
+
+                      if textureClasses
+                          .contains(
+                              className
+                          ) {
+
+                          textures.append(
+                              objectName
+                          )
+                      }
+                  }
+
+                  let sortedCounts =
+                      counts
+                          .map {
+                              ($0.key, $0.value)
+                          }
+                          .sorted {
+                              if $0.1 ==
+                                  $1.1 {
+                                  return $0.0
+                                      < $1.0
+                              }
+
+                              return $0.1
+                                  > $1.1
+                          }
+
+                  return PackageReport(
+                      filename:
+                          filename,
+                      version:
+                          header.version,
+                      licenseeVersion:
+                          header
+                              .licenseeVersion,
+                      nameCount:
+                          header.nameCount,
+                      importCount:
+                          header.importCount,
+                      exportCount:
+                          header.exportCount,
+                      staticMeshes:
+                          staticMeshes,
+                      textures:
+                          textures,
+                      classCounts:
+                          sortedCounts
+                  )
+              }
+          }
+
+          // ============================================================
+          // MARK: - MAIN UI
+          // ============================================================
+
+          struct ContentView: View {
+
+              @State private var
+                  showImporter = false
+
+              @State private var
+                  files:
+                      [ImportedFile] = []
+
+              @State private var
+                  reports:
+                      [PackageReport] = []
+
+              @State private var
+                  analysisStatus =
+                      "Import the 3 POSTAL 2 files"
+
+              @State private var
+                  isAnalyzing = false
+
+              @State private var
+                  fps: Double = 0
 
               var body: some View {
+
                   ZStack {
-                      MetalGameView()
+
+                      MetalView()
                           .ignoresSafeArea()
 
-                      VStack {
-                          HStack {
-                              VStack(alignment: .leading, spacing: 4) {
-                                  Text("POSTAL 2 iOS")
-                                      .font(.headline)
+                      VStack(
+                          spacing: 0
+                      ) {
 
-                                  Text("Native ARM64 • Metal")
-                                      .font(.caption)
+                          header
 
-                                  Text(
-                                      String(
-                                          format: "FPS %.0f",
-                                          fps
-                                      )
-                                  )
-                                  .font(.caption.monospacedDigit())
-                              }
+                          ScrollView {
 
-                              Spacer()
-
-                              Button {
-                                  showImporter = true
-                              } label: {
-                                  Text("Import POSTAL 2 Files")
-                                      .bold()
-                                      .padding(.horizontal, 14)
-                                      .padding(.vertical, 10)
-                                      .background(
-                                          Color.white.opacity(0.18)
-                                      )
-                                      .clipShape(
-                                          RoundedRectangle(
-                                              cornerRadius: 10
-                                          )
-                                      )
-                              }
-                          }
-                          .foregroundStyle(.white)
-                          .padding()
-
-                          Spacer()
-
-                          if !importedFiles.isEmpty {
                               VStack(
-                                  alignment: .leading,
-                                  spacing: 5
+                                  spacing: 12
                               ) {
-                                  Text("Imported game files")
-                                      .bold()
 
-                                  ForEach(importedFiles) { file in
-                                      HStack {
-                                          Text("✓")
-                                              .foregroundStyle(.green)
+                                  fileCard
 
-                                          Text(file.name)
+                                  if !reports
+                                      .isEmpty {
 
-                                          Spacer()
+                                      ForEach(
+                                          reports
+                                      ) {
+                                          report in
 
-                                          Text(file.sizeText)
-                                              .foregroundStyle(
-                                                  .secondary
-                                              )
+                                          ReportView(
+                                              report:
+                                                  report
+                                          )
                                       }
                                   }
                               }
-                              .font(.caption)
-                              .padding(12)
-                              .background(
-                                  Color.black.opacity(0.70)
-                              )
-                              .clipShape(
-                                  RoundedRectangle(
-                                      cornerRadius: 12
-                                  )
-                              )
-                              .foregroundStyle(.white)
                               .padding()
                           }
                       }
                   }
                   .onAppear {
-                      loadExistingFiles()
+                      loadFiles()
                   }
                   .onReceive(
-                      NotificationCenter.default.publisher(
-                          for: .postalFPSUpdate
-                      )
-                  ) { notification in
-                      if let value =
-                          notification.object as? Double {
-                          fps = value
+                      NotificationCenter
+                          .default
+                          .publisher(
+                              for:
+                                  .postalFPS
+                          )
+                  ) {
+                      note in
+
+                      if let newFPS =
+                          note.object
+                              as? Double {
+
+                          fps = newFPS
                       }
                   }
-                  .sheet(isPresented: $showImporter) {
-                      PostalFileImporter {
+                  .sheet(
+                      isPresented:
+                          $showImporter
+                  ) {
+
+                      FileImporter {
                           urls in
 
-                          importFiles(urls)
-                          showImporter = false
+                          importFiles(
+                              urls
+                          )
+
+                          showImporter =
+                              false
                       }
                   }
               }
 
-              private func dataDirectory() throws -> URL {
-                  let documents =
-                      FileManager.default.urls(
-                          for: .documentDirectory,
-                          in: .userDomainMask
-                      )[0]
+              private var header:
+                  some View {
 
-                  let folder =
-                      documents.appendingPathComponent(
-                          "Postal2Data",
-                          isDirectory: true
+                  VStack(spacing: 10) {
+
+                      HStack {
+
+                          VStack(
+                              alignment:
+                                  .leading
+                          ) {
+
+                              Text(
+                                  "POSTAL 2 iOS"
+                              )
+                              .font(
+                                  .title2.bold()
+                              )
+
+                              Text(
+                                  "Native ARM64 • Metal"
+                              )
+                              .font(
+                                  .caption
+                              )
+
+                              Text(
+                                  String(
+                                      format:
+                                          "FPS %.0f",
+                                      fps
+                                  )
+                              )
+                              .font(
+                                  .caption
+                                      .monospacedDigit()
+                              )
+                          }
+
+                          Spacer()
+
+                          Button {
+                              showImporter =
+                                  true
+                          } label: {
+
+                              Text(
+                                  "Import Files"
+                              )
+                              .bold()
+                              .padding(
+                                  .horizontal,
+                                  15
+                              )
+                              .padding(
+                                  .vertical,
+                                  11
+                              )
+                              .background(
+                                  Color.white
+                                      .opacity(
+                                          0.18
+                                      )
+                              )
+                              .clipShape(
+                                  RoundedRectangle(
+                                      cornerRadius:
+                                          12
+                                  )
+                              )
+                          }
+                      }
+
+                      Button {
+
+                          analyze()
+
+                      } label: {
+
+                          HStack {
+
+                              if isAnalyzing {
+
+                                  ProgressView()
+                                      .tint(
+                                          .white
+                                      )
+                              }
+
+                              Text(
+                                  isAnalyzing
+                                      ? "Analyzing..."
+                                      : "Analyze Bridge"
+                              )
+                              .bold()
+                          }
+                          .frame(
+                              maxWidth:
+                                  .infinity
+                          )
+                          .padding(
+                              .vertical,
+                              12
+                          )
+                          .background(
+                              canAnalyze
+                                  ? Color.white
+                                      .opacity(
+                                          0.20
+                                      )
+                                  : Color.white
+                                      .opacity(
+                                          0.08
+                                      )
+                          )
+                          .clipShape(
+                              RoundedRectangle(
+                                  cornerRadius:
+                                      12
+                              )
+                          )
+                      }
+                      .disabled(
+                          !canAnalyze ||
+                          isAnalyzing
                       )
 
-                  try FileManager.default.createDirectory(
-                      at: folder,
-                      withIntermediateDirectories: true
+                      Text(
+                          analysisStatus
+                      )
+                      .font(
+                          .caption
+                      )
+                      .frame(
+                          maxWidth:
+                              .infinity,
+                          alignment:
+                              .leading
+                      )
+                  }
+                  .foregroundStyle(
+                      .white
                   )
+                  .padding()
+                  .background(
+                      Color.black
+                          .opacity(
+                              0.75
+                          )
+                  )
+              }
+
+              private var fileCard:
+                  some View {
+
+                  VStack(
+                      alignment:
+                          .leading,
+                      spacing: 8
+                  ) {
+
+                      Text(
+                          "POSTAL 2 DATA"
+                      )
+                      .font(
+                          .headline
+                      )
+
+                      requiredFile(
+                          "Bridge.fuk"
+                      )
+
+                      requiredFile(
+                          "Zo_BridgeMeshes.usx"
+                      )
+
+                      requiredFile(
+                          "Zo_BridgeTex.utx"
+                      )
+                  }
+                  .frame(
+                      maxWidth:
+                          .infinity,
+                      alignment:
+                          .leading
+                  )
+                  .padding()
+                  .background(
+                      Color.black
+                          .opacity(
+                              0.72
+                          )
+                  )
+                  .clipShape(
+                      RoundedRectangle(
+                          cornerRadius:
+                              14
+                      )
+                  )
+                  .foregroundStyle(
+                      .white
+                  )
+              }
+
+              @ViewBuilder
+              private func requiredFile(
+                  _ name: String
+              ) -> some View {
+
+                  let found =
+                      files.first {
+                          $0.name
+                              .caseInsensitiveCompare(
+                                  name
+                              )
+                              == .orderedSame
+                      }
+
+                  HStack {
+
+                      Text(
+                          found == nil
+                              ? "✕"
+                              : "✓"
+                      )
+                      .foregroundStyle(
+                          found == nil
+                              ? .red
+                              : .green
+                      )
+
+                      Text(name)
+
+                      Spacer()
+
+                      if let found {
+
+                          Text(
+                              found.sizeText
+                          )
+                          .foregroundStyle(
+                              .secondary
+                          )
+                      }
+                  }
+                  .font(
+                      .caption
+                  )
+              }
+
+              private var canAnalyze:
+                  Bool {
+
+                  hasFile(
+                      "Bridge.fuk"
+                  )
+                  &&
+                  hasFile(
+                      "Zo_BridgeMeshes.usx"
+                  )
+                  &&
+                  hasFile(
+                      "Zo_BridgeTex.utx"
+                  )
+              }
+
+              private func hasFile(
+                  _ name: String
+              ) -> Bool {
+
+                  files.contains {
+                      $0.name
+                          .caseInsensitiveCompare(
+                              name
+                          )
+                          == .orderedSame
+                  }
+              }
+
+              private func postalDirectory()
+                  throws -> URL {
+
+                  let documents =
+                      FileManager.default
+                          .urls(
+                              for:
+                                  .documentDirectory,
+                              in:
+                                  .userDomainMask
+                          )[0]
+
+                  let folder =
+                      documents
+                          .appendingPathComponent(
+                              "Postal2Data",
+                              isDirectory:
+                                  true
+                          )
+
+                  try FileManager
+                      .default
+                      .createDirectory(
+                          at: folder,
+                          withIntermediateDirectories:
+                              true
+                      )
 
                   return folder
               }
 
-              private func importFiles(_ urls: [URL]) {
+              private func loadFiles() {
+
                   do {
-                      let folder = try dataDirectory()
+
+                      let directory =
+                          try postalDirectory()
+
+                      let urls =
+                          try FileManager
+                              .default
+                              .contentsOfDirectory(
+                                  at:
+                                      directory,
+                                  includingPropertiesForKeys:
+                                      [
+                                          .fileSizeKey
+                                      ]
+                              )
+
+                      files =
+                          urls.map {
+                              url in
+
+                              let values =
+                                  try? url
+                                      .resourceValues(
+                                          forKeys:
+                                              [
+                                                  .fileSizeKey
+                                              ]
+                                      )
+
+                              return ImportedFile(
+                                  url: url,
+                                  name:
+                                      url
+                                          .lastPathComponent,
+                                  size:
+                                      Int64(
+                                          values?
+                                              .fileSize
+                                          ?? 0
+                                      )
+                              )
+                          }
+                          .sorted {
+                              $0.name
+                                  .lowercased()
+                              <
+                              $1.name
+                                  .lowercased()
+                          }
+
+                  } catch {
+
+                      analysisStatus =
+                          "File load error: \(error.localizedDescription)"
+                  }
+              }
+
+              private func importFiles(
+                  _ urls: [URL]
+              ) {
+
+                  guard !urls.isEmpty
+                  else {
+                      return
+                  }
+
+                  do {
+
+                      let directory =
+                          try postalDirectory()
 
                       for source in urls {
+
                           let access =
-                              source.startAccessingSecurityScopedResource()
+                              source
+                                  .startAccessingSecurityScopedResource()
 
                           defer {
+
                               if access {
-                                  source.stopAccessingSecurityScopedResource()
+
+                                  source
+                                      .stopAccessingSecurityScopedResource()
                               }
                           }
 
                           let destination =
-                              folder.appendingPathComponent(
-                                  source.lastPathComponent
-                              )
+                              directory
+                                  .appendingPathComponent(
+                                      source
+                                          .lastPathComponent
+                                  )
 
-                          if FileManager.default.fileExists(
-                              atPath: destination.path
-                          ) {
-                              try FileManager.default.removeItem(
-                                  at: destination
-                              )
+                          if FileManager
+                              .default
+                              .fileExists(
+                                  atPath:
+                                      destination
+                                          .path
+                              ) {
+
+                              try FileManager
+                                  .default
+                                  .removeItem(
+                                      at:
+                                          destination
+                                  )
                           }
 
-                          try FileManager.default.copyItem(
-                              at: source,
-                              to: destination
-                          )
+                          try FileManager
+                              .default
+                              .copyItem(
+                                  at: source,
+                                  to:
+                                      destination
+                              )
                       }
 
-                      loadExistingFiles()
+                      loadFiles()
+
+                      reports.removeAll()
+
+                      analysisStatus =
+                          "Files ready — press Analyze Bridge"
 
                   } catch {
-                      print(
-                          "Import error:",
-                          error.localizedDescription
-                      )
+
+                      analysisStatus =
+                          "Import error: \(error.localizedDescription)"
                   }
               }
 
-              private func loadExistingFiles() {
-                  do {
-                      let folder = try dataDirectory()
+              private func analyze() {
 
-                      let urls =
-                          try FileManager.default.contentsOfDirectory(
-                              at: folder,
-                              includingPropertiesForKeys: [
-                                  .fileSizeKey
-                              ]
-                          )
-
-                      importedFiles = urls.map { url in
-                          let values =
-                              try? url.resourceValues(
-                                  forKeys: [.fileSizeKey]
-                              )
-
-                          return ImportedFile(
-                              name: url.lastPathComponent,
-                              size: Int64(
-                                  values?.fileSize ?? 0
-                              ),
-                              path: url
-                          )
-                      }
-                      .sorted {
-                          $0.name.lowercased()
-                              < $1.name.lowercased()
-                      }
-
-                  } catch {
-                      print(
-                          "Load files error:",
-                          error.localizedDescription
-                      )
+                  guard canAnalyze
+                  else {
+                      return
                   }
+
+                  isAnalyzing = true
+
+                  analysisStatus =
+                      "Reading Unreal Engine packages..."
+
+                  reports.removeAll()
+
+                  let currentFiles =
+                      files
+
+                  DispatchQueue
+                      .global(
+                          qos:
+                              .userInitiated
+                      )
+                      .async {
+
+                          var newReports:
+                              [PackageReport] = []
+
+                          var failure:
+                              String?
+
+                          let wanted = [
+                              "Bridge.fuk",
+                              "Zo_BridgeMeshes.usx",
+                              "Zo_BridgeTex.utx"
+                          ]
+
+                          for wantedName
+                              in wanted {
+
+                              guard
+                                  let file =
+                                      currentFiles
+                                          .first(
+                                              where: {
+                                                  $0.name
+                                                      .caseInsensitiveCompare(
+                                                          wantedName
+                                                      )
+                                                      == .orderedSame
+                                              }
+                                          )
+                              else {
+                                  failure =
+                                      "Missing \(wantedName)"
+                                  break
+                              }
+
+                              do {
+
+                                  let parser =
+                                      try UnrealPackageParser(
+                                          url:
+                                              file.url
+                                      )
+
+                                  let report =
+                                      parser.makeReport(
+                                          filename:
+                                              file.name
+                                      )
+
+                                  newReports.append(
+                                      report
+                                  )
+
+                              } catch {
+
+                                  failure =
+                                      "\(wantedName): \(error.localizedDescription)"
+
+                                  break
+                              }
+                          }
+
+                          DispatchQueue
+                              .main
+                              .async {
+
+                                  isAnalyzing =
+                                      false
+
+                                  if let failure {
+
+                                      analysisStatus =
+                                          "ERROR: \(failure)"
+
+                                      reports =
+                                          newReports
+
+                                  } else {
+
+                                      reports =
+                                          newReports
+
+                                      let meshCount =
+                                          newReports
+                                              .reduce(
+                                                  0
+                                              ) {
+                                                  $0 +
+                                                  $1
+                                                      .staticMeshes
+                                                      .count
+                                              }
+
+                                      let textureCount =
+                                          newReports
+                                              .reduce(
+                                                  0
+                                              ) {
+                                                  $0 +
+                                                  $1
+                                                      .textures
+                                                      .count
+                                              }
+
+                                      analysisStatus =
+                                          "SUCCESS • \(meshCount) StaticMeshes • \(textureCount) texture/material objects"
+                                  }
+                              }
+                      }
               }
           }
 
-          struct PostalFileImporter:
+          // ============================================================
+          // MARK: - PACKAGE REPORT VIEW
+          // ============================================================
+
+          struct ReportView: View {
+
+              let report:
+                  PackageReport
+
+              var body: some View {
+
+                  VStack(
+                      alignment:
+                          .leading,
+                      spacing: 8
+                  ) {
+
+                      HStack {
+
+                          Text("✓")
+                              .foregroundStyle(
+                                  .green
+                              )
+
+                          Text(
+                              report.filename
+                          )
+                          .font(
+                              .headline
+                          )
+
+                          Spacer()
+                      }
+
+                      Text(
+                          "Unreal package \(report.version)/\(report.licenseeVersion)"
+                      )
+
+                      Text(
+                          "Names: \(report.nameCount)"
+                      )
+
+                      Text(
+                          "Imports: \(report.importCount)"
+                      )
+
+                      Text(
+                          "Exports: \(report.exportCount)"
+                      )
+
+                      if !report
+                          .staticMeshes
+                          .isEmpty {
+
+                          Divider()
+
+                          Text(
+                              "STATIC MESHES: \(report.staticMeshes.count)"
+                          )
+                          .bold()
+
+                          ForEach(
+                              Array(
+                                  report
+                                      .staticMeshes
+                                      .prefix(
+                                          30
+                                      )
+                              ),
+                              id:
+                                  \.self
+                          ) {
+                              mesh in
+
+                              Text(
+                                  "• \(mesh)"
+                              )
+                          }
+                      }
+
+                      if !report
+                          .textures
+                          .isEmpty {
+
+                          Divider()
+
+                          Text(
+                              "TEXTURES / MATERIALS: \(report.textures.count)"
+                          )
+                          .bold()
+
+                          ForEach(
+                              Array(
+                                  report
+                                      .textures
+                                      .prefix(
+                                          30
+                                      )
+                              ),
+                              id:
+                                  \.self
+                          ) {
+                              texture in
+
+                              Text(
+                                  "• \(texture)"
+                              )
+                          }
+                      }
+
+                      Divider()
+
+                      Text(
+                          "TOP OBJECT CLASSES"
+                      )
+                      .bold()
+
+                      ForEach(
+                          Array(
+                              report
+                                  .classCounts
+                                  .prefix(
+                                      15
+                                  )
+                                  .enumerated()
+                          ),
+                          id:
+                              \.offset
+                      ) {
+                          item in
+
+                          HStack {
+
+                              Text(
+                                  item
+                                      .element
+                                      .0
+                              )
+
+                              Spacer()
+
+                              Text(
+                                  "\(item.element.1)"
+                              )
+                              .foregroundStyle(
+                                  .secondary
+                              )
+                          }
+                      }
+                  }
+                  .font(
+                      .caption
+                  )
+                  .frame(
+                      maxWidth:
+                          .infinity,
+                      alignment:
+                          .leading
+                  )
+                  .padding()
+                  .background(
+                      Color.black
+                          .opacity(
+                              0.75
+                          )
+                  )
+                  .clipShape(
+                      RoundedRectangle(
+                          cornerRadius:
+                              14
+                      )
+                  )
+                  .foregroundStyle(
+                      .white
+                  )
+              }
+          }
+
+          // ============================================================
+          // MARK: - FILE PICKER
+          // ============================================================
+
+          struct FileImporter:
               UIViewControllerRepresentable {
 
-              let completion: ([URL]) -> Void
+              let completion:
+                  ([URL]) -> Void
 
-              func makeCoordinator() -> Coordinator {
-                  Coordinator(completion: completion)
+              func makeCoordinator()
+                  -> Coordinator {
+
+                  Coordinator(
+                      completion:
+                          completion
+                  )
               }
 
               func makeUIViewController(
                   context: Context
-              ) -> UIDocumentPickerViewController {
+              )
+                  -> UIDocumentPickerViewController {
 
                   let picker =
                       UIDocumentPickerViewController(
-                          forOpeningContentTypes: [
-                              .data,
-                              .item
-                          ],
-                          asCopy: true
+                          forOpeningContentTypes:
+                              [
+                                  .data,
+                                  .item
+                              ],
+                          asCopy:
+                              true
                       )
 
-                  picker.allowsMultipleSelection = true
-                  picker.delegate = context.coordinator
+                  picker
+                      .allowsMultipleSelection =
+                      true
+
+                  picker.delegate =
+                      context
+                          .coordinator
 
                   return picker
               }
@@ -348,52 +1776,70 @@ jobs:
               func updateUIViewController(
                   _ uiViewController:
                       UIDocumentPickerViewController,
-                  context: Context
+                  context:
+                      Context
               ) {}
 
               final class Coordinator:
                   NSObject,
                   UIDocumentPickerDelegate {
 
-                  let completion: ([URL]) -> Void
+                  let completion:
+                      ([URL]) -> Void
 
                   init(
                       completion:
-                          @escaping ([URL]) -> Void
+                          @escaping
+                          ([URL]) -> Void
                   ) {
-                      self.completion = completion
+
+                      self.completion =
+                          completion
                   }
 
                   func documentPicker(
                       _ controller:
                           UIDocumentPickerViewController,
-                      didPickDocumentsAt urls: [URL]
+                      didPickDocumentsAt
+                          urls: [URL]
                   ) {
-                      completion(urls)
+
+                      completion(
+                          urls
+                      )
                   }
 
                   func documentPickerWasCancelled(
                       _ controller:
                           UIDocumentPickerViewController
                   ) {
+
                       completion([])
                   }
               }
           }
 
-          struct MetalGameView:
+          // ============================================================
+          // MARK: - METAL
+          // ============================================================
+
+          struct MetalView:
               UIViewRepresentable {
 
-              func makeCoordinator() -> Renderer {
-                  Renderer()
+              func makeCoordinator()
+                  -> MetalRenderer {
+
+                  MetalRenderer()
               }
 
               func makeUIView(
-                  context: Context
+                  context:
+                      Context
               ) -> MTKView {
 
-                  guard let device =
-                      MTLCreateSystemDefaultDevice()
+                  guard
+                      let device =
+                          MTLCreateSystemDefaultDevice()
                   else {
                       fatalError(
                           "Metal unavailable"
@@ -402,67 +1848,101 @@ jobs:
 
                   let view =
                       MTKView(
-                          frame: .zero,
-                          device: device
+                          frame:
+                              .zero,
+                          device:
+                              device
                       )
 
                   view.delegate =
-                      context.coordinator
+                      context
+                          .coordinator
 
-                  view.preferredFramesPerSecond = 60
-                  view.enableSetNeedsDisplay = false
-                  view.isPaused = false
-                  view.framebufferOnly = true
-                  view.colorPixelFormat = .bgra8Unorm
+                  view
+                      .preferredFramesPerSecond =
+                      60
 
-                  context.coordinator.setup(
-                      device: device
-                  )
+                  view
+                      .enableSetNeedsDisplay =
+                      false
+
+                  view.isPaused =
+                      false
+
+                  view.framebufferOnly =
+                      true
+
+                  view.colorPixelFormat =
+                      .bgra8Unorm
+
+                  context
+                      .coordinator
+                      .setup(
+                          device:
+                              device
+                      )
 
                   return view
               }
 
               func updateUIView(
-                  _ uiView: MTKView,
-                  context: Context
+                  _ uiView:
+                      MTKView,
+                  context:
+                      Context
               ) {}
           }
 
-          final class Renderer:
+          final class MetalRenderer:
               NSObject,
               MTKViewDelegate {
 
               private var queue:
                   MTLCommandQueue?
 
-              private var frameCount = 0
-              private var lastFPSUpdate =
+              private var frames = 0
+
+              private var lastTime =
                   CACurrentMediaTime()
 
               func setup(
-                  device: MTLDevice
+                  device:
+                      MTLDevice
               ) {
+
                   queue =
-                      device.makeCommandQueue()
+                      device
+                          .makeCommandQueue()
               }
 
               func mtkView(
-                  _ view: MTKView,
-                  drawableSizeWillChange size:
-                      CGSize
+                  _ view:
+                      MTKView,
+                  drawableSizeWillChange
+                      size:
+                          CGSize
               ) {}
 
               func draw(
-                  in view: MTKView
+                  in view:
+                      MTKView
               ) {
+
                   guard
                       let descriptor =
-                          view.currentRenderPassDescriptor,
+                          view
+                              .currentRenderPassDescriptor,
+
                       let drawable =
-                          view.currentDrawable,
-                      let queue = queue,
+                          view
+                              .currentDrawable,
+
+                      let queue,
+
                       let commandBuffer =
-                          queue.makeCommandBuffer()
+                          queue
+                              .makeCommandBuffer()
+
                   else {
                       return
                   }
@@ -471,18 +1951,25 @@ jobs:
                       .colorAttachments[0]
                       .clearColor =
                       MTLClearColor(
-                          red: 0.025,
-                          green: 0.025,
-                          blue: 0.025,
-                          alpha: 1
+                          red:
+                              0.015,
+                          green:
+                              0.015,
+                          blue:
+                              0.015,
+                          alpha:
+                              1
                       )
 
                   if let encoder =
                       commandBuffer
                           .makeRenderCommandEncoder(
-                              descriptor: descriptor
+                              descriptor:
+                                  descriptor
                           ) {
-                      encoder.endEncoding()
+
+                      encoder
+                          .endEncoding()
                   }
 
                   commandBuffer.present(
@@ -491,32 +1978,37 @@ jobs:
 
                   commandBuffer.commit()
 
-                  frameCount += 1
+                  frames += 1
 
                   let now =
                       CACurrentMediaTime()
 
                   let elapsed =
-                      now - lastFPSUpdate
+                      now - lastTime
 
-                  if elapsed >= 1.0 {
-                      let currentFPS =
-                          Double(frameCount)
+                  if elapsed >= 1 {
+
+                      let measuredFPS =
+                          Double(frames)
                           / elapsed
 
-                      frameCount = 0
-                      lastFPSUpdate = now
+                      frames = 0
 
-                      DispatchQueue.main.async {
-                          NotificationCenter
-                              .default
-                              .post(
-                                  name:
-                                      .postalFPSUpdate,
-                                  object:
-                                      currentFPS
-                              )
-                      }
+                      lastTime = now
+
+                      DispatchQueue
+                          .main
+                          .async {
+
+                              NotificationCenter
+                                  .default
+                                  .post(
+                                      name:
+                                          .postalFPS,
+                                      object:
+                                          measuredFPS
+                                  )
+                          }
                   }
               }
           }
@@ -525,7 +2017,10 @@ jobs:
       - name: Generate Xcode project
         run: |
           set -e
+
           xcodegen generate
+
+          echo "===== PROJECT CREATED ====="
           ls -la
           ls -la Postal2Native.xcodeproj
 
@@ -547,7 +2042,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             build
 
-      - name: Create unsigned IPA
+      - name: Create IPA
         run: |
           set -euo pipefail
 
@@ -559,12 +2054,12 @@ jobs:
               -quit
           )"
 
-          echo "APP_PATH=$APP_PATH"
-
           if [ -z "$APP_PATH" ]; then
-            echo "ERROR: app not found"
+            echo "ERROR: APP NOT FOUND"
             exit 1
           fi
+
+          echo "APP=$APP_PATH"
 
           rm -rf Payload
           mkdir -p Payload
@@ -573,15 +2068,15 @@ jobs:
 
           /usr/bin/zip \
             -qry \
-            Postal2Native-unsigned.ipa \
+            Postal2Native-BridgeParser.ipa \
             Payload
 
           ls -lh \
-            Postal2Native-unsigned.ipa
+            Postal2Native-BridgeParser.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Postal2Native-ImportFiles-IPA
-          path: Postal2Native-unsigned.ipa
+          name: Postal2Native-BridgeParser-IPA
+          path: Postal2Native-BridgeParser.ipa
           if-no-files-found: error
