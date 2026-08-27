@@ -1,68 +1,36 @@
-name: Build POSTAL 2 Native iOS
+name: Postal2Native
 
-on:
-  workflow_dispatch:
+options:
+  bundleIdPrefix: com.postal2ios
+  deploymentTarget:
+    iOS: "17.0"
 
-permissions:
-  contents: read
+targets:
+  Postal2Native:
+    type: application
+    platform: iOS
 
-jobs:
-  build:
-    runs-on: macos-latest
-    timeout-minutes: 30
+    deploymentTarget: "17.0"
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    sources:
+      - Postal2Native/Sources
 
-      - name: Install XcodeGen
-        run: |
-          set -e
-          brew install xcodegen
-          xcodebuild -version
-          xcodegen --version
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.postal2ios.native
+        PRODUCT_NAME: Postal2Native
 
-      - name: Generate Xcode project
-        run: |
-          set -e
-          xcodegen generate
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: "POSTAL 2 iOS"
+        INFOPLIST_KEY_UIRequiresFullScreen: YES
 
-      - name: Build native ARM64 app
-        run: |
-          set -euo pipefail
-          rm -rf build
+        TARGETED_DEVICE_FAMILY: "1"
 
-          xcodebuild \
-            -project Postal2Native.xcodeproj \
-            -scheme Postal2Native \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination "generic/platform=iOS" \
-            -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            build
+        ARCHS: arm64
+        ONLY_ACTIVE_ARCH: NO
 
-      - name: Create unsigned IPA
-        run: |
-          set -euo pipefail
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
 
-          APP_PATH="$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' -print -quit)"
-
-          if [ -z "$APP_PATH" ]; then
-            echo "ERROR: .app not found"
-            exit 1
-          fi
-
-          rm -rf Payload
-          mkdir -p Payload
-          cp -R "$APP_PATH" Payload/
-
-          /usr/bin/zip -qry Postal2Native-unsigned.ipa Payload
-
-      - name: Upload IPA
-        uses: actions/upload-artifact@v4
-        with:
-          name: Postal2Native-unsigned-IPA
-          path: Postal2Native-unsigned.ipa
+    scheme:
+      gatherCoverageData: false
