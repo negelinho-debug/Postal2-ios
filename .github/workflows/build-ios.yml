@@ -1,4 +1,4 @@
-name: POSTAL 2 Full Data iOS FIXED Importer
+name: POSTAL 2 Full Data iOS FIXED Importer v2
 
 on:
   workflow_dispatch:
@@ -125,42 +125,74 @@ jobs:
 
           @main
           struct Postal2App: App {
+
               var body: some Scene {
+
                   WindowGroup {
+
                       ContentView()
-                          .preferredColorScheme(.dark)
+                          .preferredColorScheme(
+                              .dark
+                          )
                   }
               }
           }
 
+          // =====================================================
+          // FILE COUNTERS
+          // =====================================================
+
           struct PostalCounts {
+
               var maps = 0
+
               var staticMeshes = 0
+
               var textures = 0
+
               var animations = 0
+
               var scripts = 0
+
               var sounds = 0
+
               var music = 0
+
               var configs = 0
+
               var total = 0
           }
 
+          // =====================================================
+          // MAIN VIEW
+          // =====================================================
+
           struct ContentView: View {
 
-              @State private var showImporter = false
-              @State private var importing = false
+              @State private var showImporter =
+                  false
+
+              @State private var importing =
+                  false
 
               @State private var status =
                   "Import the full POSTAL 2 folder"
 
-              @State private var errorText: String? = nil
-              @State private var progressText = ""
+              @State private var errorText:
+                  String? = nil
+
+              @State private var progressText =
+                  ""
 
               @State private var counts =
                   PostalCounts()
 
               private let fm =
                   FileManager.default
+
+              // =================================================
+              // UI
+              // =================================================
 
               var body: some View {
 
@@ -187,9 +219,18 @@ jobs:
                               .secondary
                           )
 
+                          // =====================================
+                          // IMPORT BUTTON
+                          // =====================================
+
                           Button {
-                              errorText = nil
-                              showImporter = true
+
+                              errorText =
+                                  nil
+
+                              showImporter =
+                                  true
+
                           } label: {
 
                               HStack {
@@ -218,6 +259,10 @@ jobs:
                               importing
                           )
 
+                          // =====================================
+                          // IMPORT PROGRESS
+                          // =====================================
+
                           if importing {
 
                               ProgressView()
@@ -242,13 +287,19 @@ jobs:
 
                           Divider()
 
+                          // =====================================
+                          // PACKAGE COUNTS
+                          // =====================================
+
                           VStack(
                               spacing: 8
                           ) {
 
                               StatRow(
-                                  title: "Maps",
-                                  ext: ".fuk",
+                                  title:
+                                      "Maps",
+                                  ext:
+                                      ".fuk",
                                   value:
                                       counts.maps
                               )
@@ -256,7 +307,8 @@ jobs:
                               StatRow(
                                   title:
                                       "StaticMeshes",
-                                  ext: ".usx",
+                                  ext:
+                                      ".usx",
                                   value:
                                       counts.staticMeshes
                               )
@@ -264,7 +316,8 @@ jobs:
                               StatRow(
                                   title:
                                       "Textures",
-                                  ext: ".utx",
+                                  ext:
+                                      ".utx",
                                   value:
                                       counts.textures
                               )
@@ -272,7 +325,8 @@ jobs:
                               StatRow(
                                   title:
                                       "Animations",
-                                  ext: ".ukx",
+                                  ext:
+                                      ".ukx",
                                   value:
                                       counts.animations
                               )
@@ -280,7 +334,8 @@ jobs:
                               StatRow(
                                   title:
                                       "Scripts",
-                                  ext: ".u",
+                                  ext:
+                                      ".u",
                                   value:
                                       counts.scripts
                               )
@@ -288,7 +343,8 @@ jobs:
                               StatRow(
                                   title:
                                       "Sounds",
-                                  ext: ".uax / wav",
+                                  ext:
+                                      ".uax / wav",
                                   value:
                                       counts.sounds
                               )
@@ -296,7 +352,8 @@ jobs:
                               StatRow(
                                   title:
                                       "Music",
-                                  ext: ".ogg / mp3",
+                                  ext:
+                                      ".ogg / mp3",
                                   value:
                                       counts.music
                               )
@@ -304,13 +361,18 @@ jobs:
                               StatRow(
                                   title:
                                       "Configs",
-                                  ext: ".ini / int",
+                                  ext:
+                                      ".ini / int",
                                   value:
                                       counts.configs
                               )
                           }
 
                           Divider()
+
+                          // =====================================
+                          // TOTAL FILES
+                          // =====================================
 
                           HStack {
 
@@ -330,6 +392,10 @@ jobs:
                                   .bold
                               )
                           }
+
+                          // =====================================
+                          // STATUS
+                          // =====================================
 
                           Text(
                               status
@@ -394,6 +460,11 @@ jobs:
                           20
                       )
                   }
+
+                  // =============================================
+                  // FOLDER IMPORTER
+                  // =============================================
+
                   .fileImporter(
                       isPresented:
                           $showImporter,
@@ -433,17 +504,27 @@ jobs:
                           )
                       }
                   }
+
+                  // =============================================
+                  // FIND EXISTING IMPORT
+                  // =============================================
+
                   .onAppear {
 
                       scanExistingImport()
                   }
               }
 
+              // =================================================
+              // BEGIN IMPORT
+              // =================================================
+
               private func beginImport(
                   _ source: URL
               ) {
 
-                  importing = true
+                  importing =
+                      true
 
                   status =
                       "Reading POSTAL 2 folder…"
@@ -457,12 +538,9 @@ jobs:
                   counts =
                       PostalCounts()
 
-                  /*
-                   Security-scoped access is the important fix.
-
-                   Without this, iOS may return the selected folder
-                   but deny recursive access immediately afterwards.
-                  */
+                  // =============================================
+                  // SECURITY SCOPED ACCESS
+                  // =============================================
 
                   let accessGranted =
                       source
@@ -542,14 +620,20 @@ jobs:
                   }
               }
 
+              // =================================================
+              // IMPORT FOLDER
+              // =================================================
+
               private func importFolder(
                   _ source: URL
               ) throws -> PostalCounts {
 
                   guard let documents =
                       fm.urls(
-                          for: .documentDirectory,
-                          in: .userDomainMask
+                          for:
+                              .documentDirectory,
+                          in:
+                              .userDomainMask
                       ).first
                   else {
 
@@ -558,6 +642,10 @@ jobs:
                               "Documents directory unavailable"
                       )
                   }
+
+                  // =============================================
+                  // DESTINATION
+                  // =============================================
 
                   let destination =
                       documents
@@ -569,7 +657,8 @@ jobs:
 
                   try fm
                       .createDirectory(
-                          at: destination,
+                          at:
+                              destination,
                           withIntermediateDirectories:
                               true
                       )
@@ -578,17 +667,22 @@ jobs:
                       [URLResourceKey] = [
 
                           .isDirectoryKey,
+
                           .isRegularFileKey,
+
                           .fileSizeKey
                       ]
 
                   guard let enumerator =
                       fm.enumerator(
-                          at: source,
+                          at:
+                              source,
                           includingPropertiesForKeys:
                               keys,
                           options: [
+
                               .skipsHiddenFiles,
+
                               .skipsPackageDescendants
                           ]
                       )
@@ -609,31 +703,51 @@ jobs:
                   var scanned =
                       0
 
+                  // =============================================
+                  // POSTAL 2 FILE TYPES
+                  // =============================================
+
                   let allowedExtensions:
                       Set<String> = [
 
                           "fuk",
+
                           "usx",
+
                           "utx",
+
                           "ukx",
+
                           "u",
+
                           "uax",
 
                           "wav",
+
                           "ogg",
+
                           "mp3",
 
                           "ini",
+
                           "int",
 
                           "bmp",
+
                           "tga",
+
                           "png",
+
                           "jpg",
+
                           "jpeg",
 
                           "txt"
                       ]
+
+                  // =============================================
+                  // WALK DIRECTORY
+                  // =============================================
 
                   while let item =
                       enumerator.nextObject()
@@ -648,7 +762,8 @@ jobs:
                                       Set(keys)
                               )
 
-                      if values?.isDirectory ==
+                      if values?
+                          .isDirectory ==
                           true {
 
                           continue
@@ -668,16 +783,17 @@ jobs:
                           .lowercased()
 
                       guard allowedExtensions
-                          .contains(ext)
+                          .contains(
+                              ext
+                          )
                       else {
 
                           continue
                       }
 
-                      /*
-                       Preserve directory structure relative
-                       to selected POSTAL 2 root.
-                      */
+                      // =========================================
+                      // KEEP ORIGINAL DIRECTORY STRUCTURE
+                      // =========================================
 
                       let sourceRoot =
                           source
@@ -726,10 +842,15 @@ jobs:
 
                       try fm
                           .createDirectory(
-                              at: parent,
+                              at:
+                                  parent,
                               withIntermediateDirectories:
                                   true
                           )
+
+                      // =========================================
+                      // REPLACE EXISTING FILE
+                      // =========================================
 
                       if fm
                           .fileExists(
@@ -739,14 +860,21 @@ jobs:
 
                           try fm
                               .removeItem(
-                                  at: target
+                                  at:
+                                      target
                               )
                       }
 
+                      // =========================================
+                      // COPY FILE
+                      // =========================================
+
                       try fm
                           .copyItem(
-                              at: item,
-                              to: target
+                              at:
+                                  item,
+                              to:
+                                  target
                           )
 
                       copied += 1
@@ -758,10 +886,17 @@ jobs:
                               &result
                       )
 
+                      // =========================================
+                      // UPDATE PROGRESS
+                      // =========================================
+
                       if copied % 25 == 0 {
 
-                          let c = copied
-                          let s = scanned
+                          let c =
+                              copied
+
+                          let s =
+                              scanned
 
                           DispatchQueue.main.async {
 
@@ -784,6 +919,10 @@ jobs:
 
                   return result
               }
+
+              // =================================================
+              // CLASSIFY POSTAL FILE
+              // =================================================
 
               private func classify(
                   extensionName ext:
@@ -835,12 +974,18 @@ jobs:
                   }
               }
 
+              // =================================================
+              // SCAN EXISTING IMPORT
+              // =================================================
+
               private func scanExistingImport() {
 
                   guard let documents =
                       fm.urls(
-                          for: .documentDirectory,
-                          in: .userDomainMask
+                          for:
+                              .documentDirectory,
+                          in:
+                              .userDomainMask
                       ).first
                   else {
 
@@ -866,12 +1011,14 @@ jobs:
                   }
 
                   DispatchQueue.global(
-                      qos: .utility
+                      qos:
+                          .utility
                   ).async {
 
                       guard let enumerator =
                           fm.enumerator(
-                              at: root,
+                              at:
+                                  root,
                               includingPropertiesForKeys:
                                   [.isRegularFileKey],
                               options:
@@ -943,6 +1090,10 @@ jobs:
                   }
               }
 
+              // =================================================
+              // ERROR
+              // =================================================
+
               private func fail(
                   _ text: String
               ) {
@@ -958,11 +1109,20 @@ jobs:
               }
           }
 
+          // =====================================================
+          // STAT ROW
+          // =====================================================
+
           struct StatRow: View {
 
-              let title: String
-              let ext: String
-              let value: Int
+              let title:
+                  String
+
+              let ext:
+                  String
+
+              let value:
+                  Int
 
               var body: some View {
 
@@ -971,7 +1131,8 @@ jobs:
                       VStack(
                           alignment:
                               .leading,
-                          spacing: 2
+                          spacing:
+                              2
                       ) {
 
                           Text(
@@ -994,8 +1155,26 @@ jobs:
                       Text(
                           "\(value)"
                       )
+
+                      // =========================================
+                      // FIXED:
+                      //
+                      // OLD:
+                      //
+                      // .system(
+                      //     design: .monospaced
+                      // )
+                      //
+                      // caused:
+                      //
+                      // missing argument for parameter #1
+                      //
+                      // NEW:
+                      // =========================================
+
                       .font(
                           .system(
+                              .body,
                               design:
                                   .monospaced
                           )
@@ -1003,6 +1182,10 @@ jobs:
                   }
               }
           }
+
+          // =====================================================
+          // IMPORT ERROR
+          // =====================================================
 
           struct ImportError:
               LocalizedError {
@@ -1017,6 +1200,10 @@ jobs:
               }
           }
           SWIFT
+
+          # ======================================================
+          # INFO.PLIST
+          # ======================================================
 
           cat > Postal2iOS/Sources/Info.plist <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
@@ -1041,9 +1228,19 @@ jobs:
 
               <key>UISupportedInterfaceOrientations</key>
               <array>
-                  <string>UIInterfaceOrientationLandscapeLeft</string>
-                  <string>UIInterfaceOrientationLandscapeRight</string>
-                  <string>UIInterfaceOrientationPortrait</string>
+
+                  <string>
+                  UIInterfaceOrientationLandscapeLeft
+                  </string>
+
+                  <string>
+                  UIInterfaceOrientationLandscapeRight
+                  </string>
+
+                  <string>
+                  UIInterfaceOrientationPortrait
+                  </string>
+
               </array>
 
               <key>UILaunchScreen</key>
@@ -1067,12 +1264,57 @@ jobs:
           xcodegen generate
 
           echo
-          echo "===== PROJECT ====="
+          echo "======================================"
+          echo "PROJECT GENERATED"
+          echo "======================================"
 
           find . \
             -maxdepth 2 \
             -type f \
             -print
+
+      # ==========================================================
+      # CHECK SWIFT SOURCE BEFORE BUILD
+      # ==========================================================
+
+      - name: Verify importer source
+        shell: bash
+        run: |
+          set -e
+
+          SWIFT="$GITHUB_WORKSPACE/Postal2iOS/Sources/Postal2App.swift"
+
+          test -f "$SWIFT"
+
+          echo
+          echo "======================================"
+          echo "IMPORTER SOURCE CHECK"
+          echo "======================================"
+
+          grep -n \
+            "fileImporter" \
+            "$SWIFT"
+
+          grep -n \
+            "startAccessingSecurityScopedResource" \
+            "$SWIFT"
+
+          grep -n \
+            "Postal2FullData" \
+            "$SWIFT"
+
+          grep -n \
+            "Imported" \
+            "$SWIFT"
+
+          grep -n \
+            "design:" \
+            "$SWIFT"
+
+          echo
+          echo "======================================"
+          echo "SOURCE READY"
+          echo "======================================"
 
       # ==========================================================
       # BUILD
@@ -1090,6 +1332,11 @@ jobs:
 
           mkdir -p \
             "$GITHUB_WORKSPACE/build"
+
+          echo
+          echo "======================================"
+          echo "BUILDING POSTAL 2 iOS ARM64"
+          echo "======================================"
 
           xcodebuild \
             -project Postal2iOS.xcodeproj \
@@ -1123,7 +1370,7 @@ jobs:
               "error:|fatal error:" \
               "$GITHUB_WORKSPACE/build/xcodebuild.log" \
               | tail \
-                  -150 \
+                  -200 \
               || true
 
             echo
@@ -1156,7 +1403,9 @@ jobs:
 
           if [ -z "$APP" ]; then
 
+            echo
             echo "ERROR: Postal2iOS.app not found"
+
             exit 1
           fi
 
@@ -1164,10 +1413,45 @@ jobs:
             >> "$GITHUB_ENV"
 
           echo
-          echo "APP:"
+          echo "======================================"
+          echo "APP FOUND"
+          echo "======================================"
+
           echo "$APP"
 
-          du -sh "$APP"
+          du \
+            -sh \
+            "$APP"
+
+      # ==========================================================
+      # CHECK ARM64
+      # ==========================================================
+
+      - name: Verify ARM64 binary
+        shell: bash
+        run: |
+          set -e
+
+          BIN="$APP_PATH/Postal2iOS"
+
+          test -f "$BIN"
+
+          echo
+          echo "======================================"
+          echo "BINARY"
+          echo "======================================"
+
+          file "$BIN"
+
+          echo
+          echo "======================================"
+          echo "ARCHITECTURE"
+          echo "======================================"
+
+          lipo \
+            -info \
+            "$BIN" \
+            || true
 
       # ==========================================================
       # CREATE IPA
@@ -1193,16 +1477,20 @@ jobs:
 
           zip \
             -qry \
-            "POSTAL-2-iOS-FullData-Importer-FIXED.ipa" \
+            "POSTAL-2-iOS-FullData-Importer-FIXED-v2.ipa" \
             Payload
 
-          rm -rf Payload
+          rm -rf \
+            Payload
 
           echo
-          echo "===== IPA ====="
+          echo "======================================"
+          echo "IPA CREATED"
+          echo "======================================"
 
-          ls -lh \
-            POSTAL-2-iOS-FullData-Importer-FIXED.ipa
+          ls \
+            -lh \
+            POSTAL-2-iOS-FullData-Importer-FIXED-v2.ipa
 
       # ==========================================================
       # VERIFY IPA
@@ -1213,31 +1501,64 @@ jobs:
         run: |
           set -e
 
-          IPA="$GITHUB_WORKSPACE/output/POSTAL-2-iOS-FullData-Importer-FIXED.ipa"
+          IPA="$GITHUB_WORKSPACE/output/POSTAL-2-iOS-FullData-Importer-FIXED-v2.ipa"
 
           test -f "$IPA"
-
-          echo
-          echo "===== IPA CONTENTS ====="
-
-          unzip -l "$IPA" \
-            | head -50
-
-          echo
-          echo "===== BUNDLE ID ====="
 
           TMP="$RUNNER_TEMP/postal2-ipa"
 
           rm -rf "$TMP"
+
           mkdir -p "$TMP"
 
-          unzip -q \
+          unzip \
+            -q \
             "$IPA" \
             -d "$TMP"
 
+          APP="$TMP/Payload/POSTAL2.app"
+
+          test -d "$APP"
+
+          echo
+          echo "======================================"
+          echo "BUNDLE ID"
+          echo "======================================"
+
           /usr/libexec/PlistBuddy \
             -c "Print :CFBundleIdentifier" \
-            "$TMP/Payload/POSTAL2.app/Info.plist"
+            "$APP/Info.plist"
+
+          echo
+          echo "======================================"
+          echo "FILE SHARING"
+          echo "======================================"
+
+          /usr/libexec/PlistBuddy \
+            -c "Print :UIFileSharingEnabled" \
+            "$APP/Info.plist" \
+            || true
+
+          echo
+          echo "======================================"
+          echo "OPEN DOCUMENTS IN PLACE"
+          echo "======================================"
+
+          /usr/libexec/PlistBuddy \
+            -c "Print :LSSupportsOpeningDocumentsInPlace" \
+            "$APP/Info.plist" \
+            || true
+
+          echo
+          echo "======================================"
+          echo "IPA CONTENTS"
+          echo "======================================"
+
+          unzip \
+            -l \
+            "$IPA" \
+            | head \
+                -60
 
       # ==========================================================
       # README
@@ -1248,70 +1569,191 @@ jobs:
         run: |
           set -e
 
-          cat > "$GITHUB_WORKSPACE/output/README.txt" <<'EOF'
+          cat > \
+            "$GITHUB_WORKSPACE/output/README.txt" \
+            <<'EOF'
           POSTAL 2 iOS
-          FULL DATA IMPORTER FIXED
-          ========================
+          FULL DATA IMPORTER FIXED v2
+          ===========================
 
-          This build fixes the iOS folder picker.
+          CURRENT STAGE
+          -------------
+
+          POSTAL 2 full-data importer.
+
+          This build does NOT yet run the complete POSTAL 2 game.
+
+          Its job is to import and preserve the original POSTAL 2
+          game-data directory on iOS so the next native-runtime
+          stages can use it.
+
 
           HOW TO IMPORT
+          -------------
 
-          1. Open POSTAL 2.
+          1. Install the IPA.
 
-          2. Press:
+          2. Open POSTAL 2.
+
+          3. Press:
+
              Import POSTAL 2 Folder
 
-          3. In Files, find the MAIN POSTAL 2 folder.
+          4. iOS Files opens.
 
-          4. The selected folder should contain folders/files such as:
+          5. Select ONE MAIN POSTAL 2 folder.
+
+          It should contain data such as:
 
              Maps
+
              StaticMeshes
+
              Textures
+
              Animations
+
              Sounds
+
              Music
+
              System
 
-          5. Press Open.
 
-          6. The app should IMMEDIATELY show:
+          6. Press Open.
 
-             Reading POSTAL 2 folder...
 
-          7. Then it will copy and count the game files.
+          EXPECTED RESULT
+          ---------------
+
+          The app immediately displays:
+
+             Reading POSTAL 2 folder…
+
+          Then the file counter starts increasing.
+
+          Example:
+
+             Imported 25 files
+
+             Imported 50 files
+
+             Imported 75 files
+
+
+          PACKAGE TYPES
+          -------------
+
+          Maps
+          .fuk
+
+          Static meshes
+          .usx
+
+          Textures
+          .utx
+
+          Animations
+          .ukx
+
+          Scripts
+          .u
+
+          Sounds
+          .uax
+          .wav
+
+          Music
+          .ogg
+          .mp3
+
+          Config
+          .ini
+          .int
+
+
+          IMPORT LOCATION
+          ---------------
+
+          Imported files are stored inside:
+
+             Documents/Postal2FullData
+
 
           IMPORTANT
+          ---------
 
-          Do NOT select Maps alone.
-          Do NOT select Textures alone.
-          Do NOT import every folder separately.
+          Do NOT select only Maps.
 
-          Select ONE main POSTAL 2 folder.
+          Do NOT select only Textures.
 
-          Imported game data is stored in:
+          Do NOT import each folder one by one.
 
-          Documents/Postal2FullData
+          Select the MAIN POSTAL 2 folder once.
 
-          Bundle ID remains:
 
-          com.postal2ios.native
+          FIX IN v2
+          ---------
 
-          so installing over the previous test build should keep
-          existing app Documents when your signing method allows it.
+          Fixed Swift compiler error:
 
-          This is still the DATA IMPORT stage.
+             missing argument for parameter #1 in call
 
-          It is NOT yet the complete playable POSTAL 2 runtime.
+          Old invalid font call:
 
-          Next stage after successful import:
+             .system(
+                 design: .monospaced
+             )
 
-          load all package dependencies and reconstruct the Bridge
-          map automatically from imported POSTAL 2 data.
+          New valid font call:
+
+             .system(
+                 .body,
+                 design: .monospaced
+             )
+
+
+          BUNDLE
+          ------
+
+          Bundle ID:
+
+             com.postal2ios.native
+
+
+          PLATFORM
+          --------
+
+          iPhone ARM64
+
+          Minimum iOS:
+
+             iOS 15
+
+
+          NEXT STAGE
+          ----------
+
+          After full-data import works correctly:
+
+          package indexing
+
+          Unreal package reader
+
+          map dependency resolution
+
+          Bridge map loading
+
+          rendering
+
+          controls
+
+          gameplay runtime
+
 
           IPA is unsigned.
-          Re-sign it with your normal sideloading method.
+
+          Re-sign with your normal iOS sideloading method.
           EOF
 
       # ==========================================================
@@ -1321,9 +1763,9 @@ jobs:
       - name: Upload POSTAL 2 IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Postal2Native-FullData-Importer-FIXED
+          name: Postal2Native-FullData-Importer-FIXED-v2
           path: |
-            output/POSTAL-2-iOS-FullData-Importer-FIXED.ipa
+            output/POSTAL-2-iOS-FullData-Importer-FIXED-v2.ipa
             output/README.txt
           if-no-files-found: error
           retention-days: 7
@@ -1336,7 +1778,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: Postal2Native-FullData-Importer-FIXED-failed
+          name: Postal2Native-FullData-Importer-FIXED-v2-failed
           path: |
             Postal2iOS/project.yml
             Postal2iOS/Sources/Postal2App.swift
