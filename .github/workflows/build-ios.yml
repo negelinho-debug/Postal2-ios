@@ -1,4 +1,4 @@
-name: Build POSTAL 2 Native iOS
+name: Build POSTAL 2 Full Data iOS
 
 on:
   workflow_dispatch:
@@ -32,9 +32,6 @@ jobs:
           cat > project.yml <<'EOF'
           name: Postal2Native
 
-          options:
-            bundleIdPrefix: com.postal2ios
-
           targets:
             Postal2Native:
               type: application
@@ -48,468 +45,857 @@ jobs:
                 base:
                   PRODUCT_BUNDLE_IDENTIFIER: com.postal2ios.native
                   PRODUCT_NAME: Postal2Native
+
                   GENERATE_INFOPLIST_FILE: YES
                   INFOPLIST_KEY_CFBundleDisplayName: "POSTAL 2 iOS"
                   INFOPLIST_KEY_UILaunchScreen_Generation: YES
+
                   TARGETED_DEVICE_FAMILY: "1"
+
                   ARCHS: arm64
                   ONLY_ACTIVE_ARCH: NO
+
                   CODE_SIGNING_ALLOWED: NO
                   CODE_SIGNING_REQUIRED: NO
                   CODE_SIGN_IDENTITY: ""
           EOF
 
           cat > Postal2Native/Sources/Postal2NativeApp.swift <<'EOF'
-          import Foundation
           import SwiftUI
           import UIKit
           import UniformTypeIdentifiers
-          import MetalKit
-          import QuartzCore
-          import Combine
-          import simd
-
-          extension Notification.Name {
-              static let postalFPS =
-                  Notification.Name("postalFPS")
-
-              static let postalMeshStatus =
-                  Notification.Name("postalMeshStatus")
-
-              static let postalReloadMesh =
-                  Notification.Name("postalReloadMesh")
-
-              static let postalNextMesh =
-                  Notification.Name("postalNextMesh")
-          }
 
           @main
           struct Postal2NativeApp: App {
               var body: some Scene {
                   WindowGroup {
-                      ContentView()
+                      GameDataView()
                           .preferredColorScheme(.dark)
                   }
               }
           }
 
-          struct MeshStatus {
-              let title: String
-              let detail: String
-              let success: Bool
+          struct GameIndex {
+              var maps: [URL] = []
+              var textures: [URL] = []
+              var meshes: [URL] = []
+              var animations: [URL] = []
+              var scripts: [URL] = []
+              var sounds: [URL] = []
+              var music: [URL] = []
+
+              var total: Int {
+                  maps.count +
+                  textures.count +
+                  meshes.count +
+                  animations.count +
+                  scripts.count +
+                  sounds.count +
+                  music.count
+              }
           }
 
-          struct ContentView: View {
+          struct GameDataView: View {
 
-              @State private var fps: Double = 0
+              @State private var showFolderPicker = false
+
               @State private var status =
-                  "Loading original POSTAL 2 StaticMesh..."
-              @State private var meshName = "Waiting..."
-              @State private var detail = ""
-              @State private var success = false
-              @State private var showImporter = false
-              @State private var files: [String] = []
+                  "Import the full POSTAL 2 folder"
+
+              @State private var index =
+                  GameIndex()
+
+              @State private var importing = false
+
+              @State private var gameReady = false
 
               var body: some View {
 
                   ZStack {
 
-                      BridgeMetalView()
+                      Color.black
                           .ignoresSafeArea()
 
-                      VStack {
+                      ScrollView {
 
-                          VStack(spacing: 10) {
+                          VStack(
+                              alignment: .leading,
+                              spacing: 18
+                          ) {
 
                               HStack {
 
                                   VStack(
-                                      alignment: .leading,
-                                      spacing: 3
+                                      alignment: .leading
                                   ) {
 
                                       Text("POSTAL 2 iOS")
-                                          .font(.title2.bold())
-
-                                      Text("Native ARM64 • Metal")
-                                          .font(.caption)
+                                          .font(
+                                              .largeTitle.bold()
+                                          )
 
                                       Text(
-                                          String(
-                                              format: "FPS %.0f",
-                                              fps
-                                          )
+                                          "Native ARM64 runtime"
                                       )
-                                      .font(
-                                          .caption
-                                              .monospacedDigit()
+                                      .foregroundStyle(
+                                          .secondary
                                       )
                                   }
 
                                   Spacer()
-
-                                  Button {
-                                      showImporter = true
-                                  } label: {
-
-                                      Text("Import Files")
-                                          .bold()
-                                          .padding(.horizontal, 14)
-                                          .padding(.vertical, 10)
-                                          .background(
-                                              Color.white.opacity(0.18)
-                                          )
-                                          .clipShape(
-                                              RoundedRectangle(
-                                                  cornerRadius: 12
-                                              )
-                                          )
-                                  }
                               }
 
-                              HStack {
+                              Button {
 
-                                  Button {
+                                  showFolderPicker =
+                                      true
 
-                                      NotificationCenter
-                                          .default
-                                          .post(
-                                              name: .postalReloadMesh,
-                                              object: nil
-                                          )
-
-                                  } label: {
-
-                                      Text("Reload Mesh")
-                                          .bold()
-                                          .frame(
-                                              maxWidth: .infinity
-                                          )
-                                          .padding(.vertical, 11)
-                                          .background(
-                                              Color.white.opacity(0.16)
-                                          )
-                                          .clipShape(
-                                              RoundedRectangle(
-                                                  cornerRadius: 11
-                                              )
-                                          )
-                                  }
-
-                                  Button {
-
-                                      NotificationCenter
-                                          .default
-                                          .post(
-                                              name: .postalNextMesh,
-                                              object: nil
-                                          )
-
-                                  } label: {
-
-                                      Text("Next Mesh")
-                                          .bold()
-                                          .frame(
-                                              maxWidth: .infinity
-                                          )
-                                          .padding(.vertical, 11)
-                                          .background(
-                                              Color.white.opacity(0.16)
-                                          )
-                                          .clipShape(
-                                              RoundedRectangle(
-                                                  cornerRadius: 11
-                                              )
-                                          )
-                                  }
-                              }
-
-                              VStack(
-                                  alignment: .leading,
-                                  spacing: 4
-                              ) {
+                              } label: {
 
                                   HStack {
 
-                                      Text(success ? "✓" : "•")
-                                          .foregroundStyle(
-                                              success
-                                                  ? Color.green
-                                                  : Color.yellow
-                                          )
+                                      if importing {
 
-                                      Text(meshName)
-                                          .bold()
+                                          ProgressView()
+                                              .tint(
+                                                  .white
+                                              )
+                                      }
+
+                                      Text(
+                                          importing
+                                              ? "Importing..."
+                                              : "Import POSTAL 2 Folder"
+                                      )
+                                      .bold()
+                                  }
+                                  .frame(
+                                      maxWidth: .infinity
+                                  )
+                                  .padding(
+                                      .vertical,
+                                      16
+                                  )
+                                  .background(
+                                      Color.white
+                                          .opacity(
+                                              0.16
+                                          )
+                                  )
+                                  .clipShape(
+                                      RoundedRectangle(
+                                          cornerRadius: 14
+                                      )
+                                  )
+                              }
+                              .disabled(importing)
+
+                              VStack(
+                                  alignment: .leading,
+                                  spacing: 10
+                              ) {
+
+                                  Text("GAME DATA")
+                                      .font(
+                                          .headline
+                                      )
+
+                                  dataLine(
+                                      "Maps",
+                                      index.maps.count,
+                                      ".fuk"
+                                  )
+
+                                  dataLine(
+                                      "StaticMeshes",
+                                      index.meshes.count,
+                                      ".usx"
+                                  )
+
+                                  dataLine(
+                                      "Textures",
+                                      index.textures.count,
+                                      ".utx"
+                                  )
+
+                                  dataLine(
+                                      "Animations",
+                                      index.animations.count,
+                                      ".ukx"
+                                  )
+
+                                  dataLine(
+                                      "Scripts",
+                                      index.scripts.count,
+                                      ".u"
+                                  )
+
+                                  dataLine(
+                                      "Sounds",
+                                      index.sounds.count,
+                                      ".uax / wav"
+                                  )
+
+                                  dataLine(
+                                      "Music",
+                                      index.music.count,
+                                      "audio"
+                                  )
+
+                                  Divider()
+
+                                  HStack {
+
+                                      Text(
+                                          "TOTAL FILES"
+                                      )
+                                      .bold()
+
+                                      Spacer()
+
+                                      Text(
+                                          "\(index.total)"
+                                      )
+                                      .bold()
                                   }
 
-                                  Text(status)
+                              }
+                              .padding()
+                              .background(
+                                  Color.white
+                                      .opacity(
+                                          0.07
+                                      )
+                              )
+                              .clipShape(
+                                  RoundedRectangle(
+                                      cornerRadius: 14
+                                  )
+                              )
 
-                                  if !detail.isEmpty {
-                                      Text(detail)
-                                          .foregroundStyle(
-                                              Color.secondary
+                              Text(status)
+                                  .font(.caption)
+                                  .foregroundStyle(
+                                      gameReady
+                                          ? Color.green
+                                          : Color.secondary
+                                  )
+
+                              if !index.maps.isEmpty {
+
+                                  VStack(
+                                      alignment: .leading,
+                                      spacing: 8
+                                  ) {
+
+                                      Text(
+                                          "MAPS FOUND"
+                                      )
+                                      .font(
+                                          .headline
+                                      )
+
+                                      ForEach(
+                                          Array(
+                                              index.maps
+                                                  .prefix(
+                                                      50
+                                                  )
+                                          ),
+                                          id: \.path
+                                      ) {
+                                          url in
+
+                                          Text(
+                                              "✓ \(url.lastPathComponent)"
                                           )
+                                          .font(
+                                              .caption
+                                          )
+                                      }
+
+                                      if index.maps.count > 50 {
+
+                                          Text(
+                                              "+ \(index.maps.count - 50) more maps"
+                                          )
+                                          .font(
+                                              .caption
+                                          )
+                                          .foregroundStyle(
+                                              .secondary
+                                          )
+                                      }
+                                  }
+                                  .padding()
+                                  .frame(
+                                      maxWidth:
+                                          .infinity,
+                                      alignment:
+                                          .leading
+                                  )
+                                  .background(
+                                      Color.white
+                                          .opacity(
+                                              0.07
+                                          )
+                                  )
+                                  .clipShape(
+                                      RoundedRectangle(
+                                          cornerRadius:
+                                              14
+                                      )
+                                  )
+                              }
+
+                              if gameReady {
+
+                                  Button {
+
+                                      status =
+                                          "Game data ready. Next build: full map runtime."
+
+                                  } label: {
+
+                                      Text(
+                                          "POSTAL 2 DATA READY ✓"
+                                      )
+                                      .bold()
+                                      .frame(
+                                          maxWidth:
+                                              .infinity
+                                      )
+                                      .padding(
+                                          .vertical,
+                                          16
+                                      )
+                                      .background(
+                                          Color.green
+                                              .opacity(
+                                                  0.25
+                                              )
+                                      )
+                                      .clipShape(
+                                          RoundedRectangle(
+                                              cornerRadius:
+                                                  14
+                                          )
+                                      )
                                   }
                               }
-                              .font(.caption)
-                              .frame(
-                                  maxWidth: .infinity,
-                                  alignment: .leading
-                              )
                           }
-                          .foregroundStyle(Color.white)
                           .padding()
-                          .background(
-                              Color.black.opacity(0.72)
-                          )
-
-                          Spacer()
-
-                          VStack(spacing: 3) {
-
-                              Text(
-                                  "Drag = rotate • Pinch = zoom"
-                              )
-
-                              Text(fileStatusText)
-                          }
-                          .font(.caption)
-                          .foregroundStyle(Color.white)
-                          .padding(10)
-                          .background(
-                              Color.black.opacity(0.65)
-                          )
-                          .clipShape(
-                              RoundedRectangle(
-                                  cornerRadius: 10
-                              )
-                          )
-                          .padding(.bottom, 20)
                       }
                   }
                   .onAppear {
-                      loadFiles()
-                  }
-                  .onReceive(
-                      NotificationCenter
-                          .default
-                          .publisher(
-                              for: .postalFPS
-                          )
-                  ) { note in
-
-                      if let value =
-                          note.object as? Double {
-
-                          fps = value
-                      }
-                  }
-                  .onReceive(
-                      NotificationCenter
-                          .default
-                          .publisher(
-                              for: .postalMeshStatus
-                          )
-                  ) { note in
-
-                      if let value =
-                          note.object as? MeshStatus {
-
-                          meshName = value.title
-                          status = value.detail
-                          success = value.success
-
-                          detail =
-                              value.success
-                                  ? "Original UE2 geometry from Zo_BridgeMeshes.usx"
-                                  : ""
-                      }
+                      scanInstalledData()
                   }
                   .sheet(
-                      isPresented: $showImporter
+                      isPresented:
+                          $showFolderPicker
                   ) {
 
-                      PostalFileImporter {
-                          urls in
+                      FolderPicker {
+                          url in
 
-                          importFiles(urls)
-                          showImporter = false
+                          showFolderPicker =
+                              false
+
+                          guard let url else {
+                              return
+                          }
+
+                          importFolder(
+                              url
+                          )
                       }
                   }
               }
 
-              private var fileStatusText: String {
+              @ViewBuilder
+              private func dataLine(
+                  _ name: String,
+                  _ count: Int,
+                  _ type: String
+              ) -> some View {
 
-                  let hasUSX =
-                      files.contains {
-                          $0.caseInsensitiveCompare(
-                              "Zo_BridgeMeshes.usx"
-                          ) == .orderedSame
-                      }
+                  HStack {
 
-                  let hasMap =
-                      files.contains {
-                          $0.caseInsensitiveCompare(
-                              "Bridge.fuk"
-                          ) == .orderedSame
-                      }
+                      Text(
+                          count > 0
+                              ? "✓"
+                              : "•"
+                      )
+                      .foregroundStyle(
+                          count > 0
+                              ? Color.green
+                              : Color.secondary
+                      )
 
-                  let hasTex =
-                      files.contains {
-                          $0.caseInsensitiveCompare(
-                              "Zo_BridgeTex.utx"
-                          ) == .orderedSame
-                      }
+                      Text(name)
 
-                  return
-                      "USX \(hasUSX ? "✓" : "✕") • FUK \(hasMap ? "✓" : "✕") • UTX \(hasTex ? "✓" : "✕")"
+                      Spacer()
+
+                      Text(
+                          "\(count)"
+                      )
+                      .monospacedDigit()
+
+                      Text(type)
+                          .foregroundStyle(
+                              .secondary
+                          )
+                  }
+                  .font(.caption)
               }
 
-              private func postalDirectory()
+              private func storageDirectory()
                   throws -> URL {
 
                   let documents =
                       FileManager.default.urls(
-                          for: .documentDirectory,
-                          in: .userDomainMask
+                          for:
+                              .documentDirectory,
+                          in:
+                              .userDomainMask
                       )[0]
 
                   let folder =
-                      documents.appendingPathComponent(
-                          "Postal2Data",
-                          isDirectory: true
-                      )
+                      documents
+                          .appendingPathComponent(
+                              "Postal2FullData",
+                              isDirectory: true
+                          )
 
                   try FileManager.default
                       .createDirectory(
                           at: folder,
-                          withIntermediateDirectories: true
+                          withIntermediateDirectories:
+                              true
                       )
 
                   return folder
               }
 
-              private func loadFiles() {
-
-                  do {
-
-                      let folder =
-                          try postalDirectory()
-
-                      files =
-                          try FileManager.default
-                              .contentsOfDirectory(
-                                  atPath: folder.path
-                              )
-                              .sorted()
-
-                  } catch {
-
-                      files = []
-                  }
-              }
-
-              private func importFiles(
-                  _ urls: [URL]
+              private func importFolder(
+                  _ source: URL
               ) {
 
-                  guard !urls.isEmpty
+                  importing = true
+
+                  status =
+                      "Copying POSTAL 2 game data..."
+
+                  DispatchQueue
+                      .global(
+                          qos:
+                              .userInitiated
+                      )
+                      .async {
+
+                          do {
+
+                              let access =
+                                  source
+                                      .startAccessingSecurityScopedResource()
+
+                              defer {
+
+                                  if access {
+
+                                      source
+                                          .stopAccessingSecurityScopedResource()
+                                  }
+                              }
+
+                              let destination =
+                                  try storageDirectory()
+
+                              try copyGameFiles(
+                                  from: source,
+                                  to: destination
+                              )
+
+                              let result =
+                                  try createIndex(
+                                      root:
+                                          destination
+                                  )
+
+                              DispatchQueue
+                                  .main
+                                  .async {
+
+                                      index =
+                                          result
+
+                                      importing =
+                                          false
+
+                                      evaluateGameData()
+                                  }
+
+                          } catch {
+
+                              DispatchQueue
+                                  .main
+                                  .async {
+
+                                      importing =
+                                          false
+
+                                      gameReady =
+                                          false
+
+                                      status =
+                                          "ERROR: \(error.localizedDescription)"
+                                  }
+                          }
+                      }
+              }
+
+              private func copyGameFiles(
+                  from source: URL,
+                  to destination: URL
+              ) throws {
+
+                  let manager =
+                      FileManager.default
+
+                  guard
+                      let enumerator =
+                          manager.enumerator(
+                              at: source,
+                              includingPropertiesForKeys:
+                                  [
+                                      .isDirectoryKey
+                                  ],
+                              options:
+                                  [
+                                      .skipsHiddenFiles
+                                  ]
+                          )
                   else {
-                      return
+
+                      throw NSError(
+                          domain:
+                              "Postal2",
+                          code: 1,
+                          userInfo:
+                              [
+                                  NSLocalizedDescriptionKey:
+                                      "Could not read selected folder"
+                              ]
+                      )
                   }
 
-                  do {
+                  let allowedExtensions:
+                      Set<String> = [
+                          "fuk",
+                          "usx",
+                          "utx",
+                          "ukx",
+                          "u",
+                          "uax",
+                          "wav",
+                          "ogg",
+                          "mp3",
+                          "ini",
+                          "int",
+                          "ka",
+                          "est"
+                      ]
 
-                      let folder =
-                          try postalDirectory()
+                  for case let fileURL
+                      as URL in enumerator {
 
-                      for source in urls {
+                      let values =
+                          try fileURL
+                              .resourceValues(
+                                  forKeys:
+                                      [
+                                          .isDirectoryKey
+                                      ]
+                              )
 
-                          let access =
-                              source
-                                  .startAccessingSecurityScopedResource()
+                      if values.isDirectory
+                          == true {
 
-                          defer {
+                          continue
+                      }
 
-                              if access {
+                      let ext =
+                          fileURL
+                              .pathExtension
+                              .lowercased()
 
-                                  source
-                                      .stopAccessingSecurityScopedResource()
-                              }
-                          }
+                      guard
+                          allowedExtensions
+                              .contains(ext)
+                      else {
 
-                          let destination =
-                              folder
-                                  .appendingPathComponent(
-                                      source.lastPathComponent
-                                  )
+                          continue
+                      }
 
-                          if FileManager.default
-                              .fileExists(
-                                  atPath: destination.path
-                              ) {
+                      let relative =
+                          fileURL.path
+                              .replacingOccurrences(
+                                  of:
+                                      source.path,
+                                  with: ""
+                              )
 
-                              try FileManager.default
-                                  .removeItem(
-                                      at: destination
-                                  )
-                          }
+                      let cleanRelative =
+                          relative
+                              .trimmingCharacters(
+                                  in:
+                                      CharacterSet(
+                                          charactersIn:
+                                              "/"
+                                      )
+                              )
 
-                          try FileManager.default
-                              .copyItem(
-                                  at: source,
-                                  to: destination
+                      let target =
+                          destination
+                              .appendingPathComponent(
+                                  cleanRelative
+                              )
+
+                      let targetFolder =
+                          target
+                              .deletingLastPathComponent()
+
+                      try manager
+                          .createDirectory(
+                              at:
+                                  targetFolder,
+                              withIntermediateDirectories:
+                                  true
+                          )
+
+                      if manager
+                          .fileExists(
+                              atPath:
+                                  target.path
+                          ) {
+
+                          try manager
+                              .removeItem(
+                                  at:
+                                      target
                               )
                       }
 
-                      loadFiles()
-
-                      NotificationCenter
-                          .default
-                          .post(
-                              name: .postalReloadMesh,
-                              object: nil
+                      try manager
+                          .copyItem(
+                              at:
+                                  fileURL,
+                              to:
+                                  target
                           )
+                  }
+              }
+
+              private func scanInstalledData() {
+
+                  do {
+
+                      let root =
+                          try storageDirectory()
+
+                      index =
+                          try createIndex(
+                              root:
+                                  root
+                          )
+
+                      evaluateGameData()
 
                   } catch {
 
                       status =
-                          "Import error: \(error.localizedDescription)"
+                          "No game data imported yet"
+                  }
+              }
 
-                      success = false
+              private func createIndex(
+                  root: URL
+              ) throws -> GameIndex {
+
+                  var result =
+                      GameIndex()
+
+                  guard
+                      let enumerator =
+                          FileManager.default
+                              .enumerator(
+                                  at:
+                                      root,
+                                  includingPropertiesForKeys:
+                                      nil,
+                                  options:
+                                      [
+                                          .skipsHiddenFiles
+                                      ]
+                              )
+                  else {
+
+                      return result
+                  }
+
+                  for case let url
+                      as URL in enumerator {
+
+                      let ext =
+                          url
+                              .pathExtension
+                              .lowercased()
+
+                      switch ext {
+
+                      case "fuk":
+
+                          result.maps.append(
+                              url
+                          )
+
+                      case "usx":
+
+                          result.meshes.append(
+                              url
+                          )
+
+                      case "utx":
+
+                          result.textures.append(
+                              url
+                          )
+
+                      case "ukx":
+
+                          result.animations.append(
+                              url
+                          )
+
+                      case "u":
+
+                          result.scripts.append(
+                              url
+                          )
+
+                      case "uax",
+                           "wav":
+
+                          result.sounds.append(
+                              url
+                          )
+
+                      case "ogg",
+                           "mp3":
+
+                          result.music.append(
+                              url
+                          )
+
+                      default:
+                          break
+                      }
+                  }
+
+                  result.maps.sort {
+                      $0.lastPathComponent
+                          .lowercased()
+                      <
+                      $1.lastPathComponent
+                          .lowercased()
+                  }
+
+                  result.meshes.sort {
+                      $0.lastPathComponent
+                          .lowercased()
+                      <
+                      $1.lastPathComponent
+                          .lowercased()
+                  }
+
+                  result.textures.sort {
+                      $0.lastPathComponent
+                          .lowercased()
+                      <
+                      $1.lastPathComponent
+                          .lowercased()
+                  }
+
+                  return result
+              }
+
+              private func evaluateGameData() {
+
+                  let enoughData =
+                      !index.maps.isEmpty
+                      &&
+                      !index.meshes.isEmpty
+                      &&
+                      !index.textures.isEmpty
+                      &&
+                      !index.scripts.isEmpty
+
+                  gameReady =
+                      enoughData
+
+                  if enoughData {
+
+                      status =
+                          "POSTAL 2 data indexed successfully • \(index.maps.count) maps • \(index.total) game files"
+
+                  } else if index.total > 0 {
+
+                      status =
+                          "Partial game data found. Select the main POSTAL 2 folder."
+
+                  } else {
+
+                      status =
+                          "Import the full POSTAL 2 folder"
                   }
               }
           }
 
-          struct PostalFileImporter:
+          struct FolderPicker:
               UIViewControllerRepresentable {
 
               let completion:
-                  ([URL]) -> Void
+                  (URL?) -> Void
 
               func makeCoordinator()
                   -> Coordinator {
 
                   Coordinator(
-                      completion: completion
+                      completion:
+                          completion
                   )
               }
 
               func makeUIViewController(
                   context: Context
-              ) -> UIDocumentPickerViewController {
+              )
+                  -> UIDocumentPickerViewController {
 
                   let picker =
                       UIDocumentPickerViewController(
-                          forOpeningContentTypes: [
-                              .data,
-                              .item
-                          ],
-                          asCopy: true
+                          forOpeningContentTypes:
+                              [
+                                  .folder
+                              ],
+                          asCopy:
+                              false
                       )
 
-                  picker.allowsMultipleSelection = true
-                  picker.delegate = context.coordinator
+                  picker.allowsMultipleSelection =
+                      false
+
+                  picker.delegate =
+                      context.coordinator
 
                   return picker
               }
@@ -517,7 +903,8 @@ jobs:
               func updateUIViewController(
                   _ uiViewController:
                       UIDocumentPickerViewController,
-                  context: Context
+                  context:
+                      Context
               ) {}
 
               final class Coordinator:
@@ -525,23 +912,28 @@ jobs:
                   UIDocumentPickerDelegate {
 
                   let completion:
-                      ([URL]) -> Void
+                      (URL?) -> Void
 
                   init(
                       completion:
-                          @escaping ([URL]) -> Void
+                          @escaping
+                          (URL?) -> Void
                   ) {
 
-                      self.completion = completion
+                      self.completion =
+                          completion
                   }
 
                   func documentPicker(
                       _ controller:
                           UIDocumentPickerViewController,
-                      didPickDocumentsAt urls: [URL]
+                      didPickDocumentsAt
+                          urls: [URL]
                   ) {
 
-                      completion(urls)
+                      completion(
+                          urls.first
+                      )
                   }
 
                   func documentPickerWasCancelled(
@@ -549,2251 +941,7 @@ jobs:
                           UIDocumentPickerViewController
                   ) {
 
-                      completion([])
-                  }
-              }
-          }
-
-          enum PostalError:
-              LocalizedError {
-
-              case bad(String)
-
-              var errorDescription: String? {
-
-                  switch self {
-
-                  case .bad(let text):
-                      return text
-                  }
-              }
-          }
-
-          struct BinaryReader {
-
-              let data: Data
-              var offset: Int = 0
-
-              mutating func ensure(
-                  _ count: Int
-              ) throws {
-
-                  guard
-                      count >= 0,
-                      offset >= 0,
-                      offset + count <= data.count
-                  else {
-
-                      throw PostalError.bad(
-                          "Read outside package at \(offset)"
-                      )
-                  }
-              }
-
-              mutating func readUInt8()
-                  throws -> UInt8 {
-
-                  try ensure(1)
-
-                  let value =
-                      data[
-                          data.startIndex + offset
-                      ]
-
-                  offset += 1
-
-                  return value
-              }
-
-              mutating func readUInt16()
-                  throws -> UInt16 {
-
-                  let a =
-                      UInt16(
-                          try readUInt8()
-                      )
-
-                  let b =
-                      UInt16(
-                          try readUInt8()
-                      )
-
-                  return a
-                      | (b << 8)
-              }
-
-              mutating func readUInt32()
-                  throws -> UInt32 {
-
-                  let a =
-                      UInt32(
-                          try readUInt8()
-                      )
-
-                  let b =
-                      UInt32(
-                          try readUInt8()
-                      )
-
-                  let c =
-                      UInt32(
-                          try readUInt8()
-                      )
-
-                  let d =
-                      UInt32(
-                          try readUInt8()
-                      )
-
-                  return a
-                      | (b << 8)
-                      | (c << 16)
-                      | (d << 24)
-              }
-
-              mutating func readInt32()
-                  throws -> Int32 {
-
-                  Int32(
-                      bitPattern:
-                          try readUInt32()
-                  )
-              }
-
-              mutating func readFloat()
-                  throws -> Float {
-
-                  Float(
-                      bitPattern:
-                          try readUInt32()
-                  )
-              }
-
-              mutating func readBytes(
-                  count: Int
-              ) throws -> Data {
-
-                  try ensure(count)
-
-                  let start = offset
-                  let end = offset + count
-
-                  offset = end
-
-                  return data.subdata(
-                      in: start..<end
-                  )
-              }
-
-              mutating func skip(
-                  _ count: Int
-              ) throws {
-
-                  try ensure(count)
-
-                  offset += count
-              }
-
-              mutating func seek(
-                  _ position: Int
-              ) throws {
-
-                  guard
-                      position >= 0,
-                      position <= data.count
-                  else {
-
-                      throw PostalError.bad(
-                          "Invalid seek \(position)"
-                      )
-                  }
-
-                  offset = position
-              }
-
-              mutating func readCompactIndex()
-                  throws -> Int {
-
-                  let first =
-                      try readUInt8()
-
-                  let negative =
-                      (first & 0x80) != 0
-
-                  var value =
-                      Int(first & 0x3F)
-
-                  if (first & 0x40) != 0 {
-
-                      var shift = 6
-                      var steps = 0
-
-                      while true {
-
-                          let next =
-                              try readUInt8()
-
-                          value |=
-                              Int(next & 0x7F)
-                              << shift
-
-                          shift += 7
-                          steps += 1
-
-                          if (next & 0x80) == 0 {
-                              break
-                          }
-
-                          if steps > 4 {
-
-                              throw PostalError.bad(
-                                  "Bad CompactIndex"
-                              )
-                          }
-                      }
-                  }
-
-                  return negative
-                      ? -value
-                      : value
-              }
-          }
-
-          struct UEImport {
-              let classPackage: Int
-              let className: Int
-              let packageIndex: Int32
-              let objectName: Int
-          }
-
-          struct UEExport {
-              let classIndex: Int
-              let superIndex: Int
-              let packageIndex: Int32
-              let objectName: Int
-              let objectFlags: UInt32
-              let serialSize: Int
-              let serialOffset: Int
-          }
-
-          struct RawVertex {
-              let position: SIMD3<Float>
-              let normal: SIMD3<Float>
-          }
-
-          struct MeshGeometry {
-              let name: String
-              let vertices: [RawVertex]
-              let indices: [UInt16]
-          }
-
-          final class UE2Package {
-
-              let data: Data
-
-              private(set) var names:
-                  [String] = []
-
-              private(set) var imports:
-                  [UEImport] = []
-
-              private(set) var exports:
-                  [UEExport] = []
-
-              private(set) var version = 0
-              private(set) var licensee = 0
-
-              init(url: URL) throws {
-
-                  data =
-                      try Data(
-                          contentsOf: url,
-                          options: .mappedIfSafe
-                      )
-
-                  try parsePackage()
-              }
-
-              private func parsePackage()
-                  throws {
-
-                  var reader =
-                      BinaryReader(
-                          data: data
-                      )
-
-                  let magic =
-                      try reader.readUInt32()
-
-                  guard
-                      magic == 0x9E2A83C1
-                  else {
-
-                      throw PostalError.bad(
-                          "Not an Unreal package"
-                      )
-                  }
-
-                  version =
-                      Int(
-                          try reader.readUInt16()
-                      )
-
-                  licensee =
-                      Int(
-                          try reader.readUInt16()
-                      )
-
-                  _ =
-                      try reader.readUInt32()
-
-                  let nameCount =
-                      Int(
-                          try reader.readInt32()
-                      )
-
-                  let nameOffset =
-                      Int(
-                          try reader.readInt32()
-                      )
-
-                  let exportCount =
-                      Int(
-                          try reader.readInt32()
-                      )
-
-                  let exportOffset =
-                      Int(
-                          try reader.readInt32()
-                      )
-
-                  let importCount =
-                      Int(
-                          try reader.readInt32()
-                      )
-
-                  let importOffset =
-                      Int(
-                          try reader.readInt32()
-                      )
-
-                  guard
-                      nameCount >= 0,
-                      nameCount < 100000,
-                      exportCount >= 0,
-                      exportCount < 1000000,
-                      importCount >= 0,
-                      importCount < 1000000
-                  else {
-
-                      throw PostalError.bad(
-                          "Invalid package tables"
-                      )
-                  }
-
-                  try reader.seek(
-                      nameOffset
-                  )
-
-                  var parsedNames:
-                      [String] = []
-
-                  parsedNames.reserveCapacity(
-                      nameCount
-                  )
-
-                  for _ in 0..<nameCount {
-
-                      let length =
-                          try reader
-                              .readCompactIndex()
-
-                      var value = ""
-
-                      if length > 0 {
-
-                          guard
-                              length < 65536
-                          else {
-
-                              throw PostalError.bad(
-                                  "Bad name length"
-                              )
-                          }
-
-                          let bytes =
-                              try reader
-                                  .readBytes(
-                                      count: length
-                                  )
-
-                          value =
-                              String(
-                                  data: bytes,
-                                  encoding: .isoLatin1
-                              ) ?? ""
-
-                      } else if length < 0 {
-
-                          let chars =
-                              -length
-
-                          guard
-                              chars < 65536
-                          else {
-
-                              throw PostalError.bad(
-                                  "Bad unicode name"
-                              )
-                          }
-
-                          let bytes =
-                              try reader
-                                  .readBytes(
-                                      count:
-                                          chars * 2
-                                  )
-
-                          value =
-                              String(
-                                  data: bytes,
-                                  encoding:
-                                      .utf16LittleEndian
-                              ) ?? ""
-                      }
-
-                      value =
-                          value
-                              .replacingOccurrences(
-                                  of: "\0",
-                                  with: ""
-                              )
-
-                      _ =
-                          try reader.readUInt32()
-
-                      parsedNames.append(
-                          value
-                      )
-                  }
-
-                  names = parsedNames
-
-                  try reader.seek(
-                      importOffset
-                  )
-
-                  var parsedImports:
-                      [UEImport] = []
-
-                  parsedImports.reserveCapacity(
-                      importCount
-                  )
-
-                  for _ in 0..<importCount {
-
-                      parsedImports.append(
-                          UEImport(
-                              classPackage:
-                                  try reader
-                                      .readCompactIndex(),
-
-                              className:
-                                  try reader
-                                      .readCompactIndex(),
-
-                              packageIndex:
-                                  try reader
-                                      .readInt32(),
-
-                              objectName:
-                                  try reader
-                                      .readCompactIndex()
-                          )
-                      )
-                  }
-
-                  imports = parsedImports
-
-                  try reader.seek(
-                      exportOffset
-                  )
-
-                  var parsedExports:
-                      [UEExport] = []
-
-                  parsedExports.reserveCapacity(
-                      exportCount
-                  )
-
-                  for _ in 0..<exportCount {
-
-                      let classIndex =
-                          try reader
-                              .readCompactIndex()
-
-                      let superIndex =
-                          try reader
-                              .readCompactIndex()
-
-                      let packageIndex =
-                          try reader
-                              .readInt32()
-
-                      let objectName =
-                          try reader
-                              .readCompactIndex()
-
-                      let objectFlags =
-                          try reader
-                              .readUInt32()
-
-                      let serialSize =
-                          try reader
-                              .readCompactIndex()
-
-                      var serialOffset = 0
-
-                      if serialSize != 0 {
-
-                          serialOffset =
-                              try reader
-                                  .readCompactIndex()
-                      }
-
-                      parsedExports.append(
-                          UEExport(
-                              classIndex:
-                                  classIndex,
-
-                              superIndex:
-                                  superIndex,
-
-                              packageIndex:
-                                  packageIndex,
-
-                              objectName:
-                                  objectName,
-
-                              objectFlags:
-                                  objectFlags,
-
-                              serialSize:
-                                  serialSize,
-
-                              serialOffset:
-                                  serialOffset
-                          )
-                      )
-                  }
-
-                  exports = parsedExports
-              }
-
-              private func name(
-                  _ index: Int
-              ) -> String {
-
-                  guard
-                      index >= 0,
-                      index < names.count
-                  else {
-
-                      return "Unknown"
-                  }
-
-                  return names[index]
-              }
-
-              private func objectName(
-                  _ reference: Int
-              ) -> String {
-
-                  if reference == 0 {
-                      return "Class"
-                  }
-
-                  if reference < 0 {
-
-                      let index =
-                          -reference - 1
-
-                      guard
-                          index >= 0,
-                          index < imports.count
-                      else {
-
-                          return "Unknown"
-                      }
-
-                      return name(
-                          imports[index].objectName
-                      )
-                  }
-
-                  let index =
-                      reference - 1
-
-                  guard
-                      index >= 0,
-                      index < exports.count
-                  else {
-
-                      return "Unknown"
-                  }
-
-                  return name(
-                      exports[index].objectName
-                  )
-              }
-
-              private func className(
-                  _ export: UEExport
-              ) -> String {
-
-                  objectName(
-                      export.classIndex
-                  )
-              }
-
-              func staticMeshNames()
-                  -> [String] {
-
-                  exports.compactMap {
-                      item in
-
-                      guard
-                          className(item)
-                              == "StaticMesh"
-                      else {
-
-                          return nil
-                      }
-
-                      return name(
-                          item.objectName
-                      )
-                  }
-              }
-
-              func loadStaticMesh(
-                  named wantedName: String
-              ) throws -> MeshGeometry {
-
-                  guard
-                      let export =
-                          exports.first(
-                              where: {
-                                  className($0)
-                                      == "StaticMesh"
-                                  &&
-                                  name(
-                                      $0.objectName
-                                  )
-                                      .caseInsensitiveCompare(
-                                          wantedName
-                                      )
-                                      == .orderedSame
-                              }
-                          )
-                  else {
-
-                      throw PostalError.bad(
-                          "StaticMesh \(wantedName) not found"
-                      )
-                  }
-
-                  return try parseStaticMesh(
-                      export
-                  )
-              }
-
-              private func skipPropertyTable(
-                  _ reader: inout BinaryReader
-              ) throws {
-
-                  while true {
-
-                      let nameIndex =
-                          try reader
-                              .readCompactIndex()
-
-                      guard
-                          nameIndex >= 0,
-                          nameIndex < names.count
-                      else {
-
-                          throw PostalError.bad(
-                              "Invalid property name"
-                          )
-                      }
-
-                      let propertyName =
-                          names[nameIndex]
-
-                      if propertyName == "None" {
-                          break
-                      }
-
-                      let info =
-                          try reader.readUInt8()
-
-                      let type =
-                          Int(info & 0x0F)
-
-                      let isArray =
-                          (info & 0x80) != 0
-
-                      if type == 10 {
-
-                          _ =
-                              try reader
-                                  .readCompactIndex()
-                      }
-
-                      let sizeCode =
-                          Int(
-                              (info >> 4) & 7
-                          )
-
-                      var dataSize = 0
-
-                      switch sizeCode {
-
-                      case 0:
-                          dataSize = 1
-
-                      case 1:
-                          dataSize = 2
-
-                      case 2:
-                          dataSize = 4
-
-                      case 3:
-                          dataSize = 12
-
-                      case 4:
-                          dataSize = 16
-
-                      case 5:
-                          dataSize =
-                              Int(
-                                  try reader
-                                      .readUInt8()
-                              )
-
-                      case 6:
-                          dataSize =
-                              Int(
-                                  try reader
-                                      .readUInt16()
-                              )
-
-                      case 7:
-                          dataSize =
-                              Int(
-                                  try reader
-                                      .readInt32()
-                              )
-
-                      default:
-                          dataSize = 0
-                      }
-
-                      if type != 3 && isArray {
-
-                          let first =
-                              try reader
-                                  .readUInt8()
-
-                          if first >= 128 {
-
-                              _ =
-                                  try reader
-                                      .readUInt8()
-
-                              if (first & 0x40)
-                                  != 0 {
-
-                                  _ =
-                                      try reader
-                                          .readUInt8()
-
-                                  _ =
-                                      try reader
-                                          .readUInt8()
-                              }
-                          }
-                      }
-
-                      guard dataSize >= 0
-                      else {
-
-                          throw PostalError.bad(
-                              "Negative property size"
-                          )
-                      }
-
-                      if type != 3 {
-
-                          try reader.skip(
-                              dataSize
-                          )
-                      }
-                  }
-              }
-
-              private func parseStaticMesh(
-                  _ export: UEExport
-              ) throws -> MeshGeometry {
-
-                  guard
-                      export.serialOffset >= 0,
-                      export.serialSize > 0,
-                      export.serialOffset
-                          + export.serialSize
-                          <= data.count
-                  else {
-
-                      throw PostalError.bad(
-                          "Bad StaticMesh export"
-                      )
-                  }
-
-                  var reader =
-                      BinaryReader(
-                          data: data,
-                          offset:
-                              export.serialOffset
-                      )
-
-                  try skipPropertyTable(
-                      &reader
-                  )
-
-                  for _ in 0..<6 {
-                      _ =
-                          try reader.readFloat()
-                  }
-
-                  _ =
-                      try reader.readUInt8()
-
-                  for _ in 0..<4 {
-                      _ =
-                          try reader.readFloat()
-                  }
-
-                  let sectionCount =
-                      try reader.readCompactIndex()
-
-                  guard
-                      sectionCount >= 0,
-                      sectionCount < 10000
-                  else {
-
-                      throw PostalError.bad(
-                          "Bad section count \(sectionCount)"
-                      )
-                  }
-
-                  for _ in 0..<sectionCount {
-
-                      _ =
-                          try reader.readInt32()
-
-                      _ =
-                          try reader.readUInt16()
-
-                      _ =
-                          try reader.readUInt16()
-
-                      _ =
-                          try reader.readUInt16()
-
-                      _ =
-                          try reader.readUInt16()
-
-                      _ =
-                          try reader.readUInt16()
-                  }
-
-                  for _ in 0..<6 {
-                      _ =
-                          try reader.readFloat()
-                  }
-
-                  _ =
-                      try reader.readUInt8()
-
-                  let vertexCount =
-                      try reader.readCompactIndex()
-
-                  guard
-                      vertexCount > 0,
-                      vertexCount < 1_000_000
-                  else {
-
-                      throw PostalError.bad(
-                          "Bad vertex count \(vertexCount)"
-                      )
-                  }
-
-                  var vertices:
-                      [RawVertex] = []
-
-                  vertices.reserveCapacity(
-                      vertexCount
-                  )
-
-                  for _ in 0..<vertexCount {
-
-                      let px =
-                          try reader.readFloat()
-
-                      let py =
-                          try reader.readFloat()
-
-                      let pz =
-                          try reader.readFloat()
-
-                      let nx =
-                          try reader.readFloat()
-
-                      let ny =
-                          try reader.readFloat()
-
-                      let nz =
-                          try reader.readFloat()
-
-                      vertices.append(
-                          RawVertex(
-                              position:
-                                  SIMD3<Float>(
-                                      px,
-                                      py,
-                                      pz
-                                  ),
-                              normal:
-                                  SIMD3<Float>(
-                                      nx,
-                                      ny,
-                                      nz
-                                  )
-                          )
-                      )
-                  }
-
-                  _ =
-                      try reader.readInt32()
-
-                  let colorCount =
-                      try reader.readCompactIndex()
-
-                  guard
-                      colorCount >= 0,
-                      colorCount < 1_000_000
-                  else {
-
-                      throw PostalError.bad(
-                          "Bad color stream"
-                      )
-                  }
-
-                  try reader.skip(
-                      colorCount * 4
-                  )
-
-                  _ =
-                      try reader.readInt32()
-
-                  let alphaCount =
-                      try reader.readCompactIndex()
-
-                  guard
-                      alphaCount >= 0,
-                      alphaCount < 1_000_000
-                  else {
-
-                      throw PostalError.bad(
-                          "Bad alpha stream"
-                      )
-                  }
-
-                  try reader.skip(
-                      alphaCount * 4
-                  )
-
-                  _ =
-                      try reader.readInt32()
-
-                  let uvStreamCount =
-                      try reader.readCompactIndex()
-
-                  guard
-                      uvStreamCount >= 0,
-                      uvStreamCount < 16
-                  else {
-
-                      throw PostalError.bad(
-                          "Bad UV stream count \(uvStreamCount)"
-                      )
-                  }
-
-                  for _ in 0..<uvStreamCount {
-
-                      let uvCount =
-                          try reader
-                              .readCompactIndex()
-
-                      guard
-                          uvCount >= 0,
-                          uvCount < 1_000_000
-                      else {
-
-                          throw PostalError.bad(
-                              "Bad UV count"
-                          )
-                      }
-
-                      for _ in 0..<uvCount {
-
-                          _ =
-                              try reader.readFloat()
-
-                          _ =
-                              try reader.readFloat()
-                      }
-
-                      _ =
-                          try reader.readInt32()
-
-                      _ =
-                          try reader.readInt32()
-                  }
-
-                  let indexCount =
-                      try reader.readCompactIndex()
-
-                  guard
-                      indexCount >= 3,
-                      indexCount < 3_000_000
-                  else {
-
-                      throw PostalError.bad(
-                          "Bad index count \(indexCount)"
-                      )
-                  }
-
-                  var rawIndices:
-                      [UInt16] = []
-
-                  rawIndices.reserveCapacity(
-                      indexCount
-                  )
-
-                  for _ in 0..<indexCount {
-
-                      rawIndices.append(
-                          try reader.readUInt16()
-                      )
-                  }
-
-                  _ =
-                      try reader.readInt32()
-
-                  let secondCount =
-                      try reader.readCompactIndex()
-
-                  guard
-                      secondCount >= 0,
-                      secondCount < 3_000_000
-                  else {
-
-                      throw PostalError.bad(
-                          "Bad second index stream"
-                      )
-                  }
-
-                  try reader.skip(
-                      secondCount * 2
-                  )
-
-                  _ =
-                      try reader.readInt32()
-
-                  var validIndices:
-                      [UInt16] = []
-
-                  validIndices.reserveCapacity(
-                      rawIndices.count
-                  )
-
-                  var i = 0
-
-                  while i + 2
-                      < rawIndices.count {
-
-                      let a = rawIndices[i]
-                      let b = rawIndices[i + 1]
-                      let c = rawIndices[i + 2]
-
-                      if
-                          Int(a) < vertices.count,
-                          Int(b) < vertices.count,
-                          Int(c) < vertices.count {
-
-                          validIndices.append(a)
-                          validIndices.append(b)
-                          validIndices.append(c)
-                      }
-
-                      i += 3
-                  }
-
-                  guard
-                      !validIndices.isEmpty
-                  else {
-
-                      throw PostalError.bad(
-                          "Mesh has no valid triangles"
-                      )
-                  }
-
-                  return MeshGeometry(
-                      name:
-                          name(
-                              export.objectName
-                          ),
-                      vertices:
-                          vertices,
-                      indices:
-                          validIndices
-                  )
-              }
-          }
-
-          struct GPUVertex {
-              var position:
-                  SIMD4<Float>
-
-              var normal:
-                  SIMD4<Float>
-          }
-
-          struct GPUUniforms {
-              var yaw: Float
-              var pitch: Float
-              var aspect: Float
-              var zoom: Float
-          }
-
-          struct BridgeMetalView:
-              UIViewRepresentable {
-
-              func makeCoordinator()
-                  -> BridgeRenderer {
-
-                  BridgeRenderer()
-              }
-
-              func makeUIView(
-                  context: Context
-              ) -> MTKView {
-
-                  guard
-                      let device =
-                          MTLCreateSystemDefaultDevice()
-                  else {
-
-                      fatalError(
-                          "Metal unavailable"
-                      )
-                  }
-
-                  let view =
-                      MTKView(
-                          frame: .zero,
-                          device: device
-                      )
-
-                  view.colorPixelFormat =
-                      .bgra8Unorm
-
-                  view.depthStencilPixelFormat =
-                      .depth32Float
-
-                  view.preferredFramesPerSecond =
-                      60
-
-                  view.enableSetNeedsDisplay =
-                      false
-
-                  view.isPaused =
-                      false
-
-                  view.clearColor =
-                      MTLClearColor(
-                          red: 0.015,
-                          green: 0.015,
-                          blue: 0.018,
-                          alpha: 1
-                      )
-
-                  context.coordinator
-                      .setup(
-                          device: device
-                      )
-
-                  view.delegate =
-                      context.coordinator
-
-                  let pan =
-                      UIPanGestureRecognizer(
-                          target:
-                              context.coordinator,
-                          action:
-                              #selector(
-                                  BridgeRenderer
-                                      .handlePan(_:)
-                              )
-                      )
-
-                  let pinch =
-                      UIPinchGestureRecognizer(
-                          target:
-                              context.coordinator,
-                          action:
-                              #selector(
-                                  BridgeRenderer
-                                      .handlePinch(_:)
-                              )
-                      )
-
-                  view.addGestureRecognizer(
-                      pan
-                  )
-
-                  view.addGestureRecognizer(
-                      pinch
-                  )
-
-                  context.coordinator
-                      .reloadFromDisk()
-
-                  return view
-              }
-
-              func updateUIView(
-                  _ uiView: MTKView,
-                  context: Context
-              ) {}
-          }
-
-          final class BridgeRenderer:
-              NSObject,
-              MTKViewDelegate {
-
-              private var device:
-                  MTLDevice?
-
-              private var queue:
-                  MTLCommandQueue?
-
-              private var pipeline:
-                  MTLRenderPipelineState?
-
-              private var depthState:
-                  MTLDepthStencilState?
-
-              private var vertexBuffer:
-                  MTLBuffer?
-
-              private var indexBuffer:
-                  MTLBuffer?
-
-              private var indexCount = 0
-
-              private var package:
-                  UE2Package?
-
-              private var meshNames:
-                  [String] = []
-
-              private var currentMeshIndex = 0
-
-              private var yaw:
-                  Float = 0.3
-
-              private var pitch:
-                  Float = -0.2
-
-              private var zoom:
-                  Float = 1.0
-
-              private var frames = 0
-
-              private var lastFPS =
-                  CACurrentMediaTime()
-
-              override init() {
-
-                  super.init()
-
-                  NotificationCenter
-                      .default
-                      .addObserver(
-                          self,
-                          selector:
-                              #selector(
-                                  reloadNotification
-                              ),
-                          name:
-                              .postalReloadMesh,
-                          object: nil
-                      )
-
-                  NotificationCenter
-                      .default
-                      .addObserver(
-                          self,
-                          selector:
-                              #selector(
-                                  nextMeshNotification
-                              ),
-                          name:
-                              .postalNextMesh,
-                          object: nil
-                      )
-              }
-
-              deinit {
-
-                  NotificationCenter
-                      .default
-                      .removeObserver(
-                          self
-                      )
-              }
-
-              func setup(
-                  device: MTLDevice
-              ) {
-
-                  self.device = device
-
-                  queue =
-                      device.makeCommandQueue()
-
-                  do {
-
-                      pipeline =
-                          try makePipeline(
-                              device: device
-                          )
-
-                      let descriptor =
-                          MTLDepthStencilDescriptor()
-
-                      descriptor.depthCompareFunction =
-                          .less
-
-                      descriptor.isDepthWriteEnabled =
-                          true
-
-                      depthState =
-                          device.makeDepthStencilState(
-                              descriptor:
-                                  descriptor
-                          )
-
-                  } catch {
-
-                      postStatus(
-                          title: "Metal error",
-                          detail:
-                              error.localizedDescription,
-                          success: false
-                      )
-                  }
-              }
-
-              private func makePipeline(
-                  device: MTLDevice
-              ) throws -> MTLRenderPipelineState {
-
-                  let source = """
-                  #include <metal_stdlib>
-                  using namespace metal;
-
-                  struct GPUVertex
-                  {
-                      float4 position;
-                      float4 normal;
-                  };
-
-                  struct Uniforms
-                  {
-                      float yaw;
-                      float pitch;
-                      float aspect;
-                      float zoom;
-                  };
-
-                  struct VertexOut
-                  {
-                      float4 position [[position]];
-                      float3 normal;
-                  };
-
-                  vertex VertexOut v_main(
-                      device const GPUVertex *vertices
-                          [[buffer(0)]],
-                      constant Uniforms &u
-                          [[buffer(1)]],
-                      uint vertexID
-                          [[vertex_id]])
-                  {
-                      GPUVertex input =
-                          vertices[vertexID];
-
-                      float3 p =
-                          input.position.xyz;
-
-                      float3 n =
-                          input.normal.xyz;
-
-                      float cy = cos(u.yaw);
-                      float sy = sin(u.yaw);
-
-                      float cp = cos(u.pitch);
-                      float sp = sin(u.pitch);
-
-                      float3 py;
-
-                      py.x =
-                          cy * p.x
-                          + sy * p.z;
-
-                      py.y =
-                          p.y;
-
-                      py.z =
-                          -sy * p.x
-                          + cy * p.z;
-
-                      float3 ny;
-
-                      ny.x =
-                          cy * n.x
-                          + sy * n.z;
-
-                      ny.y =
-                          n.y;
-
-                      ny.z =
-                          -sy * n.x
-                          + cy * n.z;
-
-                      float3 pr;
-
-                      pr.x =
-                          py.x;
-
-                      pr.y =
-                          cp * py.y
-                          - sp * py.z;
-
-                      pr.z =
-                          sp * py.y
-                          + cp * py.z;
-
-                      float3 nr;
-
-                      nr.x =
-                          ny.x;
-
-                      nr.y =
-                          cp * ny.y
-                          - sp * ny.z;
-
-                      nr.z =
-                          sp * ny.y
-                          + cp * ny.z;
-
-                      float depth =
-                          pr.z + 3.2;
-
-                      depth =
-                          max(
-                              depth,
-                              0.25
-                          );
-
-                      float factor =
-                          1.9 * u.zoom;
-
-                      VertexOut out;
-
-                      out.position =
-                          float4(
-                              pr.x
-                                  * factor
-                                  / max(
-                                      u.aspect,
-                                      0.1
-                                  ),
-
-                              pr.y
-                                  * factor,
-
-                              depth - 0.1,
-
-                              depth
-                          );
-
-                      out.normal =
-                          normalize(nr);
-
-                      return out;
-                  }
-
-                  fragment half4 f_main(
-                      VertexOut input
-                          [[stage_in]])
-                  {
-                      float3 lightDir =
-                          normalize(
-                              float3(
-                                  0.35,
-                                  0.75,
-                                  0.55
-                              )
-                          );
-
-                      float light =
-                          dot(
-                              normalize(
-                                  input.normal
-                              ),
-                              lightDir
-                          );
-
-                      light =
-                          clamp(
-                              light * 0.55
-                                  + 0.55,
-                              0.18,
-                              1.0
-                          );
-
-                      half3 base =
-                          half3(
-                              0.78,
-                              0.79,
-                              0.82
-                          );
-
-                      return half4(
-                          base * half(light),
-                          1.0
-                      );
-                  }
-                  """
-
-                  let library =
-                      try device.makeLibrary(
-                          source: source,
-                          options: nil
-                      )
-
-                  guard
-                      let vertex =
-                          library.makeFunction(
-                              name: "v_main"
-                          ),
-                      let fragment =
-                          library.makeFunction(
-                              name: "f_main"
-                          )
-                  else {
-
-                      throw PostalError.bad(
-                          "Metal shader functions missing"
-                      )
-                  }
-
-                  let descriptor =
-                      MTLRenderPipelineDescriptor()
-
-                  descriptor.vertexFunction =
-                      vertex
-
-                  descriptor.fragmentFunction =
-                      fragment
-
-                  descriptor
-                      .colorAttachments[0]
-                      .pixelFormat =
-                      .bgra8Unorm
-
-                  descriptor
-                      .depthAttachmentPixelFormat =
-                      .depth32Float
-
-                  return try device
-                      .makeRenderPipelineState(
-                          descriptor: descriptor
-                      )
-              }
-
-              @objc
-              private func reloadNotification() {
-
-                  reloadFromDisk()
-              }
-
-              @objc
-              private func nextMeshNotification() {
-
-                  guard
-                      !meshNames.isEmpty,
-                      let package = package
-                  else {
-                      return
-                  }
-
-                  currentMeshIndex += 1
-
-                  if currentMeshIndex
-                      >= meshNames.count {
-
-                      currentMeshIndex = 0
-                  }
-
-                  let wanted =
-                      meshNames[
-                          currentMeshIndex
-                      ]
-
-                  do {
-
-                      let geometry =
-                          try package
-                              .loadStaticMesh(
-                                  named: wanted
-                              )
-
-                      try upload(
-                          geometry
-                      )
-
-                  } catch {
-
-                      postStatus(
-                          title: wanted,
-                          detail:
-                              error.localizedDescription,
-                          success: false
-                      )
-                  }
-              }
-
-              func reloadFromDisk() {
-
-                  guard device != nil
-                  else {
-                      return
-                  }
-
-                  do {
-
-                      let documents =
-                          FileManager.default.urls(
-                              for: .documentDirectory,
-                              in: .userDomainMask
-                          )[0]
-
-                      let folder =
-                          documents
-                              .appendingPathComponent(
-                                  "Postal2Data",
-                                  isDirectory: true
-                              )
-
-                      let url =
-                          folder
-                              .appendingPathComponent(
-                                  "Zo_BridgeMeshes.usx"
-                              )
-
-                      guard
-                          FileManager.default
-                              .fileExists(
-                                  atPath: url.path
-                              )
-                      else {
-
-                          throw PostalError.bad(
-                              "Import Zo_BridgeMeshes.usx first"
-                          )
-                      }
-
-                      let loadedPackage =
-                          try UE2Package(
-                              url: url
-                          )
-
-                      let names =
-                          loadedPackage
-                              .staticMeshNames()
-
-                      guard
-                          !names.isEmpty
-                      else {
-
-                          throw PostalError.bad(
-                              "No StaticMesh objects found"
-                          )
-                      }
-
-                      package =
-                          loadedPackage
-
-                      meshNames =
-                          names
-
-                      if let preferred =
-                          names.firstIndex(
-                              where: {
-                                  $0.caseInsensitiveCompare(
-                                      "zo_bridge_tower"
-                                  ) == .orderedSame
-                              }
-                          ) {
-
-                          currentMeshIndex =
-                              preferred
-
-                      } else {
-
-                          currentMeshIndex = 0
-                      }
-
-                      let selected =
-                          names[
-                              currentMeshIndex
-                          ]
-
-                      let geometry =
-                          try loadedPackage
-                              .loadStaticMesh(
-                                  named: selected
-                              )
-
-                      try upload(
-                          geometry
-                      )
-
-                  } catch {
-
-                      vertexBuffer = nil
-                      indexBuffer = nil
-                      indexCount = 0
-
-                      postStatus(
-                          title: "Bridge mesh",
-                          detail:
-                              error.localizedDescription,
-                          success: false
-                      )
-                  }
-              }
-
-              private func upload(
-                  _ geometry: MeshGeometry
-              ) throws {
-
-                  guard let device = device
-                  else {
-
-                      throw PostalError.bad(
-                          "Metal device missing"
-                      )
-                  }
-
-                  guard
-                      !geometry.vertices.isEmpty,
-                      !geometry.indices.isEmpty
-                  else {
-
-                      throw PostalError.bad(
-                          "Empty geometry"
-                      )
-                  }
-
-                  var minimum =
-                      geometry.vertices[0].position
-
-                  var maximum =
-                      geometry.vertices[0].position
-
-                  for vertex
-                      in geometry.vertices {
-
-                      minimum =
-                          simd_min(
-                              minimum,
-                              vertex.position
-                          )
-
-                      maximum =
-                          simd_max(
-                              maximum,
-                              vertex.position
-                          )
-                  }
-
-                  let center =
-                      (minimum + maximum) * 0.5
-
-                  let size =
-                      maximum - minimum
-
-                  let maximumDimension =
-                      max(
-                          max(
-                              abs(size.x),
-                              abs(size.y)
-                          ),
-                          abs(size.z)
-                      )
-
-                  let scale:
-                      Float =
-                      maximumDimension > 0.0001
-                          ? 1.7 / maximumDimension
-                          : 1.0
-
-                  var gpuVertices:
-                      [GPUVertex] = []
-
-                  gpuVertices.reserveCapacity(
-                      geometry.vertices.count
-                  )
-
-                  for vertex
-                      in geometry.vertices {
-
-                      let local =
-                          (vertex.position - center)
-                          * scale
-
-                      let convertedPosition =
-                          SIMD3<Float>(
-                              local.x,
-                              local.z,
-                              -local.y
-                          )
-
-                      var convertedNormal =
-                          SIMD3<Float>(
-                              vertex.normal.x,
-                              vertex.normal.z,
-                              -vertex.normal.y
-                          )
-
-                      if simd_length_squared(
-                          convertedNormal
-                      ) > 0.000001 {
-
-                          convertedNormal =
-                              simd_normalize(
-                                  convertedNormal
-                              )
-                      }
-
-                      gpuVertices.append(
-                          GPUVertex(
-                              position:
-                                  SIMD4<Float>(
-                                      convertedPosition.x,
-                                      convertedPosition.y,
-                                      convertedPosition.z,
-                                      1
-                                  ),
-                              normal:
-                                  SIMD4<Float>(
-                                      convertedNormal.x,
-                                      convertedNormal.y,
-                                      convertedNormal.z,
-                                      0
-                                  )
-                          )
-                      )
-                  }
-
-                  let newVertexBuffer:
-                      MTLBuffer? =
-                      gpuVertices
-                          .withUnsafeBufferPointer {
-                              buffer in
-
-                              guard
-                                  let baseAddress =
-                                      buffer.baseAddress
-                              else {
-
-                                  return nil
-                              }
-
-                              return device
-                                  .makeBuffer(
-                                      bytes:
-                                          UnsafeRawPointer(
-                                              baseAddress
-                                          ),
-                                      length:
-                                          buffer.count
-                                          * MemoryLayout<
-                                              GPUVertex
-                                          >.stride,
-                                      options:
-                                          .storageModeShared
-                                  )
-                          }
-
-                  guard
-                      let newVertexBuffer =
-                          newVertexBuffer
-                  else {
-
-                      throw PostalError.bad(
-                          "Could not create vertex buffer"
-                      )
-                  }
-
-                  let newIndexBuffer:
-                      MTLBuffer? =
-                      geometry.indices
-                          .withUnsafeBufferPointer {
-                              buffer in
-
-                              guard
-                                  let baseAddress =
-                                      buffer.baseAddress
-                              else {
-
-                                  return nil
-                              }
-
-                              return device
-                                  .makeBuffer(
-                                      bytes:
-                                          UnsafeRawPointer(
-                                              baseAddress
-                                          ),
-                                      length:
-                                          buffer.count
-                                          * MemoryLayout<
-                                              UInt16
-                                          >.stride,
-                                      options:
-                                          .storageModeShared
-                                  )
-                          }
-
-                  guard
-                      let newIndexBuffer =
-                          newIndexBuffer
-                  else {
-
-                      throw PostalError.bad(
-                          "Could not create index buffer"
-                      )
-                  }
-
-                  vertexBuffer =
-                      newVertexBuffer
-
-                  indexBuffer =
-                      newIndexBuffer
-
-                  indexCount =
-                      geometry.indices.count
-
-                  let triangles =
-                      geometry.indices.count / 3
-
-                  postStatus(
-                      title: geometry.name,
-                      detail:
-                          "\(geometry.vertices.count) vertices • \(triangles) triangles • \(meshNames.count) Bridge meshes",
-                      success: true
-                  )
-              }
-
-              @objc
-              func handlePan(
-                  _ gesture:
-                      UIPanGestureRecognizer
-              ) {
-
-                  guard
-                      let view =
-                          gesture.view
-                  else {
-                      return
-                  }
-
-                  let translation =
-                      gesture.translation(
-                          in: view
-                      )
-
-                  yaw +=
-                      Float(
-                          translation.x
-                      ) * 0.008
-
-                  pitch +=
-                      Float(
-                          translation.y
-                      ) * 0.008
-
-                  pitch =
-                      min(
-                          max(
-                              pitch,
-                              -1.4
-                          ),
-                          1.4
-                      )
-
-                  gesture.setTranslation(
-                      .zero,
-                      in: view
-                  )
-              }
-
-              @objc
-              func handlePinch(
-                  _ gesture:
-                      UIPinchGestureRecognizer
-              ) {
-
-                  zoom *=
-                      Float(
-                          gesture.scale
-                      )
-
-                  zoom =
-                      min(
-                          max(
-                              zoom,
-                              0.45
-                          ),
-                          2.5
-                      )
-
-                  gesture.scale = 1
-              }
-
-              func mtkView(
-                  _ view: MTKView,
-                  drawableSizeWillChange size: CGSize
-              ) {}
-
-              func draw(
-                  in view: MTKView
-              ) {
-
-                  guard
-                      let queue = queue,
-                      let pipeline = pipeline,
-                      let descriptor =
-                          view.currentRenderPassDescriptor,
-                      let drawable =
-                          view.currentDrawable,
-                      let commandBuffer =
-                          queue.makeCommandBuffer()
-                  else {
-
-                      return
-                  }
-
-                  descriptor
-                      .colorAttachments[0]
-                      .clearColor =
-                      MTLClearColor(
-                          red: 0.012,
-                          green: 0.014,
-                          blue: 0.018,
-                          alpha: 1
-                      )
-
-                  descriptor
-                      .depthAttachment
-                      .clearDepth = 1.0
-
-                  descriptor
-                      .depthAttachment
-                      .loadAction = .clear
-
-                  descriptor
-                      .depthAttachment
-                      .storeAction = .dontCare
-
-                  if let encoder =
-                      commandBuffer
-                          .makeRenderCommandEncoder(
-                              descriptor: descriptor
-                          ) {
-
-                      encoder
-                          .setRenderPipelineState(
-                              pipeline
-                          )
-
-                      if let depthState =
-                          depthState {
-
-                          encoder
-                              .setDepthStencilState(
-                                  depthState
-                              )
-                      }
-
-                      encoder.setCullMode(
-                          .none
-                      )
-
-                      if
-                          let vertexBuffer =
-                              vertexBuffer,
-                          let indexBuffer =
-                              indexBuffer,
-                          indexCount > 0 {
-
-                          encoder
-                              .setVertexBuffer(
-                                  vertexBuffer,
-                                  offset: 0,
-                                  index: 0
-                              )
-
-                          let width =
-                              max(
-                                  Float(
-                                      view.drawableSize.width
-                                  ),
-                                  1
-                              )
-
-                          let height =
-                              max(
-                                  Float(
-                                      view.drawableSize.height
-                                  ),
-                                  1
-                              )
-
-                          var uniforms =
-                              GPUUniforms(
-                                  yaw: yaw,
-                                  pitch: pitch,
-                                  aspect:
-                                      width / height,
-                                  zoom: zoom
-                              )
-
-                          encoder
-                              .setVertexBytes(
-                                  &uniforms,
-                                  length:
-                                      MemoryLayout<
-                                          GPUUniforms
-                                      >.stride,
-                                  index: 1
-                              )
-
-                          encoder
-                              .drawIndexedPrimitives(
-                                  type: .triangle,
-                                  indexCount:
-                                      indexCount,
-                                  indexType:
-                                      .uint16,
-                                  indexBuffer:
-                                      indexBuffer,
-                                  indexBufferOffset:
-                                      0
-                              )
-                      }
-
-                      encoder.endEncoding()
-                  }
-
-                  commandBuffer.present(
-                      drawable
-                  )
-
-                  commandBuffer.commit()
-
-                  updateFPS()
-              }
-
-              private func updateFPS() {
-
-                  frames += 1
-
-                  let now =
-                      CACurrentMediaTime()
-
-                  let elapsed =
-                      now - lastFPS
-
-                  if elapsed >= 1 {
-
-                      let fps =
-                          Double(frames)
-                          / elapsed
-
-                      frames = 0
-                      lastFPS = now
-
-                      DispatchQueue.main.async {
-
-                          NotificationCenter
-                              .default
-                              .post(
-                                  name: .postalFPS,
-                                  object: fps
-                              )
-                      }
-                  }
-              }
-
-              private func postStatus(
-                  title: String,
-                  detail: String,
-                  success: Bool
-              ) {
-
-                  DispatchQueue.main.async {
-
-                      NotificationCenter
-                          .default
-                          .post(
-                              name:
-                                  .postalMeshStatus,
-                              object:
-                                  MeshStatus(
-                                      title: title,
-                                      detail: detail,
-                                      success: success
-                                  )
-                          )
+                      completion(nil)
                   }
               }
           }
@@ -2805,8 +953,7 @@ jobs:
 
           xcodegen generate
 
-          echo "===== PROJECT CREATED ====="
-          ls -la
+          echo "===== PROJECT ====="
           ls -la Postal2Native.xcodeproj
 
       - name: Build native ARM64 app
@@ -2830,12 +977,17 @@ jobs:
           STATUS=${PIPESTATUS[0]}
 
           if [ "$STATUS" -ne 0 ]; then
+
             echo ""
             echo "======================================"
             echo "REAL BUILD ERRORS"
             echo "======================================"
 
-            grep -n -E "error:|fatal error:" xcodebuild.log | tail -100 || true
+            grep -n -E \
+              "error:|fatal error:" \
+              xcodebuild.log \
+              | tail -100 \
+              || true
 
             echo "======================================"
 
@@ -2859,23 +1011,25 @@ jobs:
             exit 1
           fi
 
-          echo "APP=$APP_PATH"
-
           rm -rf Payload
+
           mkdir -p Payload
 
-          cp -R "$APP_PATH" Payload/
+          cp -R \
+            "$APP_PATH" \
+            Payload/
 
           /usr/bin/zip \
             -qry \
-            Postal2Native-RealBridgeMesh.ipa \
+            Postal2Native-FullData.ipa \
             Payload
 
-          ls -lh Postal2Native-RealBridgeMesh.ipa
+          ls -lh \
+            Postal2Native-FullData.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Postal2Native-RealBridgeMesh-IPA
-          path: Postal2Native-RealBridgeMesh.ipa
+          name: Postal2Native-FullData-IPA
+          path: Postal2Native-FullData.ipa
           if-no-files-found: error
