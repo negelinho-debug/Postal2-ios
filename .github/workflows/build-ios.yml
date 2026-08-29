@@ -1,4 +1,4 @@
-name: POSTAL 2 iOS Native Folder Picker v5 XCODE FIX
+name: POSTAL 2 iOS v6 ORIGINAL EXE TEST
 
 on:
   workflow_dispatch:
@@ -8,1754 +8,1062 @@ permissions:
 
 jobs:
   build:
-    name: Build POSTAL 2 Native iOS
+    name: Build POSTAL 2 Windows x86 runtime
     runs-on: macos-14
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
-
-      # ==========================================================
-      # CHECKOUT
-      # ==========================================================
-
       - name: Checkout
         uses: actions/checkout@v4
-
-      # ==========================================================
-      # TOOLS
-      # ==========================================================
 
       - name: Install tools
         shell: bash
         run: |
-          set -e
+          set -euxo pipefail
+          brew install xcodegen make
 
-          brew install xcodegen
-
-          echo
-          echo "======================================"
-          echo "XCODE"
-          echo "======================================"
-
+          echo "===== XCODE ====="
           xcodebuild -version
 
-          echo
-          echo "======================================"
-          echo "XCODEGEN"
-          echo "======================================"
-
+          echo "===== XCODEGEN ====="
           xcodegen --version
 
-          echo
-          echo "======================================"
-          echo "IPHONE SDK"
-          echo "======================================"
+          echo "===== IPHONE SDK ====="
+          xcrun --sdk iphoneos --show-sdk-version
 
-          xcrun \
-            --sdk iphoneos \
-            --show-sdk-version
+          echo "===== GNU MAKE ====="
+          gmake --version | head -n 1
 
-      # ==========================================================
-      # CREATE PROJECT
-      #
-      # IMPORTANT FIX:
-      #
-      # xcodeVersion: 15.4
-      # projectFormat: xcode15_3
-      #
-      # This prevents XcodeGen from creating objectVersion 77.
-      # ==========================================================
-
-      - name: Create POSTAL 2 project
+      - name: Clone WineGlass and blink
         shell: bash
         run: |
-          set -e
+          set -euxo pipefail
 
           cd "$GITHUB_WORKSPACE"
+          rm -rf WineGlass blink
 
-          rm -rf Postal2iOS
+          git clone --depth 1 \
+            https://github.com/Contonion/WineGlass.git \
+            WineGlass
 
-          mkdir -p \
-            Postal2iOS/Sources
+          git clone --depth 1 \
+            https://github.com/jart/blink.git \
+            blink
 
-          cat > Postal2iOS/project.yml <<'YAML'
-          name: Postal2iOS
+          echo "===== WINEGLASS COMMIT ====="
+          git -C WineGlass rev-parse HEAD
 
-          options:
+          echo "===== BLINK COMMIT ====="
+          git -C blink rev-parse HEAD
 
-            bundleIdPrefix: com.postal2ios
-
-            xcodeVersion: "15.4"
-
-            projectFormat: xcode15_3
-
-          settings:
-
-            base:
-
-              IPHONEOS_DEPLOYMENT_TARGET: "15.0"
-
-              SWIFT_VERSION: "5.0"
-
-              SWIFT_STRICT_CONCURRENCY: minimal
-
-              TARGETED_DEVICE_FAMILY: "1"
-
-              CODE_SIGNING_ALLOWED: "NO"
-
-              CODE_SIGNING_REQUIRED: "NO"
-
-              CODE_SIGN_IDENTITY: ""
-
-          targets:
-
-            Postal2iOS:
-
-              type: application
-
-              platform: iOS
-
-              deploymentTarget: "15.0"
-
-              sources:
-
-                - path: Sources
-
-              settings:
-
-                base:
-
-                  PRODUCT_BUNDLE_IDENTIFIER: com.postal2ios.native
-
-                  PRODUCT_NAME: Postal2iOS
-
-                  INFOPLIST_FILE: Sources/Info.plist
-
-                  GENERATE_INFOPLIST_FILE: "NO"
-
-                  SWIFT_VERSION: "5.0"
-
-                  SWIFT_STRICT_CONCURRENCY: minimal
-
-                  TARGETED_DEVICE_FAMILY: "1"
-
-                  IPHONEOS_DEPLOYMENT_TARGET: "15.0"
-
-                  CODE_SIGNING_ALLOWED: "NO"
-
-                  CODE_SIGNING_REQUIRED: "NO"
-
-                  CODE_SIGN_IDENTITY: ""
-
-              info:
-
-                path: Sources/Info.plist
-
-                properties:
-
-                  CFBundleDisplayName: POSTAL 2
-
-                  CFBundleName: POSTAL 2
-
-                  CFBundleShortVersionString: "0.5"
-
-                  CFBundleVersion: "5"
-
-                  UIFileSharingEnabled: true
-
-                  LSSupportsOpeningDocumentsInPlace: true
-
-                  UIApplicationSupportsIndirectInputEvents: true
-
-                  UIApplicationSceneManifest:
-
-                    UIApplicationSupportsMultipleScenes: false
-
-                  UISupportedInterfaceOrientations:
-
-                    - UIInterfaceOrientationLandscapeLeft
-
-                    - UIInterfaceOrientationLandscapeRight
-
-                    - UIInterfaceOrientationPortrait
-
-                  UILaunchScreen: {}
-          YAML
-
-      # ==========================================================
-      # CREATE APPLICATION
-      # ==========================================================
-
-      - name: Create native POSTAL 2 importer
+      - name: Build blink ARM64 no-JIT
         shell: bash
         run: |
-          set -e
+          set -euxo pipefail
 
-          cd "$GITHUB_WORKSPACE"
+          BLINK="$GITHUB_WORKSPACE/blink"
+          WG="$GITHUB_WORKSPACE/WineGlass"
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          CC="$(xcrun --sdk iphoneos -f clang)"
+          AR="$(xcrun --sdk iphoneos -f ar)"
 
-          cat > Postal2iOS/Sources/Postal2App.swift <<'SWIFT'
-          import SwiftUI
-          import UIKit
-          import UniformTypeIdentifiers
-          import Foundation
+          cd "$BLINK"
+
+          test -f config.h.ios
+          cp config.h.ios config.h
+
+          ./configure \
+            CC="$CC" \
+            AR="$AR" \
+            CFLAGS="-g -O2 -arch arm64 -isysroot $SDK -miphoneos-version-min=17.0" \
+            --disable-threads \
+            --disable-sockets \
+            --disable-jit
+
+          gmake -j"$(sysctl -n hw.ncpu)" o//blink/blink.a
+
+          test -f o//blink/blink.a
+
+          mkdir -p "$WG/Vendor/blink/lib"
+          cp o//blink/blink.a "$WG/Vendor/blink/lib/blink.a"
+
+          "$CC" \
+            -c \
+            -std=c11 \
+            -g \
+            -O2 \
+            -arch arm64 \
+            -isysroot "$SDK" \
+            -miphoneos-version-min=17.0 \
+            -D_FILE_OFFSET_BITS=64 \
+            -D_DARWIN_C_SOURCE \
+            -DTARGET_OS_IPHONE=1 \
+            -isystem "$SDK/usr/include" \
+            -I"$BLINK" \
+            -include "$BLINK/config.h" \
+            "$WG/Vendor/blink/wg_blink_impl.c" \
+            -o "$WG/Vendor/blink/lib/wg_blink_impl.o"
+
+          echo "===== BLINK ====="
+          file "$WG/Vendor/blink/lib/blink.a"
+          file "$WG/Vendor/blink/lib/wg_blink_impl.o"
+
+      - name: Patch WineGlass into POSTAL 2 v6
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd "$GITHUB_WORKSPACE/WineGlass"
+
+          python3 <<'PY'
+          from pathlib import Path
+          import plistlib
+          import re
+
+          # ======================================================
+          # PROJECT.YML
+          # ======================================================
+
+          project = Path("project.yml")
+          s = project.read_text()
+
+          s = s.replace(
+              "bundleIdPrefix: com.wineglass",
+              "bundleIdPrefix: com.postal2ios"
+          )
+
+          s = s.replace(
+              "PRODUCT_BUNDLE_IDENTIFIER: com.wineglass.app",
+              "PRODUCT_BUNDLE_IDENTIFIER: com.postal2ios.native"
+          )
+
+          s = re.sub(
+              r'xcodeVersion:\s*"[^"]+"',
+              'xcodeVersion: "15.4"',
+              s,
+              count=1
+          )
+
+          if "projectFormat:" not in s:
+              s = s.replace(
+                  '  xcodeVersion: "15.4"',
+                  '  xcodeVersion: "15.4"\n  projectFormat: xcode15_3',
+                  1
+              )
+
+          s = s.replace(
+              'TARGETED_DEVICE_FAMILY: "1,2"',
+              'TARGETED_DEVICE_FAMILY: "1"'
+          )
+
+          s = re.sub(
+              r'^\s*CODE_SIGN_ENTITLEMENTS:.*\n',
+              '',
+              s,
+              flags=re.MULTILINE
+          )
+
+          s = s.replace(
+              "CODE_SIGN_STYLE: Automatic",
+              "CODE_SIGN_STYLE: Manual"
+          )
+
+          s = re.sub(
+              r'^\s*DEVELOPMENT_TEAM:.*\n',
+              '',
+              s,
+              flags=re.MULTILINE
+          )
+
+          project.write_text(s)
+
+          # ======================================================
+          # INFO.PLIST
+          # ======================================================
+
+          plist_path = Path("Sources/App/Info.plist")
+
+          with plist_path.open("rb") as f:
+              info = plistlib.load(f)
+
+          info["CFBundleName"] = "POSTAL 2"
+          info["CFBundleDisplayName"] = "POSTAL 2"
+          info["CFBundleShortVersionString"] = "0.6"
+          info["CFBundleVersion"] = "6"
+          info["UIFileSharingEnabled"] = True
+          info["LSSupportsOpeningDocumentsInPlace"] = True
+
+          with plist_path.open("wb") as f:
+              plistlib.dump(
+                  info,
+                  f,
+                  sort_keys=False
+              )
+
+          # ======================================================
+          # LOG TO DOCUMENTS
+          # ======================================================
+
+          log_path = Path(
+              "Sources/Core/wg_log.c"
+          )
+
+          log_path.write_text(r'''#include "wg_log.h"
+          #include <stdio.h>
+          #include <string.h>
+          #include <pthread.h>
+          #include <stdlib.h>
+          #include <stdarg.h>
+
+          static WGLogCallback s_callback = NULL;
+          static void *s_userdata = NULL;
+          static WGLogLevel s_minLevel = WG_LOG_DEBUG;
+
+          static pthread_mutex_t s_mutex =
+              PTHREAD_MUTEX_INITIALIZER;
+
+          static FILE *s_postal_file = NULL;
+
+          static const char *level_names[] = {
+              "DBG",
+              "INF",
+              "WRN",
+              "ERR",
+              "FTL"
+          };
 
 
-          // =====================================================
-          // APP
-          // =====================================================
+          void wg_log_init(void) {
 
-          @main
-          struct Postal2App: App {
+              s_callback = NULL;
+              s_userdata = NULL;
+              s_minLevel = WG_LOG_DEBUG;
 
-              var body: some Scene {
+              const char *home =
+                  getenv("HOME");
 
-                  WindowGroup {
-
-                      ContentView()
-                          .preferredColorScheme(
-                              .dark
-                          )
-                  }
-              }
-          }
-
-
-          // =====================================================
-          // COUNTERS
-          // =====================================================
-
-          struct PostalCounts {
-
-              var maps = 0
-
-              var staticMeshes = 0
-
-              var textures = 0
-
-              var animations = 0
-
-              var scripts = 0
-
-              var sounds = 0
-
-              var music = 0
-
-              var configs = 0
-
-              var executables = 0
-
-              var other = 0
-
-              var total = 0
-          }
-
-
-          // =====================================================
-          // NATIVE IOS FOLDER PICKER
-          // =====================================================
-
-          struct NativeFolderPicker:
-              UIViewControllerRepresentable {
-
-              let onPicked:
-                  (URL) -> Void
-
-              let onCancelled:
-                  () -> Void
-
-
-              // =================================================
-              // COORDINATOR
-              // =================================================
-
-              func makeCoordinator()
-                  -> Coordinator {
-
-                  Coordinator(
-                      onPicked:
-                          onPicked,
-                      onCancelled:
-                          onCancelled
-                  )
-              }
-
-
-              // =================================================
-              // CREATE PICKER
-              // =================================================
-
-              func makeUIViewController(
-                  context:
-                      Context
-              ) -> UIDocumentPickerViewController {
-
-                  let picker =
-                      UIDocumentPickerViewController(
-                          forOpeningContentTypes: [
-                              UTType.folder
-                          ],
-                          asCopy:
-                              false
-                      )
-
-                  picker.delegate =
-                      context.coordinator
-
-                  picker.allowsMultipleSelection =
-                      false
-
-                  picker.shouldShowFileExtensions =
-                      true
-
-                  return picker
-              }
-
-
-              // =================================================
-              // UPDATE
-              // =================================================
-
-              func updateUIViewController(
-                  _ uiViewController:
-                      UIDocumentPickerViewController,
-                  context:
-                      Context
+              if (
+                  home &&
+                  home[0]
               ) {
 
-              }
-
-
-              // =================================================
-              // COORDINATOR
-              // =================================================
-
-              final class Coordinator:
-                  NSObject,
-                  UIDocumentPickerDelegate {
-
-                  let onPicked:
-                      (URL) -> Void
-
-                  let onCancelled:
-                      () -> Void
-
-
-                  init(
-                      onPicked:
-                          @escaping (URL) -> Void,
-                      onCancelled:
-                          @escaping () -> Void
-                  ) {
-
-                      self.onPicked =
-                          onPicked
-
-                      self.onCancelled =
-                          onCancelled
-
-                      super.init()
-                  }
-
-
-                  // =============================================
-                  // SELECTED FOLDER
-                  // =============================================
-
-                  func documentPicker(
-                      _ controller:
-                          UIDocumentPickerViewController,
-                      didPickDocumentsAt urls:
-                          [URL]
-                  ) {
-
-                      print("")
-                      print(
-                          "======================================"
-                      )
-                      print(
-                          "POSTAL 2 FOLDER CALLBACK"
-                      )
-                      print(
-                          "======================================"
-                      )
-
-                      print(
-                          "Returned URLs:",
-                          urls.count
-                      )
-
-                      guard let url =
-                          urls.first
-                      else {
-
-                          print(
-                              "ERROR: picker returned zero URLs"
-                          )
-
-                          DispatchQueue.main.async {
-
-                              self.onCancelled()
-                          }
-
-                          return
-                      }
-
-                      print(
-                          "Selected:",
-                          url.lastPathComponent
-                      )
-
-                      print(
-                          "Path:",
-                          url.path
-                      )
-
-                      print(
-                          "======================================"
-                      )
-
-                      DispatchQueue.main.async {
-
-                          self.onPicked(
-                              url
-                          )
-                      }
-                  }
-
-
-                  // =============================================
-                  // CANCELLED
-                  // =============================================
-
-                  func documentPickerWasCancelled(
-                      _ controller:
-                          UIDocumentPickerViewController
-                  ) {
-
-                      print(
-                          "POSTAL 2 folder picker cancelled"
-                      )
-
-                      DispatchQueue.main.async {
-
-                          self.onCancelled()
-                      }
-                  }
-              }
-          }
-
-
-          // =====================================================
-          // MAIN SCREEN
-          // =====================================================
-
-          struct ContentView:
-              View {
-
-              @State private var showPicker =
-                  false
-
-              @State private var importing =
-                  false
-
-              @State private var callbackCount =
-                  0
-
-              @State private var selectedFolder =
-                  "None"
-
-              @State private var status =
-                  "Select the MAIN POSTAL 2 folder"
-
-              @State private var progressText =
-                  ""
-
-              @State private var errorText:
-                  String? = nil
-
-              @State private var counts =
-                  PostalCounts()
-
-              private let fm =
-                  FileManager.default
-
-
-              // =================================================
-              // UI
-              // =================================================
-
-              var body: some View {
-
-                  ScrollView {
-
-                      VStack(
-                          spacing:
-                              16
-                      ) {
-
-                          // =====================================
-                          // TITLE
-                          // =====================================
-
-                          Text(
-                              "POSTAL 2 iOS"
-                          )
-                          .font(
-                              .system(
-                                  size:
-                                      32,
-                                  weight:
-                                      .bold
-                              )
-                          )
-
-                          Text(
-                              "Native ARM64 Data Importer v5"
-                          )
-                          .foregroundStyle(
-                              .secondary
-                          )
-
-
-                          // =====================================
-                          // IMPORT BUTTON
-                          // =====================================
-
-                          Button {
-
-                              errorText =
-                                  nil
-
-                              status =
-                                  "Opening iOS folder picker…"
-
-                              showPicker =
-                                  true
-
-                          } label: {
-
-                              HStack {
-
-                                  Image(
-                                      systemName:
-                                          "folder.fill.badge.plus"
-                                  )
-
-                                  Text(
-                                      importing
-                                      ? "IMPORTING…"
-                                      : "IMPORT POSTAL 2 FOLDER"
-                                  )
-                                  .fontWeight(
-                                      .bold
-                                  )
-                              }
-                              .frame(
-                                  maxWidth:
-                                      .infinity
-                              )
-                              .padding(
-                                  8
-                              )
-                          }
-                          .buttonStyle(
-                              .borderedProminent
-                          )
-                          .disabled(
-                              importing
-                          )
-
-
-                          Divider()
-
-
-                          // =====================================
-                          // CALLBACK DEBUG
-                          // =====================================
-
-                          HStack {
-
-                              Text(
-                                  "Picker callbacks"
-                              )
-
-                              Spacer()
-
-                              Text(
-                                  "\(callbackCount)"
-                              )
-                              .font(
-                                  .system(
-                                      .body,
-                                      design:
-                                          .monospaced
-                                  )
-                              )
-                          }
-
-
-                          HStack(
-                              alignment:
-                                  .top
-                          ) {
-
-                              Text(
-                                  "Selected"
-                              )
-
-                              Spacer()
-
-                              Text(
-                                  selectedFolder
-                              )
-                              .foregroundStyle(
-                                  .secondary
-                              )
-                              .multilineTextAlignment(
-                                  .trailing
-                              )
-                          }
-
-
-                          Divider()
-
-
-                          // =====================================
-                          // PROGRESS
-                          // =====================================
-
-                          if importing {
-
-                              ProgressView()
-
-                              Text(
-                                  progressText
-                              )
-                              .font(
-                                  .caption
-                              )
-                              .foregroundStyle(
-                                  .secondary
-                              )
-                              .multilineTextAlignment(
-                                  .center
-                              )
-                          }
-
-
-                          // =====================================
-                          // COUNTERS
-                          // =====================================
-
-                          VStack(
-                              spacing:
-                                  8
-                          ) {
-
-                              StatRow(
-                                  title:
-                                      "Maps",
-                                  ext:
-                                      ".fuk",
-                                  value:
-                                      counts.maps
-                              )
-
-                              StatRow(
-                                  title:
-                                      "StaticMeshes",
-                                  ext:
-                                      ".usx",
-                                  value:
-                                      counts.staticMeshes
-                              )
-
-                              StatRow(
-                                  title:
-                                      "Textures",
-                                  ext:
-                                      ".utx",
-                                  value:
-                                      counts.textures
-                              )
-
-                              StatRow(
-                                  title:
-                                      "Animations",
-                                  ext:
-                                      ".ukx",
-                                  value:
-                                      counts.animations
-                              )
-
-                              StatRow(
-                                  title:
-                                      "Scripts",
-                                  ext:
-                                      ".u",
-                                  value:
-                                      counts.scripts
-                              )
-
-                              StatRow(
-                                  title:
-                                      "Sounds",
-                                  ext:
-                                      ".uax / wav",
-                                  value:
-                                      counts.sounds
-                              )
-
-                              StatRow(
-                                  title:
-                                      "Music",
-                                  ext:
-                                      ".ogg / mp3",
-                                  value:
-                                      counts.music
-                              )
-
-                              StatRow(
-                                  title:
-                                      "Configs",
-                                  ext:
-                                      ".ini / int",
-                                  value:
-                                      counts.configs
-                              )
-
-                              StatRow(
-                                  title:
-                                      "Windows files",
-                                  ext:
-                                      ".exe / dll",
-                                  value:
-                                      counts.executables
-                              )
-
-                              StatRow(
-                                  title:
-                                      "Other files",
-                                  ext:
-                                      "*",
-                                  value:
-                                      counts.other
-                              )
-                          }
-
-
-                          Divider()
-
-
-                          // =====================================
-                          // TOTAL
-                          // =====================================
-
-                          HStack {
-
-                              Text(
-                                  "TOTAL IMPORTED"
-                              )
-                              .fontWeight(
-                                  .bold
-                              )
-
-                              Spacer()
-
-                              Text(
-                                  "\(counts.total)"
-                              )
-                              .font(
-                                  .system(
-                                      .headline,
-                                      design:
-                                          .monospaced
-                                  )
-                              )
-                          }
-
-
-                          // =====================================
-                          // STATUS
-                          // =====================================
-
-                          Text(
-                              status
-                          )
-                          .font(
-                              .system(
-                                  size:
-                                      14,
-                                  weight:
-                                      .semibold
-                              )
-                          )
-                          .multilineTextAlignment(
-                              .center
-                          )
-                          .foregroundStyle(
-                              errorText == nil
-                              ? .green
-                              : .red
-                          )
-
-
-                          // =====================================
-                          // ERROR
-                          // =====================================
-
-                          if let errorText {
-
-                              Text(
-                                  errorText
-                              )
-                              .font(
-                                  .caption
-                              )
-                              .foregroundStyle(
-                                  .red
-                              )
-                              .multilineTextAlignment(
-                                  .center
-                              )
-                              .textSelection(
-                                  .enabled
-                              )
-                          }
-
-
-                          Divider()
-
-
-                          // =====================================
-                          // INSTRUCTIONS
-                          // =====================================
-
-                          Text(
-                              """
-                              Press IMPORT POSTAL 2 FOLDER.
-
-                              In Files, enter the MAIN POSTAL 2 folder.
-
-                              Inside it you should normally see:
-
-                              Maps
-                              StaticMeshes
-                              Textures
-                              Animations
-                              Sounds
-                              Music
-                              System
-
-                              When you are inside that folder,
-                              press Open.
-                              """
-                          )
-                          .font(
-                              .caption
-                          )
-                          .foregroundStyle(
-                              .secondary
-                          )
-                          .multilineTextAlignment(
-                              .center
-                          )
-                      }
-                      .padding(
-                          20
-                      )
-                  }
-
-
-                  // =============================================
-                  // NATIVE PICKER
-                  // =============================================
-
-                  .sheet(
-                      isPresented:
-                          $showPicker
-                  ) {
-
-                      NativeFolderPicker(
-
-                          onPicked: {
-                              url in
-
-                              showPicker =
-                                  false
-
-                              callbackCount +=
-                                  1
-
-                              selectedFolder =
-                                  url.lastPathComponent
-
-                              status =
-                                  "Selected: \(url.lastPathComponent)"
-
-                              beginImport(
-                                  url
-                              )
-                          },
-
-                          onCancelled: {
-
-                              showPicker =
-                                  false
-
-                              status =
-                                  "Folder selection cancelled"
-                          }
-                      )
-                  }
-
-
-                  // =============================================
-                  // EXISTING IMPORT
-                  // =============================================
-
-                  .onAppear {
-
-                      scanExistingImport()
-                  }
-              }
-
-
-              // =================================================
-              // BEGIN IMPORT
-              // =================================================
-
-              private func beginImport(
-                  _ source:
-                      URL
-              ) {
-
-                  importing =
-                      true
-
-                  counts =
-                      PostalCounts()
-
-                  errorText =
-                      nil
-
-                  selectedFolder =
-                      source.lastPathComponent
-
-                  status =
-                      "Selected: \(source.lastPathComponent)"
-
-                  progressText =
-                      "Requesting folder access…"
-
-
-                  // =============================================
-                  // SECURITY SCOPE
-                  // =============================================
-
-                  let accessGranted =
-                      source
-                      .startAccessingSecurityScopedResource()
-
-                  print(
-                      "Security scope:",
-                      accessGranted
-                  )
-
-
-                  DispatchQueue.global(
-                      qos:
-                          .userInitiated
-                  ).async {
-
-                      defer {
-
-                          if accessGranted {
-
-                              source
-                                  .stopAccessingSecurityScopedResource()
-                          }
-                      }
-
-
-                      do {
-
-                          let result =
-                              try copyPostal2Folder(
-                                  source
-                              )
-
-                          DispatchQueue.main.async {
-
-                              counts =
-                                  result
-
-                              importing =
-                                  false
-
-                              progressText =
-                                  ""
-
-                              errorText =
-                                  nil
-
-                              status =
-                                  "POSTAL 2 imported successfully • \(result.total) files"
-                          }
-
-                      } catch {
-
-                          print(
-                              "POSTAL 2 IMPORT ERROR:",
-                              error.localizedDescription
-                          )
-
-                          DispatchQueue.main.async {
-
-                              importing =
-                                  false
-
-                              progressText =
-                                  ""
-
-                              status =
-                                  "POSTAL 2 import failed"
-
-                              errorText =
-                                  error.localizedDescription
-                          }
-                      }
-                  }
-              }
-
-
-              // =================================================
-              // COPY POSTAL 2
-              // =================================================
-
-              private func copyPostal2Folder(
-                  _ source:
-                      URL
-              ) throws -> PostalCounts {
-
-
-                  // =============================================
-                  // VERIFY DIRECTORY
-                  // =============================================
-
-                  let sourceValues =
-                      try source.resourceValues(
-                          forKeys: [
-                              .isDirectoryKey
-                          ]
-                      )
-
-                  guard sourceValues.isDirectory ==
-                      true
-                  else {
-
-                      throw ImportError(
-                          message:
-                              "Selected item is not a folder."
-                      )
-                  }
-
-
-                  // =============================================
-                  // DOCUMENTS
-                  // =============================================
-
-                  guard let documents =
-                      fm.urls(
-                          for:
-                              .documentDirectory,
-                          in:
-                              .userDomainMask
-                      ).first
-                  else {
-
-                      throw ImportError(
-                          message:
-                              "Could not access app Documents."
-                      )
-                  }
-
-
-                  // =============================================
-                  // DESTINATION
-                  // =============================================
-
-                  let destination =
-                      documents
-                      .appendingPathComponent(
-                          "Postal2FullData",
-                          isDirectory:
-                              true
-                      )
-
-
-                  let sourcePath =
-                      source
-                      .standardizedFileURL
-                      .path
-
-
-                  let destinationPath =
-                      destination
-                      .standardizedFileURL
-                      .path
-
-
-                  // =============================================
-                  // PREVENT SELF COPY
-                  // =============================================
+                  char path[1024];
+
+                  snprintf(
+                      path,
+                      sizeof(path),
+                      "%s/Documents/POSTAL2-WineGlass.log",
+                      home
+                  );
 
                   if (
-                      sourcePath ==
-                          destinationPath
-                      ||
-                      destinationPath.hasPrefix(
-                          sourcePath + "/"
-                      )
+                      s_postal_file
                   ) {
 
-                      throw ImportError(
-                          message:
-                              "Do not select the app's own Postal2FullData folder."
-                      )
+                      fclose(
+                          s_postal_file
+                      );
+
+                      s_postal_file =
+                          NULL;
                   }
 
+                  s_postal_file =
+                      fopen(
+                          path,
+                          "w"
+                      );
 
-                  try fm.createDirectory(
-                      at:
-                          destination,
-                      withIntermediateDirectories:
-                          true
-                  )
+                  if (
+                      s_postal_file
+                  ) {
 
+                      setvbuf(
+                          s_postal_file,
+                          NULL,
+                          _IOLBF,
+                          0
+                      );
 
-                  // =============================================
-                  // RESOURCE KEYS
-                  // =============================================
+                      fprintf(
+                          s_postal_file,
+                          "POSTAL 2 iOS v6 WineGlass log\n"
+                      );
 
-                  let keys:
-                      Set<URLResourceKey> = [
-
-                          .isDirectoryKey,
-
-                          .isRegularFileKey,
-
-                          .isSymbolicLinkKey,
-
-                          .fileSizeKey,
-
-                          .nameKey
-                      ]
-
-
-                  // =============================================
-                  // ENUMERATOR
-                  // =============================================
-
-                  guard let enumerator =
-                      fm.enumerator(
-                          at:
-                              source,
-                          includingPropertiesForKeys:
-                              Array(keys),
-                          options: [
-
-                              .skipsHiddenFiles,
-
-                              .skipsPackageDescendants
-                          ],
-                          errorHandler: {
-                              url,
-                              error in
-
-                              print(
-                                  "ENUMERATOR ERROR:",
-                                  url.path,
-                                  error.localizedDescription
-                              )
-
-                              return true
-                          }
-                      )
-                  else {
-
-                      throw ImportError(
-                          message:
-                              "iOS returned the folder but could not read its contents."
-                      )
+                      fflush(
+                          s_postal_file
+                      );
                   }
-
-
-                  var result =
-                      PostalCounts()
-
-                  var copied =
-                      0
-
-                  var scanned =
-                      0
-
-                  var failed =
-                      0
-
-
-                  let rootPath =
-                      source
-                      .standardizedFileURL
-                      .path
-
-
-                  // =============================================
-                  // WALK FILES
-                  // =============================================
-
-                  while let object =
-                      enumerator.nextObject() {
-
-                      guard let item =
-                          object as? URL
-                      else {
-
-                          continue
-                      }
-
-
-                      scanned += 1
-
-
-                      let values =
-                          try? item.resourceValues(
-                              forKeys:
-                                  keys
-                          )
-
-
-                      // =========================================
-                      // DIRECTORY
-                      // =========================================
-
-                      if values?.isDirectory ==
-                          true {
-
-                          continue
-                      }
-
-
-                      // =========================================
-                      // SYMLINK
-                      // =========================================
-
-                      if values?.isSymbolicLink ==
-                          true {
-
-                          continue
-                      }
-
-
-                      // =========================================
-                      // REGULAR FILE
-                      // =========================================
-
-                      guard values?.isRegularFile ==
-                          true
-                      else {
-
-                          continue
-                      }
-
-
-                      // =========================================
-                      // RELATIVE PATH
-                      // =========================================
-
-                      let fullPath =
-                          item
-                          .standardizedFileURL
-                          .path
-
-
-                      var relativePath =
-                          fullPath
-
-
-                      if relativePath.hasPrefix(
-                          rootPath
-                      ) {
-
-                          relativePath.removeFirst(
-                              rootPath.count
-                          )
-                      }
-
-
-                      while relativePath.hasPrefix(
-                          "/"
-                      ) {
-
-                          relativePath.removeFirst()
-                      }
-
-
-                      if relativePath.isEmpty {
-
-                          relativePath =
-                              item.lastPathComponent
-                      }
-
-
-                      // =========================================
-                      // TARGET
-                      // =========================================
-
-                      let target =
-                          destination
-                          .appendingPathComponent(
-                              relativePath
-                          )
-
-
-                      let targetFolder =
-                          target
-                          .deletingLastPathComponent()
-
-
-                      // =========================================
-                      // COPY
-                      // =========================================
-
-                      do {
-
-                          try fm.createDirectory(
-                              at:
-                                  targetFolder,
-                              withIntermediateDirectories:
-                                  true
-                          )
-
-
-                          if fm.fileExists(
-                              atPath:
-                                  target.path
-                          ) {
-
-                              try fm.removeItem(
-                                  at:
-                                      target
-                              )
-                          }
-
-
-                          try fm.copyItem(
-                              at:
-                                  item,
-                              to:
-                                  target
-                          )
-
-
-                          copied += 1
-
-
-                          classify(
-                              extensionName:
-                                  item
-                                  .pathExtension
-                                  .lowercased(),
-                              counts:
-                                  &result
-                          )
-
-                      } catch {
-
-                          failed += 1
-
-
-                          print(
-                              "COPY ERROR:",
-                              item.path,
-                              error.localizedDescription
-                          )
-                      }
-
-
-                      // =========================================
-                      // PROGRESS
-                      // =========================================
-
-                      if (
-                          copied > 0 &&
-                          copied % 10 == 0
-                      ) {
-
-                          let copiedNow =
-                              copied
-
-
-                          let scannedNow =
-                              scanned
-
-
-                          let failedNow =
-                              failed
-
-
-                          let currentName =
-                              item.lastPathComponent
-
-
-                          DispatchQueue.main.async {
-
-                              progressText =
-                                  """
-                                  COPY \(copiedNow)
-                                  Scanned \(scannedNow)
-                                  Failed \(failedNow)
-
-                                  \(currentName)
-                                  """
-                          }
-                      }
-                  }
-
-
-                  result.total =
-                      copied
-
-
-                  // =============================================
-                  // ZERO FILES
-                  // =============================================
-
-                  if copied == 0 {
-
-                      throw ImportError(
-                          message:
-                              """
-                              Folder callback worked,
-                              but zero files were copied.
-
-                              Select the MAIN POSTAL 2 folder.
-                              """
-                      )
-                  }
-
-
-                  print("")
-                  print(
-                      "======================================"
-                  )
-                  print(
-                      "POSTAL 2 IMPORT COMPLETE"
-                  )
-                  print(
-                      "======================================"
-                  )
-                  print(
-                      "Copied:",
-                      copied
-                  )
-                  print(
-                      "Scanned:",
-                      scanned
-                  )
-                  print(
-                      "Failed:",
-                      failed
-                  )
-                  print(
-                      "======================================"
-                  )
-
-
-                  return result
               }
+          }
 
 
-              // =================================================
-              // CLASSIFY
-              // =================================================
+          void wg_log_set_callback(
+              WGLogCallback callback,
+              void *userdata
+          ) {
 
-              private func classify(
-                  extensionName ext:
-                      String,
-                  counts:
-                      inout PostalCounts
+              pthread_mutex_lock(
+                  &s_mutex
+              );
+
+              s_callback =
+                  callback;
+
+              s_userdata =
+                  userdata;
+
+              pthread_mutex_unlock(
+                  &s_mutex
+              );
+          }
+
+
+          void wg_log_set_level(
+              WGLogLevel minLevel
+          ) {
+
+              s_minLevel =
+                  minLevel;
+          }
+
+
+          void wg_log(
+              WGLogLevel level,
+              const char *tag,
+              const char *fmt,
+              ...
+          ) {
+
+              if (
+                  level <
+                  s_minLevel
               ) {
 
-                  switch ext {
-
-                  case "fuk":
-
-                      counts.maps += 1
-
-
-                  case "usx":
-
-                      counts.staticMeshes += 1
-
-
-                  case "utx":
-
-                      counts.textures += 1
-
-
-                  case "ukx":
-
-                      counts.animations += 1
-
-
-                  case "u":
-
-                      counts.scripts += 1
-
-
-                  case "uax",
-                       "wav":
-
-                      counts.sounds += 1
-
-
-                  case "ogg",
-                       "mp3":
-
-                      counts.music += 1
-
-
-                  case "ini",
-                       "int":
-
-                      counts.configs += 1
-
-
-                  case "exe",
-                       "dll":
-
-                      counts.executables += 1
-
-
-                  default:
-
-                      counts.other += 1
-                  }
+                  return;
               }
 
+              int lvl =
 
-              // =================================================
-              // EXISTING IMPORT
-              // =================================================
-
-              private func scanExistingImport() {
-
-                  guard let documents =
-                      fm.urls(
-                          for:
-                              .documentDirectory,
-                          in:
-                              .userDomainMask
-                      ).first
-                  else {
-
-                      return
-                  }
-
-
-                  let root =
-                      documents
-                      .appendingPathComponent(
-                          "Postal2FullData",
-                          isDirectory:
-                              true
-                      )
-
-
-                  guard fm.fileExists(
-                      atPath:
-                          root.path
+                  (
+                      level >= 0 &&
+                      level <= WG_LOG_FATAL
                   )
-                  else {
 
-                      return
-                  }
+                  ? (int)level
 
-
-                  DispatchQueue.global(
-                      qos:
-                          .utility
-                  ).async {
+                  : (int)WG_LOG_ERROR;
 
 
-                      guard let enumerator =
-                          fm.enumerator(
-                              at:
-                                  root,
-                              includingPropertiesForKeys: [
-                                  .isRegularFileKey
-                              ],
-                              options: [
-                                  .skipsHiddenFiles
-                              ]
-                          )
-                      else {
-
-                          return
-                      }
+              const char *safe_tag =
+                  tag
+                  ? tag
+                  : "?";
 
 
-                      var result =
-                          PostalCounts()
+              char buf[512];
 
 
-                      var total =
-                          0
+              if (
+                  fmt
+              ) {
+
+                  va_list ap;
+
+                  va_start(
+                      ap,
+                      fmt
+                  );
+
+                  vsnprintf(
+                      buf,
+                      sizeof(buf),
+                      fmt,
+                      ap
+                  );
+
+                  va_end(
+                      ap
+                  );
+
+              } else {
+
+                  buf[0] =
+                      '\0';
+              }
 
 
-                      while let object =
-                          enumerator.nextObject() {
+              fprintf(
+                  stderr,
+                  "[%s/%s] %s\n",
+                  level_names[lvl],
+                  safe_tag,
+                  buf
+              );
 
 
-                          guard let item =
-                              object as? URL
-                          else {
-
-                              continue
-                          }
+              pthread_mutex_lock(
+                  &s_mutex
+              );
 
 
-                          let values =
-                              try? item.resourceValues(
-                                  forKeys: [
-                                      .isRegularFileKey
-                                  ]
-                              )
+              if (
+                  s_postal_file
+              ) {
+
+                  fprintf(
+                      s_postal_file,
+                      "[%s/%s] %s\n",
+                      level_names[lvl],
+                      safe_tag,
+                      buf
+                  );
+
+                  fflush(
+                      s_postal_file
+                  );
+              }
 
 
-                          guard values?.isRegularFile ==
-                              true
-                          else {
+              if (
+                  s_callback
+              ) {
 
-                              continue
-                          }
+                  char tagged[600];
 
+                  snprintf(
+                      tagged,
+                      sizeof(tagged),
+                      "[%s] %s",
+                      safe_tag,
+                      buf
+                  );
 
-                          total += 1
-
-
-                          classify(
-                              extensionName:
-                                  item
-                                  .pathExtension
-                                  .lowercased(),
-                              counts:
-                                  &result
-                          )
-                      }
-
-
-                      result.total =
-                          total
+                  s_callback(
+                      (WGLogLevel)lvl,
+                      safe_tag,
+                      tagged,
+                      s_userdata
+                  );
+              }
 
 
-                      if total > 0 {
+              pthread_mutex_unlock(
+                  &s_mutex
+              );
+          }
 
-                          DispatchQueue.main.async {
 
-                              counts =
-                                  result
+          void wg_log_ring_init(
+              WGLogRingBuffer *ring
+          ) {
 
-                              status =
-                                  "Existing POSTAL 2 import found • \(total) files"
-                          }
-                      }
-                  }
+              memset(
+                  ring,
+                  0,
+                  sizeof(*ring)
+              );
+
+              ring->capacity =
+                  256;
+          }
+
+
+          void wg_log_ring_push(
+              WGLogRingBuffer *ring,
+              WGLogLevel level,
+              const char *message
+          ) {
+
+              int idx =
+                  ring->head;
+
+
+              strncpy(
+                  ring->lines[idx],
+                  message,
+                  255
+              );
+
+
+              ring->lines[idx][255] =
+                  '\0';
+
+
+              ring->levels[idx] =
+                  level;
+
+
+              ring->head =
+                  (
+                      ring->head +
+                      1
+                  )
+                  %
+                  ring->capacity;
+
+
+              if (
+                  ring->count <
+                  ring->capacity
+              ) {
+
+                  ring->count++;
               }
           }
 
 
+          int wg_log_ring_count(
+              const WGLogRingBuffer *ring
+          ) {
+
+              return
+                  ring->count;
+          }
+
+
+          const char *wg_log_ring_get(
+              const WGLogRingBuffer *ring,
+              int index,
+              WGLogLevel *outLevel
+          ) {
+
+              if (
+                  index < 0 ||
+                  index >= ring->count
+              ) {
+
+                  return NULL;
+              }
+
+
+              int start =
+
+                  (
+                      ring->head
+                      -
+                      ring->count
+                      +
+                      ring->capacity
+                  )
+
+                  %
+
+                  ring->capacity;
+
+
+              int actual =
+
+                  (
+                      start +
+                      index
+                  )
+
+                  %
+
+                  ring->capacity;
+
+
+              if (
+                  outLevel
+              ) {
+
+                  *outLevel =
+                      (WGLogLevel)
+                      ring->levels[
+                          actual
+                      ];
+              }
+
+
+              return
+                  ring->lines[
+                      actual
+                  ];
+          }
+          ''')
+
+          # ======================================================
+          # AUTORUN ORIGINAL POSTAL2.EXE
+          # ======================================================
+
+          scene_path =
+              Path(
+                  "Sources/App/WGSceneDelegate.m"
+              )
+
+          m =
+              scene_path.read_text()
+
+
+          # ======================================================
+          # CHANGE LOAD BUTTON TITLE
+          # ======================================================
+
+          m, count =
+              re.subn(
+                  r'\[_loadButton\s+setTitle:@"\s*Load \.exe\s*"\s+forState:UIControlStateNormal\];',
+                  '[_loadButton setTitle:@"  RUN POSTAL 2  " forState:UIControlStateNormal];',
+                  m,
+                  count=1
+              )
+
+
+          if (
+              count != 1
+          ) {
+
+              raise SystemExit(
+                  "Could not patch Load .exe button title"
+              )
+          }
+
+
+          # ======================================================
+          # CHANGE BUTTON ACTION
+          # ======================================================
+
+          m, count =
+              re.subn(
+                  r'\[_loadButton\s+addTarget:self\s+action:@selector\(openFilePicker\)\s+forControlEvents:UIControlEventTouchUpInside\];',
+                  '[_loadButton addTarget:self action:@selector(runPostal2) forControlEvents:UIControlEventTouchUpInside];',
+                  m,
+                  count=1
+              )
+
+
+          if (
+              count != 1
+          ) {
+
+              raise SystemExit(
+                  "Could not patch Load .exe button action"
+              )
+          }
+
+
+          # ======================================================
+          # AUTO START AFTER ENGINE INITIALIZATION
+          # ======================================================
+
+          old =
+              "[self tryLoadBundledPE];"
+
+
+          if (
+              old not in m
+          ) {
+
+              raise SystemExit(
+                  "Could not find tryLoadBundledPE call"
+              )
+          }
+
+
+          m =
+              m.replace(
+                  old,
+                  "[self runPostal2];",
+                  1
+              )
+
+
+          marker =
+              "#pragma mark - UIDocumentPickerDelegate"
+
+
+          if (
+              marker not in m
+          ) {
+
+              raise SystemExit(
+                  "UIDocumentPicker marker missing"
+              )
+          }
+
+
+          # ======================================================
+          # POSTAL 2 METHODS
+          # ======================================================
+
+          postal_methods = r'''
           // =====================================================
-          // STAT ROW
+          // POSTAL 2 v6
           // =====================================================
 
-          struct StatRow:
-              View {
 
-              let title:
-                  String
+          - (NSString *)findPostal2Exe {
 
-              let ext:
-                  String
+              NSArray *paths =
 
-              let value:
-                  Int
-
-
-              var body: some View {
-
-                  HStack {
-
-                      VStack(
-                          alignment:
-                              .leading,
-                          spacing:
-                              2
-                      ) {
-
-                          Text(
-                              title
-                          )
-
-                          Text(
-                              ext
-                          )
-                          .font(
-                              .caption2
-                          )
-                          .foregroundStyle(
-                              .secondary
-                          )
-                      }
+                  NSSearchPathForDirectoriesInDomains(
+                      NSDocumentDirectory,
+                      NSUserDomainMask,
+                      YES
+                  );
 
 
-                      Spacer()
+              NSString *docs =
+                  paths.firstObject;
 
 
-                      Text(
-                          "\(value)"
-                      )
-                      .font(
-                          .system(
-                              .body,
-                              design:
-                                  .monospaced
-                          )
-                      )
+              if (
+                  !docs
+              ) {
+
+                  WG_LOGE(
+                      "POSTAL2",
+                      "Documents directory unavailable"
+                  );
+
+                  return nil;
+              }
+
+
+              NSString *root =
+
+                  [
+                      docs
+                      stringByAppendingPathComponent:
+                          @"Postal2FullData"
+                  ];
+
+
+              NSFileManager *fm =
+
+                  [
+                      NSFileManager
+                      defaultManager
+                  ];
+
+
+              BOOL isDirectory =
+                  NO;
+
+
+              if (
+
+                  ![
+                      fm
+                      fileExistsAtPath:
+                          root
+
+                      isDirectory:
+                          &isDirectory
+                  ]
+
+                  ||
+
+                  !isDirectory
+
+              ) {
+
+                  WG_LOGE(
+                      "POSTAL2",
+                      "Existing v5 folder missing: %s",
+                      root.UTF8String
+                  );
+
+                  return nil;
+              }
+
+
+              // ===============================================
+              // NORMAL POSTAL 2 PATH
+              // ===============================================
+
+              NSString *normal =
+
+                  [
+                      root
+                      stringByAppendingPathComponent:
+                          @"System/Postal2.exe"
+                  ];
+
+
+              if (
+
+                  [
+                      fm
+                      fileExistsAtPath:
+                          normal
+                  ]
+
+              ) {
+
+                  WG_LOGI(
+                      "POSTAL2",
+                      "Found normal EXE: %s",
+                      normal.UTF8String
+                  );
+
+                  return normal;
+              }
+
+
+              // ===============================================
+              // FALLBACK RECURSIVE SEARCH
+              // ===============================================
+
+              NSDirectoryEnumerator *enumerator =
+
+                  [
+                      fm
+                      enumeratorAtPath:
+                          root
+                  ];
+
+
+              NSString *relative =
+                  nil;
+
+
+              while (
+
+                  (
+                      relative =
+                          [
+                              enumerator
+                              nextObject
+                          ]
+                  )
+
+              ) {
+
+                  NSString *name =
+                      relative.lastPathComponent;
+
+
+                  if (
+
+                      [
+                          name
+
+                          caseInsensitiveCompare:
+                              @"Postal2.exe"
+                      ]
+
+                      ==
+
+                      NSOrderedSame
+
+                  ) {
+
+                      NSString *found =
+
+                          [
+                              root
+
+                              stringByAppendingPathComponent:
+                                  relative
+                          ];
+
+
+                      WG_LOGI(
+                          "POSTAL2",
+                          "Found recursive EXE: %s",
+                          found.UTF8String
+                      );
+
+
+                      return found;
                   }
               }
+
+
+              WG_LOGE(
+                  "POSTAL2",
+                  "Postal2.exe not found under Postal2FullData"
+              );
+
+
+              return nil;
           }
 
 
           // =====================================================
-          // ERROR
+          // RUN POSTAL 2
           // =====================================================
 
-          struct ImportError:
-              LocalizedError {
+          - (void)runPostal2 {
 
-              let message:
-                  String
+              if (
+                  !_engine
+              ) {
 
+                  WG_LOGW(
+                      "POSTAL2",
+                      "RUN pressed before engine initialization"
+                  );
 
-              var errorDescription:
-                  String? {
-
-                  return message
+                  return;
               }
+
+
+              NSString *exe =
+                  [
+                      self
+                      findPostal2Exe
+                  ];
+
+
+              if (
+                  !exe
+              ) {
+
+                  [
+                      _loadButton
+
+                      setTitle:
+                          @"  POSTAL2.EXE NOT FOUND  "
+
+                      forState:
+                          UIControlStateNormal
+                  ];
+
+                  return;
+              }
+
+
+              NSString *systemFolder =
+
+                  [
+                      exe
+                      stringByDeletingLastPathComponent
+                  ];
+
+
+              // ===============================================
+              // UE2 EXPECTS SYSTEM AS WORKING DIRECTORY
+              // ===============================================
+
+              if (
+
+                  chdir(
+                      systemFolder
+                          .fileSystemRepresentation
+                  )
+
+                  !=
+
+                  0
+
+              ) {
+
+                  WG_LOGE(
+                      "POSTAL2",
+                      "chdir System failed: %s",
+                      systemFolder.UTF8String
+                  );
+
+              } else {
+
+                  WG_LOGI(
+                      "POSTAL2",
+                      "Working directory: %s",
+                      systemFolder.UTF8String
+                  );
+              }
+
+
+              [
+                  _loadButton
+
+                  setTitle:
+                      @"  STARTING POSTAL 2...  "
+
+                  forState:
+                      UIControlStateNormal
+              ];
+
+
+              _loadButton.enabled =
+                  NO;
+
+
+              WG_LOGI(
+                  "POSTAL2",
+                  "Launching ORIGINAL Windows executable"
+              );
+
+
+              WG_LOGI(
+                  "POSTAL2",
+                  "EXE = %s",
+                  exe.UTF8String
+              );
+
+
+              // ===============================================
+              // REAL WINDOWS EXE
+              // ===============================================
+
+              [
+                  self
+
+                  loadAndRunPE:
+                      exe
+              ];
           }
-          SWIFT
+
+
+          '''
+
+
+          m =
+              m.replace(
+                  marker,
+                  postal_methods
+                      +
+                  "\n"
+                      +
+                  marker,
+                  1
+              )
+
+
+          scene_path.write_text(
+              m
+          )
+
+
+          print(
+              "WineGlass patched for POSTAL 2 v6"
+          )
+          PY
+
+
+          echo
+          echo "======================================"
+          echo "BUNDLE ID"
+          echo "======================================"
+
+          grep \
+            -n \
+            "PRODUCT_BUNDLE_IDENTIFIER" \
+            project.yml
+
+
+          echo
+          echo "======================================"
+          echo "POSTAL PATCH"
+          echo "======================================"
+
+          grep \
+            -n \
+            "runPostal2\|findPostal2Exe\|Postal2FullData" \
+            Sources/App/WGSceneDelegate.m
+
+
+          echo
+          echo "======================================"
+          echo "LOG PATCH"
+          echo "======================================"
+
+          grep \
+            -n \
+            "POSTAL2-WineGlass.log" \
+            Sources/Core/wg_log.c
 
 
       # ==========================================================
@@ -1765,56 +1073,26 @@ jobs:
       - name: Generate Xcode project
         shell: bash
         run: |
-          set -e
+          set -euxo pipefail
 
-          cd \
-            "$GITHUB_WORKSPACE/Postal2iOS"
-
-          echo
-          echo "======================================"
-          echo "GENERATING XCODE PROJECT"
-          echo "======================================"
+          cd "$GITHUB_WORKSPACE/WineGlass"
 
           xcodegen generate
 
           test -d \
-            Postal2iOS.xcodeproj
+            WineGlass.xcodeproj
+
+
+          PBX="$GITHUB_WORKSPACE/WineGlass/WineGlass.xcodeproj/project.pbxproj"
+
+
+          test -f \
+            "$PBX"
+
 
           echo
           echo "======================================"
-          echo "PROJECT GENERATED"
-          echo "======================================"
-
-          find . \
-            -maxdepth 3 \
-            -type f \
-            -print
-
-
-      # ==========================================================
-      # CHECK XCODE PROJECT FORMAT
-      #
-      # Previous broken build:
-      #
-      # objectVersion = 77
-      #
-      # Xcode 15.4 could not open it.
-      #
-      # This build should be xcode15_3 compatible.
-      # ==========================================================
-
-      - name: Verify Xcode 15 project format
-        shell: bash
-        run: |
-          set -e
-
-          PBX="$GITHUB_WORKSPACE/Postal2iOS/Postal2iOS.xcodeproj/project.pbxproj"
-
-          test -f "$PBX"
-
-          echo
-          echo "======================================"
-          echo "PROJECT FORMAT"
+          echo "OBJECT VERSION"
           echo "======================================"
 
           grep \
@@ -1823,141 +1101,51 @@ jobs:
             "$PBX" \
             | head
 
-          echo
-          echo "======================================"
-          echo "COMPATIBILITY"
-          echo "======================================"
-
-          grep \
-            -n \
-            "compatibilityVersion" \
-            "$PBX" \
-            | head \
-            || true
-
-          echo
-          echo "======================================"
-          echo "CHECK OBJECT VERSION 77"
-          echo "======================================"
 
           if grep \
             -q \
             "objectVersion = 77;" \
             "$PBX"; then
 
-            echo
-            echo "ERROR:"
-            echo "XcodeGen created future project format 77 again."
-            echo
-            echo "Expected Xcode 15 compatible project."
-            echo
+              echo
+              echo "ERROR:"
+              echo "future Xcode project format 77"
 
-            exit 1
+              exit 1
           fi
-
-          echo
-          echo "GOOD:"
-          echo "objectVersion 77 is NOT present."
-          echo
-          echo "Project should open in Xcode 15.4."
-
-
-      # ==========================================================
-      # VERIFY PICKER SOURCE
-      # ==========================================================
-
-      - name: Verify native picker source
-        shell: bash
-        run: |
-          set -e
-
-          SRC="$GITHUB_WORKSPACE/Postal2iOS/Sources/Postal2App.swift"
-
-          test -f "$SRC"
-
-          echo
-          echo "======================================"
-          echo "SOURCE CHECK"
-          echo "======================================"
-
-          grep -n \
-            "UIDocumentPickerViewController" \
-            "$SRC"
-
-          grep -n \
-            "didPickDocumentsAt" \
-            "$SRC"
-
-          grep -n \
-            "documentPickerWasCancelled" \
-            "$SRC"
-
-          grep -n \
-            "startAccessingSecurityScopedResource" \
-            "$SRC"
-
-          grep -n \
-            "Postal2FullData" \
-            "$SRC"
-
-          echo
-          echo "======================================"
-          echo "REAL FILEIMPORTER CHECK"
-          echo "======================================"
-
-          if grep -n -E \
-            '^[[:space:]]*\.fileImporter[[:space:]]*\(' \
-            "$SRC"; then
-
-            echo
-            echo "ERROR: real SwiftUI fileImporter call found"
-
-            exit 1
-          fi
-
-          echo
-          echo "Native UIDocumentPicker ready."
 
 
       # ==========================================================
       # BUILD
       # ==========================================================
 
-      - name: Build POSTAL 2 Native iOS
+      - name: Build POSTAL 2 v6 ARM64
         shell: bash
         run: |
           set +e
+          set -o pipefail
 
-          cd \
-            "$GITHUB_WORKSPACE/Postal2iOS"
+
+          cd "$GITHUB_WORKSPACE/WineGlass"
+
 
           rm -rf \
             "$GITHUB_WORKSPACE/build"
 
+
           mkdir -p \
             "$GITHUB_WORKSPACE/build"
 
-          echo
-          echo "======================================"
-          echo "BUILD POSTAL 2"
-          echo "======================================"
-
-          echo
-          echo "Xcode:"
-          xcodebuild -version
-
-          echo
-          echo "SDK:"
-          xcrun \
-            --sdk iphoneos \
-            --show-sdk-version
 
           echo
           echo "======================================"
+          echo "BUILD POSTAL 2 v6"
+          echo "======================================"
+
 
           xcodebuild \
-            -project Postal2iOS.xcodeproj \
-            -scheme Postal2iOS \
+            -project WineGlass.xcodeproj \
+            -scheme WineGlass \
             -configuration Release \
             -sdk iphoneos \
             -destination "generic/platform=iOS" \
@@ -1970,35 +1158,46 @@ jobs:
             build \
             2>&1 \
             | tee \
-              "$GITHUB_WORKSPACE/build/xcodebuild.log"
+                "$GITHUB_WORKSPACE/build/xcodebuild.log"
+
 
           STATUS=${PIPESTATUS[0]}
 
-          if [ "$STATUS" -ne 0 ]; then
 
-            echo
-            echo "======================================"
-            echo "REAL BUILD ERRORS"
-            echo "======================================"
+          if [
+              "$STATUS"
+              -ne
+              0
+          ]; then
 
-            grep \
-              -n \
-              -E \
-              "error:|fatal error:" \
-              "$GITHUB_WORKSPACE/build/xcodebuild.log" \
-              | tail \
-                  -250 \
-              || true
+              echo
+              echo "======================================"
+              echo "REAL BUILD ERRORS"
+              echo "======================================"
 
-            echo
-            echo "======================================"
 
-            exit "$STATUS"
+              grep \
+                -n \
+                -E \
+                "error:|fatal error:" \
+                "$GITHUB_WORKSPACE/build/xcodebuild.log" \
+                | tail \
+                    -250 \
+                || true
+
+
+              echo
+              echo "======================================"
+
+
+              exit \
+                "$STATUS"
           fi
+
 
           echo
           echo "======================================"
-          echo "XCODE BUILD SUCCESS"
+          echo "BUILD SUCCESS"
           echo "======================================"
 
 
@@ -2009,57 +1208,46 @@ jobs:
       - name: Locate built app
         shell: bash
         run: |
-          set -e
+          set -euxo pipefail
+
 
           APP="$(
-            find \
-              "$GITHUB_WORKSPACE/build/DerivedData/Build/Products" \
-              -type d \
-              -name "Postal2iOS.app" \
-              | head -n 1
+
+              find \
+                "$GITHUB_WORKSPACE/build/DerivedData/Build/Products" \
+                -type d \
+                -name "WineGlass.app" \
+                | head \
+                    -n 1
+
           )"
 
-          if [ -z "$APP" ]; then
 
-            echo
-            echo "ERROR: Postal2iOS.app not found"
+          if [
+              -z "$APP"
+          ]; then
 
-            find \
-              "$GITHUB_WORKSPACE/build" \
-              -maxdepth 8 \
-              -print
+              echo
+              echo "ERROR:"
+              echo "WineGlass.app not found"
 
-            exit 1
+              exit 1
           fi
 
-          echo "APP_PATH=$APP" \
+
+          echo \
+            "APP_PATH=$APP" \
             >> "$GITHUB_ENV"
+
 
           echo
           echo "======================================"
-          echo "APP FOUND"
+          echo "APP"
           echo "======================================"
 
-          echo "$APP"
-
-          du \
-            -sh \
+          echo \
             "$APP"
 
-
-      # ==========================================================
-      # VERIFY ARM64
-      # ==========================================================
-
-      - name: Verify ARM64 app
-        shell: bash
-        run: |
-          set -e
-
-          BIN="$APP_PATH/Postal2iOS"
-
-          test -f \
-            "$BIN"
 
           echo
           echo "======================================"
@@ -2067,131 +1255,99 @@ jobs:
           echo "======================================"
 
           file \
-            "$BIN"
+            "$APP/WineGlass"
+
 
           echo
           echo "======================================"
-          echo "ARCHITECTURE"
+          echo "ARCH"
           echo "======================================"
 
           lipo \
             -info \
-            "$BIN" \
+            "$APP/WineGlass" \
             || true
 
+
           file \
-            "$BIN" \
+            "$APP/WineGlass" \
             | grep \
                 -q \
                 "arm64"
 
-          echo
-          echo "ARM64 confirmed."
-
 
       # ==========================================================
-      # CREATE IPA
+      # VERIFY SAME BUNDLE ID AS v5
       # ==========================================================
 
-      - name: Create POSTAL 2 IPA
+      - name: Verify v6 bundle identity
         shell: bash
         run: |
-          set -e
+          set -euxo pipefail
 
-          OUTPUT="$GITHUB_WORKSPACE/output"
 
-          rm -rf \
-            "$OUTPUT"
+          INFO="$APP_PATH/Info.plist"
 
-          mkdir -p \
-            "$OUTPUT/Payload"
 
-          cp -R \
-            "$APP_PATH" \
-            "$OUTPUT/Payload/Postal2iOS.app"
+          BUNDLE="$(
 
-          cd \
-            "$OUTPUT"
+              /usr/libexec/PlistBuddy \
+                -c \
+                "Print :CFBundleIdentifier" \
+                "$INFO"
+
+          )"
+
+
+          VERSION="$(
+
+              /usr/libexec/PlistBuddy \
+                -c \
+                "Print :CFBundleShortVersionString" \
+                "$INFO"
+
+          )"
+
+
+          BUILD="$(
+
+              /usr/libexec/PlistBuddy \
+                -c \
+                "Print :CFBundleVersion" \
+                "$INFO"
+
+          )"
+
 
           echo
           echo "======================================"
-          echo "CREATE IPA"
+          echo "IDENTITY"
           echo "======================================"
 
-          /usr/bin/zip \
-            -qry \
-            "POSTAL-2-iOS-Native-Folder-Picker-v5.ipa" \
-            Payload
+          echo \
+            "Bundle:  $BUNDLE"
 
-          test -f \
-            "POSTAL-2-iOS-Native-Folder-Picker-v5.ipa"
+          echo \
+            "Version: $VERSION"
 
-          rm -rf \
-            Payload
-
-          echo
-          echo "======================================"
-          echo "IPA CREATED"
-          echo "======================================"
-
-          ls \
-            -lh \
-            POSTAL-2-iOS-Native-Folder-Picker-v5.ipa
+          echo \
+            "Build:   $BUILD"
 
 
-      # ==========================================================
-      # VERIFY IPA
-      # ==========================================================
+          test \
+            "$BUNDLE" = \
+            "com.postal2ios.native"
 
-      - name: Verify POSTAL 2 IPA
-        shell: bash
-        run: |
-          set -e
 
-          IPA="$GITHUB_WORKSPACE/output/POSTAL-2-iOS-Native-Folder-Picker-v5.ipa"
+          test \
+            "$VERSION" = \
+            "0.6"
 
-          test -f \
-            "$IPA"
 
-          TMP="$RUNNER_TEMP/postal2-ipa-check"
+          test \
+            "$BUILD" = \
+            "6"
 
-          rm -rf \
-            "$TMP"
-
-          mkdir -p \
-            "$TMP"
-
-          unzip \
-            -q \
-            "$IPA" \
-            -d \
-            "$TMP"
-
-          APP="$TMP/Payload/Postal2iOS.app"
-
-          test -d \
-            "$APP"
-
-          test -f \
-            "$APP/Postal2iOS"
-
-          echo
-          echo "======================================"
-          echo "BUNDLE ID"
-          echo "======================================"
-
-          /usr/libexec/PlistBuddy \
-            -c "Print :CFBundleIdentifier" \
-            "$APP/Info.plist"
-
-          echo
-          echo "======================================"
-          echo "VERSION"
-          echo "======================================"
-
-          /usr/libexec/PlistBuddy \
-            -c "Print :CFBundleShortVersionString" \
-            "$APP/Info.plist"
 
           echo
           echo "======================================"
@@ -2199,196 +1355,186 @@ jobs:
           echo "======================================"
 
           /usr/libexec/PlistBuddy \
-            -c "Print :UIFileSharingEnabled" \
-            "$APP/Info.plist"
-
-          echo
-          echo "======================================"
-          echo "OPEN DOCUMENTS"
-          echo "======================================"
-
-          /usr/libexec/PlistBuddy \
-            -c "Print :LSSupportsOpeningDocumentsInPlace" \
-            "$APP/Info.plist"
-
-          echo
-          echo "======================================"
-          echo "EXECUTABLE"
-          echo "======================================"
-
-          file \
-            "$APP/Postal2iOS"
-
-          echo
-          echo "======================================"
-          echo "IPA VERIFIED"
-          echo "======================================"
+            -c \
+            "Print :UIFileSharingEnabled" \
+            "$INFO"
 
 
       # ==========================================================
-      # README
+      # CREATE IPA
       # ==========================================================
 
-      - name: Create README
+      - name: Create POSTAL 2 v6 IPA
         shell: bash
         run: |
-          set -e
-
-          cat > \
-            "$GITHUB_WORKSPACE/output/README.txt" \
-            <<'EOF'
-          POSTAL 2 iOS
-          NATIVE FOLDER PICKER v5
-          =======================
+          set -euxo pipefail
 
 
-          MAIN FIX
-          --------
-
-          Previous build failed before Swift compilation:
-
-          objectVersion = 77
-
-          Xcode 15.4 could not open that Xcode project.
+          OUTPUT="$GITHUB_WORKSPACE/output"
 
 
-          v5 forces:
-
-          xcodeVersion 15.4
-
-          projectFormat xcode15_3
+          rm -rf \
+            "$OUTPUT"
 
 
-          FOLDER PICKER
-          -------------
-
-          Native:
-
-          UIDocumentPickerViewController
-
-          UIDocumentPickerDelegate
-
-          documentPicker didPickDocumentsAt
-
-          security-scoped access
+          mkdir -p \
+            "$OUTPUT/Payload"
 
 
-          TEST
-          ----
-
-          1. Install IPA.
-
-          2. Open POSTAL 2.
-
-          3. Press:
-
-             IMPORT POSTAL 2 FOLDER
-
-          4. Enter MAIN POSTAL 2 directory.
-
-          5. Press Open.
+          cp -R \
+            "$APP_PATH" \
+            "$OUTPUT/Payload/Postal2iOS.app"
 
 
-          CALLBACK
-          --------
-
-          Picker callbacks should change:
-
-          0 -> 1
+          cd \
+            "$OUTPUT"
 
 
-          IMPORT
-          ------
-
-          Files copy to:
-
-          Documents/Postal2FullData
+          echo
+          echo "======================================"
+          echo "CREATE IPA"
+          echo "======================================"
 
 
-          BUNDLE ID
+          /usr/bin/zip \
+            -qry \
+            "POSTAL-2-iOS-v6-ORIGINAL-EXE-TEST.ipa" \
+            Payload
+
+
+          rm -rf \
+            Payload
+
+
+          test -f \
+            "POSTAL-2-iOS-v6-ORIGINAL-EXE-TEST.ipa"
+
+
+          cat > README.txt <<'README'
+          POSTAL 2 iOS v6
+          ORIGINAL EXE TEST
+          ===============================
+
+
+          IMPORTANT
           ---------
+
+          DO NOT DELETE v5 FIRST.
+
+
+          SAME BUNDLE ID
+          --------------
 
           com.postal2ios.native
 
 
-          PLATFORM
-          --------
+          INSTALL
+          -------
 
-          ARM64
+          Sign v6 the same way
+          you signed v5.
 
-          iOS 15+
-
-
-          CURRENT STAGE
-          -------------
-
-          Full POSTAL 2 data importer.
-
-          The complete playable engine is not implemented yet.
+          Install v6 OVER v5.
 
 
-          NEXT
+          DATA
           ----
 
-          Package indexing
+          v5 already has:
 
-          Unreal package reader
-
-          map dependencies
-
-          rendering
-
-          controls
-
-          gameplay runtime
+          Documents/Postal2FullData
 
 
-          IPA is unsigned.
-          EOF
+          v6 searches automatically for:
+
+          Documents/Postal2FullData/System/Postal2.exe
 
 
-      # ==========================================================
-      # FINAL CHECK
-      # ==========================================================
+          If Postal2.exe is somewhere else
+          inside Postal2FullData,
+          v6 also searches recursively.
 
-      - name: Final artifact check
-        shell: bash
-        run: |
-          set -e
 
-          IPA="$GITHUB_WORKSPACE/output/POSTAL-2-iOS-Native-Folder-Picker-v5.ipa"
+          RUN
+          ---
 
-          README="$GITHUB_WORKSPACE/output/README.txt"
+          v6 changes working directory
+          to the POSTAL 2 System folder.
 
-          test -f \
-            "$IPA"
+          Then it gives the ORIGINAL
+          Windows Postal2.exe
+          to WineGlass.
 
-          test -f \
-            "$README"
+
+          CPU
+          ---
+
+          First build uses blink
+          WITHOUT JIT.
+
+
+          LOG
+          ---
+
+          After opening POSTAL 2 v6,
+          wait for the launch attempt.
+
+          Then open the POSTAL 2 folder
+          in iOS Files.
+
+          Send:
+
+          POSTAL2-WineGlass.log
+
+
+          GOAL
+          ----
+
+          Find the first REAL blocker:
+
+          DLL
+
+          Win32 API
+
+          CPU instruction
+
+          loader
+
+          graphics
+
+          or something else.
+
+
+          This is a diagnostic build.
+
+          It is NOT guaranteed
+          to reach the POSTAL 2 menu yet.
+          README
+
 
           echo
           echo "======================================"
-          echo "READY FOR UPLOAD"
+          echo "OUTPUT"
           echo "======================================"
 
           ls \
             -lh \
-            "$GITHUB_WORKSPACE/output"
+            "$OUTPUT"
 
 
       # ==========================================================
       # UPLOAD IPA
       # ==========================================================
 
-      - name: Upload POSTAL 2 IPA
+      - name: Upload POSTAL 2 v6 IPA
         uses: actions/upload-artifact@v4
         with:
 
-          name: Postal2-iOS-Native-Folder-Picker-v5-IPA
+          name: POSTAL-2-iOS-v6-ORIGINAL-EXE-TEST
 
           path: |
 
-            output/POSTAL-2-iOS-Native-Folder-Picker-v5.ipa
+            output/POSTAL-2-iOS-v6-ORIGINAL-EXE-TEST.ipa
 
             output/README.txt
 
@@ -2403,24 +1549,26 @@ jobs:
       # DEBUG
       # ==========================================================
 
-      - name: Upload debug files
+      - name: Upload build debug
         if: failure()
         uses: actions/upload-artifact@v4
         with:
 
-          name: Postal2-iOS-v5-BUILD-FAILED
+          name: POSTAL-2-iOS-v6-BUILD-FAILED
 
           path: |
 
-            Postal2iOS/project.yml
-
-            Postal2iOS/Postal2iOS.xcodeproj/project.pbxproj
-
-            Postal2iOS/Sources/Postal2App.swift
-
-            Postal2iOS/Sources/Info.plist
-
             build/xcodebuild.log
+
+            WineGlass/project.yml
+
+            WineGlass/Sources/App/WGSceneDelegate.m
+
+            WineGlass/Sources/App/Info.plist
+
+            WineGlass/Sources/Core/wg_log.c
+
+            WineGlass/WineGlass.xcodeproj/project.pbxproj
 
           if-no-files-found: ignore
 
