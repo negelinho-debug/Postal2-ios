@@ -1,4 +1,4 @@
-name: POSTAL 2 iOS Native Folder Picker v4 FULL FIXED
+name: POSTAL 2 iOS Native Folder Picker v5 XCODE FIX
 
 on:
   workflow_dispatch:
@@ -36,22 +36,34 @@ jobs:
           echo "======================================"
           echo "XCODE"
           echo "======================================"
+
           xcodebuild -version
 
           echo
           echo "======================================"
           echo "XCODEGEN"
           echo "======================================"
+
           xcodegen --version
 
           echo
           echo "======================================"
           echo "IPHONE SDK"
           echo "======================================"
-          xcrun --sdk iphoneos --show-sdk-version
+
+          xcrun \
+            --sdk iphoneos \
+            --show-sdk-version
 
       # ==========================================================
       # CREATE PROJECT
+      #
+      # IMPORTANT FIX:
+      #
+      # xcodeVersion: 15.4
+      # projectFormat: xcode15_3
+      #
+      # This prevents XcodeGen from creating objectVersion 77.
       # ==========================================================
 
       - name: Create POSTAL 2 project
@@ -70,16 +82,29 @@ jobs:
           name: Postal2iOS
 
           options:
+
             bundleIdPrefix: com.postal2ios
 
+            xcodeVersion: "15.4"
+
+            projectFormat: xcode15_3
+
           settings:
+
             base:
+
               IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+
               SWIFT_VERSION: "5.0"
+
               SWIFT_STRICT_CONCURRENCY: minimal
+
               TARGETED_DEVICE_FAMILY: "1"
+
               CODE_SIGNING_ALLOWED: "NO"
+
               CODE_SIGNING_REQUIRED: "NO"
+
               CODE_SIGN_IDENTITY: ""
 
           targets:
@@ -93,17 +118,23 @@ jobs:
               deploymentTarget: "15.0"
 
               sources:
+
                 - path: Sources
 
               settings:
+
                 base:
+
                   PRODUCT_BUNDLE_IDENTIFIER: com.postal2ios.native
+
                   PRODUCT_NAME: Postal2iOS
 
                   INFOPLIST_FILE: Sources/Info.plist
+
                   GENERATE_INFOPLIST_FILE: "NO"
 
                   SWIFT_VERSION: "5.0"
+
                   SWIFT_STRICT_CONCURRENCY: minimal
 
                   TARGETED_DEVICE_FAMILY: "1"
@@ -111,10 +142,13 @@ jobs:
                   IPHONEOS_DEPLOYMENT_TARGET: "15.0"
 
                   CODE_SIGNING_ALLOWED: "NO"
+
                   CODE_SIGNING_REQUIRED: "NO"
+
                   CODE_SIGN_IDENTITY: ""
 
               info:
+
                 path: Sources/Info.plist
 
                 properties:
@@ -123,9 +157,9 @@ jobs:
 
                   CFBundleName: POSTAL 2
 
-                  CFBundleShortVersionString: "0.4"
+                  CFBundleShortVersionString: "0.5"
 
-                  CFBundleVersion: "4"
+                  CFBundleVersion: "5"
 
                   UIFileSharingEnabled: true
 
@@ -134,11 +168,15 @@ jobs:
                   UIApplicationSupportsIndirectInputEvents: true
 
                   UIApplicationSceneManifest:
+
                     UIApplicationSupportsMultipleScenes: false
 
                   UISupportedInterfaceOrientations:
+
                     - UIInterfaceOrientationLandscapeLeft
+
                     - UIInterfaceOrientationLandscapeRight
+
                     - UIInterfaceOrientationPortrait
 
                   UILaunchScreen: {}
@@ -161,8 +199,9 @@ jobs:
           import UniformTypeIdentifiers
           import Foundation
 
+
           // =====================================================
-          // APPLICATION
+          // APP
           // =====================================================
 
           @main
@@ -180,24 +219,36 @@ jobs:
               }
           }
 
+
           // =====================================================
-          // POSTAL 2 COUNTERS
+          // COUNTERS
           // =====================================================
 
           struct PostalCounts {
 
               var maps = 0
+
               var staticMeshes = 0
+
               var textures = 0
+
               var animations = 0
+
               var scripts = 0
+
               var sounds = 0
+
               var music = 0
+
               var configs = 0
+
               var executables = 0
+
               var other = 0
+
               var total = 0
           }
+
 
           // =====================================================
           // NATIVE IOS FOLDER PICKER
@@ -212,6 +263,11 @@ jobs:
               let onCancelled:
                   () -> Void
 
+
+              // =================================================
+              // COORDINATOR
+              // =================================================
+
               func makeCoordinator()
                   -> Coordinator {
 
@@ -222,6 +278,11 @@ jobs:
                           onCancelled
                   )
               }
+
+
+              // =================================================
+              // CREATE PICKER
+              // =================================================
 
               func makeUIViewController(
                   context:
@@ -249,6 +310,11 @@ jobs:
                   return picker
               }
 
+
+              // =================================================
+              // UPDATE
+              // =================================================
+
               func updateUIViewController(
                   _ uiViewController:
                       UIDocumentPickerViewController,
@@ -257,6 +323,11 @@ jobs:
               ) {
 
               }
+
+
+              // =================================================
+              // COORDINATOR
+              // =================================================
 
               final class Coordinator:
                   NSObject,
@@ -267,6 +338,7 @@ jobs:
 
                   let onCancelled:
                       () -> Void
+
 
                   init(
                       onPicked:
@@ -283,6 +355,11 @@ jobs:
 
                       super.init()
                   }
+
+
+                  // =============================================
+                  // SELECTED FOLDER
+                  // =============================================
 
                   func documentPicker(
                       _ controller:
@@ -345,6 +422,11 @@ jobs:
                       }
                   }
 
+
+                  // =============================================
+                  // CANCELLED
+                  // =============================================
+
                   func documentPickerWasCancelled(
                       _ controller:
                           UIDocumentPickerViewController
@@ -361,6 +443,7 @@ jobs:
                   }
               }
           }
+
 
           // =====================================================
           // MAIN SCREEN
@@ -396,6 +479,11 @@ jobs:
               private let fm =
                   FileManager.default
 
+
+              // =================================================
+              // UI
+              // =================================================
+
               var body: some View {
 
                   ScrollView {
@@ -404,6 +492,10 @@ jobs:
                           spacing:
                               16
                       ) {
+
+                          // =====================================
+                          // TITLE
+                          // =====================================
 
                           Text(
                               "POSTAL 2 iOS"
@@ -418,11 +510,16 @@ jobs:
                           )
 
                           Text(
-                              "Native ARM64 Data Importer v4"
+                              "Native ARM64 Data Importer v5"
                           )
                           .foregroundStyle(
                               .secondary
                           )
+
+
+                          // =====================================
+                          // IMPORT BUTTON
+                          // =====================================
 
                           Button {
 
@@ -468,7 +565,13 @@ jobs:
                               importing
                           )
 
+
                           Divider()
+
+
+                          // =====================================
+                          // CALLBACK DEBUG
+                          // =====================================
 
                           HStack {
 
@@ -489,6 +592,7 @@ jobs:
                                   )
                               )
                           }
+
 
                           HStack(
                               alignment:
@@ -512,7 +616,13 @@ jobs:
                               )
                           }
 
+
                           Divider()
+
+
+                          // =====================================
+                          // PROGRESS
+                          // =====================================
 
                           if importing {
 
@@ -531,6 +641,11 @@ jobs:
                                   .center
                               )
                           }
+
+
+                          // =====================================
+                          // COUNTERS
+                          // =====================================
 
                           VStack(
                               spacing:
@@ -628,7 +743,13 @@ jobs:
                               )
                           }
 
+
                           Divider()
+
+
+                          // =====================================
+                          // TOTAL
+                          // =====================================
 
                           HStack {
 
@@ -653,6 +774,11 @@ jobs:
                               )
                           }
 
+
+                          // =====================================
+                          // STATUS
+                          // =====================================
+
                           Text(
                               status
                           )
@@ -673,6 +799,11 @@ jobs:
                               : .red
                           )
 
+
+                          // =====================================
+                          // ERROR
+                          // =====================================
+
                           if let errorText {
 
                               Text(
@@ -692,7 +823,13 @@ jobs:
                               )
                           }
 
+
                           Divider()
+
+
+                          // =====================================
+                          // INSTRUCTIONS
+                          // =====================================
 
                           Text(
                               """
@@ -700,7 +837,7 @@ jobs:
 
                               In Files, enter the MAIN POSTAL 2 folder.
 
-                              Inside it you should normally see folders such as:
+                              Inside it you should normally see:
 
                               Maps
                               StaticMeshes
@@ -710,7 +847,8 @@ jobs:
                               Music
                               System
 
-                              When you are INSIDE that main folder, press Open.
+                              When you are inside that folder,
+                              press Open.
                               """
                           )
                           .font(
@@ -727,6 +865,11 @@ jobs:
                           20
                       )
                   }
+
+
+                  // =============================================
+                  // NATIVE PICKER
+                  // =============================================
 
                   .sheet(
                       isPresented:
@@ -766,11 +909,17 @@ jobs:
                       )
                   }
 
+
+                  // =============================================
+                  // EXISTING IMPORT
+                  // =============================================
+
                   .onAppear {
 
                       scanExistingImport()
                   }
               }
+
 
               // =================================================
               // BEGIN IMPORT
@@ -799,6 +948,11 @@ jobs:
                   progressText =
                       "Requesting folder access…"
 
+
+                  // =============================================
+                  // SECURITY SCOPE
+                  // =============================================
+
                   let accessGranted =
                       source
                       .startAccessingSecurityScopedResource()
@@ -807,6 +961,7 @@ jobs:
                       "Security scope:",
                       accessGranted
                   )
+
 
                   DispatchQueue.global(
                       qos:
@@ -821,6 +976,7 @@ jobs:
                                   .stopAccessingSecurityScopedResource()
                           }
                       }
+
 
                       do {
 
@@ -872,14 +1028,20 @@ jobs:
                   }
               }
 
+
               // =================================================
-              // COPY POSTAL 2 FOLDER
+              // COPY POSTAL 2
               // =================================================
 
               private func copyPostal2Folder(
                   _ source:
                       URL
               ) throws -> PostalCounts {
+
+
+                  // =============================================
+                  // VERIFY DIRECTORY
+                  // =============================================
 
                   let sourceValues =
                       try source.resourceValues(
@@ -898,6 +1060,11 @@ jobs:
                       )
                   }
 
+
+                  // =============================================
+                  // DOCUMENTS
+                  // =============================================
+
                   guard let documents =
                       fm.urls(
                           for:
@@ -913,6 +1080,11 @@ jobs:
                       )
                   }
 
+
+                  // =============================================
+                  // DESTINATION
+                  // =============================================
+
                   let destination =
                       documents
                       .appendingPathComponent(
@@ -921,15 +1093,22 @@ jobs:
                               true
                       )
 
+
                   let sourcePath =
                       source
                       .standardizedFileURL
                       .path
 
+
                   let destinationPath =
                       destination
                       .standardizedFileURL
                       .path
+
+
+                  // =============================================
+                  // PREVENT SELF COPY
+                  // =============================================
 
                   if (
                       sourcePath ==
@@ -946,6 +1125,7 @@ jobs:
                       )
                   }
 
+
                   try fm.createDirectory(
                       at:
                           destination,
@@ -953,15 +1133,29 @@ jobs:
                           true
                   )
 
+
+                  // =============================================
+                  // RESOURCE KEYS
+                  // =============================================
+
                   let keys:
                       Set<URLResourceKey> = [
 
                           .isDirectoryKey,
+
                           .isRegularFileKey,
+
                           .isSymbolicLinkKey,
+
                           .fileSizeKey,
+
                           .nameKey
                       ]
+
+
+                  // =============================================
+                  // ENUMERATOR
+                  // =============================================
 
                   guard let enumerator =
                       fm.enumerator(
@@ -970,7 +1164,9 @@ jobs:
                           includingPropertiesForKeys:
                               Array(keys),
                           options: [
+
                               .skipsHiddenFiles,
+
                               .skipsPackageDescendants
                           ],
                           errorHandler: {
@@ -994,6 +1190,7 @@ jobs:
                       )
                   }
 
+
                   var result =
                       PostalCounts()
 
@@ -1006,10 +1203,16 @@ jobs:
                   var failed =
                       0
 
+
                   let rootPath =
                       source
                       .standardizedFileURL
                       .path
+
+
+                  // =============================================
+                  // WALK FILES
+                  // =============================================
 
                   while let object =
                       enumerator.nextObject() {
@@ -1021,7 +1224,9 @@ jobs:
                           continue
                       }
 
+
                       scanned += 1
+
 
                       let values =
                           try? item.resourceValues(
@@ -1029,17 +1234,32 @@ jobs:
                                   keys
                           )
 
+
+                      // =========================================
+                      // DIRECTORY
+                      // =========================================
+
                       if values?.isDirectory ==
                           true {
 
                           continue
                       }
 
+
+                      // =========================================
+                      // SYMLINK
+                      // =========================================
+
                       if values?.isSymbolicLink ==
                           true {
 
                           continue
                       }
+
+
+                      // =========================================
+                      // REGULAR FILE
+                      // =========================================
 
                       guard values?.isRegularFile ==
                           true
@@ -1048,13 +1268,20 @@ jobs:
                           continue
                       }
 
+
+                      // =========================================
+                      // RELATIVE PATH
+                      // =========================================
+
                       let fullPath =
                           item
                           .standardizedFileURL
                           .path
 
+
                       var relativePath =
                           fullPath
+
 
                       if relativePath.hasPrefix(
                           rootPath
@@ -1065,6 +1292,7 @@ jobs:
                           )
                       }
 
+
                       while relativePath.hasPrefix(
                           "/"
                       ) {
@@ -1072,11 +1300,17 @@ jobs:
                           relativePath.removeFirst()
                       }
 
+
                       if relativePath.isEmpty {
 
                           relativePath =
                               item.lastPathComponent
                       }
+
+
+                      // =========================================
+                      // TARGET
+                      // =========================================
 
                       let target =
                           destination
@@ -1084,9 +1318,15 @@ jobs:
                               relativePath
                           )
 
+
                       let targetFolder =
                           target
                           .deletingLastPathComponent()
+
+
+                      // =========================================
+                      // COPY
+                      // =========================================
 
                       do {
 
@@ -1096,6 +1336,7 @@ jobs:
                               withIntermediateDirectories:
                                   true
                           )
+
 
                           if fm.fileExists(
                               atPath:
@@ -1108,6 +1349,7 @@ jobs:
                               )
                           }
 
+
                           try fm.copyItem(
                               at:
                                   item,
@@ -1115,7 +1357,9 @@ jobs:
                                   target
                           )
 
+
                           copied += 1
+
 
                           classify(
                               extensionName:
@@ -1130,12 +1374,18 @@ jobs:
 
                           failed += 1
 
+
                           print(
                               "COPY ERROR:",
                               item.path,
                               error.localizedDescription
                           )
                       }
+
+
+                      // =========================================
+                      // PROGRESS
+                      // =========================================
 
                       if (
                           copied > 0 &&
@@ -1145,14 +1395,18 @@ jobs:
                           let copiedNow =
                               copied
 
+
                           let scannedNow =
                               scanned
+
 
                           let failedNow =
                               failed
 
+
                           let currentName =
                               item.lastPathComponent
+
 
                           DispatchQueue.main.async {
 
@@ -1168,20 +1422,28 @@ jobs:
                       }
                   }
 
+
                   result.total =
                       copied
+
+
+                  // =============================================
+                  // ZERO FILES
+                  // =============================================
 
                   if copied == 0 {
 
                       throw ImportError(
                           message:
                               """
-                              Folder callback worked, but zero files were copied.
+                              Folder callback worked,
+                              but zero files were copied.
 
-                              Make sure you selected the MAIN POSTAL 2 folder.
+                              Select the MAIN POSTAL 2 folder.
                               """
                       )
                   }
+
 
                   print("")
                   print(
@@ -1209,11 +1471,13 @@ jobs:
                       "======================================"
                   )
 
+
                   return result
               }
 
+
               // =================================================
-              // CLASSIFY EXTENSION
+              // CLASSIFY
               // =================================================
 
               private func classify(
@@ -1229,41 +1493,50 @@ jobs:
 
                       counts.maps += 1
 
+
                   case "usx":
 
                       counts.staticMeshes += 1
+
 
                   case "utx":
 
                       counts.textures += 1
 
+
                   case "ukx":
 
                       counts.animations += 1
 
+
                   case "u":
 
                       counts.scripts += 1
+
 
                   case "uax",
                        "wav":
 
                       counts.sounds += 1
 
+
                   case "ogg",
                        "mp3":
 
                       counts.music += 1
+
 
                   case "ini",
                        "int":
 
                       counts.configs += 1
 
+
                   case "exe",
                        "dll":
 
                       counts.executables += 1
+
 
                   default:
 
@@ -1271,8 +1544,9 @@ jobs:
                   }
               }
 
+
               // =================================================
-              // SCAN EXISTING DATA
+              // EXISTING IMPORT
               // =================================================
 
               private func scanExistingImport() {
@@ -1289,6 +1563,7 @@ jobs:
                       return
                   }
 
+
                   let root =
                       documents
                       .appendingPathComponent(
@@ -1296,6 +1571,7 @@ jobs:
                           isDirectory:
                               true
                       )
+
 
                   guard fm.fileExists(
                       atPath:
@@ -1306,10 +1582,12 @@ jobs:
                       return
                   }
 
+
                   DispatchQueue.global(
                       qos:
                           .utility
                   ).async {
+
 
                       guard let enumerator =
                           fm.enumerator(
@@ -1327,14 +1605,18 @@ jobs:
                           return
                       }
 
+
                       var result =
                           PostalCounts()
+
 
                       var total =
                           0
 
+
                       while let object =
                           enumerator.nextObject() {
+
 
                           guard let item =
                               object as? URL
@@ -1343,12 +1625,14 @@ jobs:
                               continue
                           }
 
+
                           let values =
                               try? item.resourceValues(
                                   forKeys: [
                                       .isRegularFileKey
                                   ]
                               )
+
 
                           guard values?.isRegularFile ==
                               true
@@ -1357,7 +1641,9 @@ jobs:
                               continue
                           }
 
+
                           total += 1
+
 
                           classify(
                               extensionName:
@@ -1369,8 +1655,10 @@ jobs:
                           )
                       }
 
+
                       result.total =
                           total
+
 
                       if total > 0 {
 
@@ -1387,6 +1675,7 @@ jobs:
               }
           }
 
+
           // =====================================================
           // STAT ROW
           // =====================================================
@@ -1402,6 +1691,7 @@ jobs:
 
               let value:
                   Int
+
 
               var body: some View {
 
@@ -1429,7 +1719,9 @@ jobs:
                           )
                       }
 
+
                       Spacer()
+
 
                       Text(
                           "\(value)"
@@ -1445,8 +1737,9 @@ jobs:
               }
           }
 
+
           // =====================================================
-          // ERROR TYPE
+          // ERROR
           // =====================================================
 
           struct ImportError:
@@ -1455,6 +1748,7 @@ jobs:
               let message:
                   String
 
+
               var errorDescription:
                   String? {
 
@@ -1462,6 +1756,7 @@ jobs:
               }
           }
           SWIFT
+
 
       # ==========================================================
       # GENERATE XCODE PROJECT
@@ -1472,7 +1767,8 @@ jobs:
         run: |
           set -e
 
-          cd "$GITHUB_WORKSPACE/Postal2iOS"
+          cd \
+            "$GITHUB_WORKSPACE/Postal2iOS"
 
           echo
           echo "======================================"
@@ -1486,7 +1782,7 @@ jobs:
 
           echo
           echo "======================================"
-          echo "PROJECT FILES"
+          echo "PROJECT GENERATED"
           echo "======================================"
 
           find . \
@@ -1494,18 +1790,80 @@ jobs:
             -type f \
             -print
 
+
       # ==========================================================
-      # VERIFY SOURCE
+      # CHECK XCODE PROJECT FORMAT
       #
-      # FIXED:
+      # Previous broken build:
       #
-      # Previous version matched the WORD .fileImporter
-      # inside a comment.
+      # objectVersion = 77
       #
-      # Now we only reject a REAL SwiftUI call:
+      # Xcode 15.4 could not open it.
       #
-      #     .fileImporter(
-      #
+      # This build should be xcode15_3 compatible.
+      # ==========================================================
+
+      - name: Verify Xcode 15 project format
+        shell: bash
+        run: |
+          set -e
+
+          PBX="$GITHUB_WORKSPACE/Postal2iOS/Postal2iOS.xcodeproj/project.pbxproj"
+
+          test -f "$PBX"
+
+          echo
+          echo "======================================"
+          echo "PROJECT FORMAT"
+          echo "======================================"
+
+          grep \
+            -n \
+            "objectVersion" \
+            "$PBX" \
+            | head
+
+          echo
+          echo "======================================"
+          echo "COMPATIBILITY"
+          echo "======================================"
+
+          grep \
+            -n \
+            "compatibilityVersion" \
+            "$PBX" \
+            | head \
+            || true
+
+          echo
+          echo "======================================"
+          echo "CHECK OBJECT VERSION 77"
+          echo "======================================"
+
+          if grep \
+            -q \
+            "objectVersion = 77;" \
+            "$PBX"; then
+
+            echo
+            echo "ERROR:"
+            echo "XcodeGen created future project format 77 again."
+            echo
+            echo "Expected Xcode 15 compatible project."
+            echo
+
+            exit 1
+          fi
+
+          echo
+          echo "GOOD:"
+          echo "objectVersion 77 is NOT present."
+          echo
+          echo "Project should open in Xcode 15.4."
+
+
+      # ==========================================================
+      # VERIFY PICKER SOURCE
       # ==========================================================
 
       - name: Verify native picker source
@@ -1558,12 +1916,11 @@ jobs:
           fi
 
           echo
-          echo "Old SwiftUI fileImporter is NOT present."
-          echo
-          echo "Native UIDocumentPicker is ready."
+          echo "Native UIDocumentPicker ready."
+
 
       # ==========================================================
-      # BUILD APP
+      # BUILD
       # ==========================================================
 
       - name: Build POSTAL 2 Native iOS
@@ -1571,7 +1928,8 @@ jobs:
         run: |
           set +e
 
-          cd "$GITHUB_WORKSPACE/Postal2iOS"
+          cd \
+            "$GITHUB_WORKSPACE/Postal2iOS"
 
           rm -rf \
             "$GITHUB_WORKSPACE/build"
@@ -1582,6 +1940,19 @@ jobs:
           echo
           echo "======================================"
           echo "BUILD POSTAL 2"
+          echo "======================================"
+
+          echo
+          echo "Xcode:"
+          xcodebuild -version
+
+          echo
+          echo "SDK:"
+          xcrun \
+            --sdk iphoneos \
+            --show-sdk-version
+
+          echo
           echo "======================================"
 
           xcodebuild \
@@ -1630,6 +2001,7 @@ jobs:
           echo "XCODE BUILD SUCCESS"
           echo "======================================"
 
+
       # ==========================================================
       # LOCATE APP
       # ==========================================================
@@ -1674,6 +2046,7 @@ jobs:
             -sh \
             "$APP"
 
+
       # ==========================================================
       # VERIFY ARM64
       # ==========================================================
@@ -1685,20 +2058,16 @@ jobs:
 
           BIN="$APP_PATH/Postal2iOS"
 
-          if [ ! -f "$BIN" ]; then
-
-            echo
-            echo "ERROR: executable missing"
-
-            exit 1
-          fi
+          test -f \
+            "$BIN"
 
           echo
           echo "======================================"
           echo "EXECUTABLE"
           echo "======================================"
 
-          file "$BIN"
+          file \
+            "$BIN"
 
           echo
           echo "======================================"
@@ -1710,13 +2079,15 @@ jobs:
             "$BIN" \
             || true
 
-          file "$BIN" \
+          file \
+            "$BIN" \
             | grep \
                 -q \
                 "arm64"
 
           echo
-          echo "ARM64 executable confirmed."
+          echo "ARM64 confirmed."
+
 
       # ==========================================================
       # CREATE IPA
@@ -1735,16 +2106,12 @@ jobs:
           mkdir -p \
             "$OUTPUT/Payload"
 
-          echo
-          echo "======================================"
-          echo "COPY APP TO PAYLOAD"
-          echo "======================================"
-
           cp -R \
             "$APP_PATH" \
             "$OUTPUT/Payload/Postal2iOS.app"
 
-          cd "$OUTPUT"
+          cd \
+            "$OUTPUT"
 
           echo
           echo "======================================"
@@ -1753,17 +2120,11 @@ jobs:
 
           /usr/bin/zip \
             -qry \
-            "POSTAL-2-iOS-Native-Folder-Picker-v4-FIXED.ipa" \
+            "POSTAL-2-iOS-Native-Folder-Picker-v5.ipa" \
             Payload
 
-          if [ ! -f \
-            "POSTAL-2-iOS-Native-Folder-Picker-v4-FIXED.ipa" ]; then
-
-            echo
-            echo "ERROR: IPA was not created"
-
-            exit 1
-          fi
+          test -f \
+            "POSTAL-2-iOS-Native-Folder-Picker-v5.ipa"
 
           rm -rf \
             Payload
@@ -1775,7 +2136,8 @@ jobs:
 
           ls \
             -lh \
-            POSTAL-2-iOS-Native-Folder-Picker-v4-FIXED.ipa
+            POSTAL-2-iOS-Native-Folder-Picker-v5.ipa
+
 
       # ==========================================================
       # VERIFY IPA
@@ -1786,15 +2148,10 @@ jobs:
         run: |
           set -e
 
-          IPA="$GITHUB_WORKSPACE/output/POSTAL-2-iOS-Native-Folder-Picker-v4-FIXED.ipa"
+          IPA="$GITHUB_WORKSPACE/output/POSTAL-2-iOS-Native-Folder-Picker-v5.ipa"
 
-          if [ ! -f "$IPA" ]; then
-
-            echo
-            echo "ERROR: IPA missing"
-
-            exit 1
-          fi
+          test -f \
+            "$IPA"
 
           TMP="$RUNNER_TEMP/postal2-ipa-check"
 
@@ -1812,30 +2169,15 @@ jobs:
 
           APP="$TMP/Payload/Postal2iOS.app"
 
-          if [ ! -d "$APP" ]; then
+          test -d \
+            "$APP"
 
-            echo
-            echo "ERROR: app missing from IPA"
-
-            unzip \
-              -l \
-              "$IPA"
-
-            exit 1
-          fi
-
-          if [ ! -f \
-            "$APP/Postal2iOS" ]; then
-
-            echo
-            echo "ERROR: executable missing from IPA"
-
-            exit 1
-          fi
+          test -f \
+            "$APP/Postal2iOS"
 
           echo
           echo "======================================"
-          echo "IPA BUNDLE ID"
+          echo "BUNDLE ID"
           echo "======================================"
 
           /usr/libexec/PlistBuddy \
@@ -1862,7 +2204,7 @@ jobs:
 
           echo
           echo "======================================"
-          echo "OPEN DOCUMENTS IN PLACE"
+          echo "OPEN DOCUMENTS"
           echo "======================================"
 
           /usr/libexec/PlistBuddy \
@@ -1871,7 +2213,7 @@ jobs:
 
           echo
           echo "======================================"
-          echo "IPA EXECUTABLE"
+          echo "EXECUTABLE"
           echo "======================================"
 
           file \
@@ -1879,19 +2221,9 @@ jobs:
 
           echo
           echo "======================================"
-          echo "IPA CONTENTS"
-          echo "======================================"
-
-          unzip \
-            -l \
-            "$IPA" \
-            | head \
-                -80
-
-          echo
-          echo "======================================"
           echo "IPA VERIFIED"
           echo "======================================"
+
 
       # ==========================================================
       # README
@@ -1906,40 +2238,43 @@ jobs:
             "$GITHUB_WORKSPACE/output/README.txt" \
             <<'EOF'
           POSTAL 2 iOS
-          NATIVE FOLDER PICKER v4 FIXED
-          =================================
+          NATIVE FOLDER PICKER v5
+          =======================
 
 
-          IPA
-          ---
+          MAIN FIX
+          --------
 
-          POSTAL-2-iOS-Native-Folder-Picker-v4-FIXED.ipa
+          Previous build failed before Swift compilation:
+
+          objectVersion = 77
+
+          Xcode 15.4 could not open that Xcode project.
 
 
-          CURRENT STAGE
-          -------------
+          v5 forces:
 
-          POSTAL 2 full-data importer.
+          xcodeVersion 15.4
 
-          This is not yet the complete playable game engine.
+          projectFormat xcode15_3
 
 
           FOLDER PICKER
           -------------
 
-          Native iOS:
+          Native:
 
           UIDocumentPickerViewController
 
           UIDocumentPickerDelegate
 
-          documentPicker(_:didPickDocumentsAt:)
+          documentPicker didPickDocumentsAt
 
-          startAccessingSecurityScopedResource()
+          security-scoped access
 
 
-          HOW TO TEST
-          -----------
+          TEST
+          ----
 
           1. Install IPA.
 
@@ -1949,51 +2284,25 @@ jobs:
 
              IMPORT POSTAL 2 FOLDER
 
-          4. Open the MAIN POSTAL 2 directory in Files.
+          4. Enter MAIN POSTAL 2 directory.
 
-          5. Inside it you should normally see:
-
-             Maps
-             StaticMeshes
-             Textures
-             Animations
-             Sounds
-             Music
-             System
-
-          6. Press Open.
+          5. Press Open.
 
 
-          CALLBACK TEST
-          -------------
+          CALLBACK
+          --------
 
-          Before:
+          Picker callbacks should change:
 
-             Picker callbacks = 0
-
-          After choosing the folder:
-
-             Picker callbacks = 1
+          0 -> 1
 
 
           IMPORT
           ------
 
-          Files are copied to:
+          Files copy to:
 
-             Documents/Postal2FullData
-
-
-          PROGRESS
-          --------
-
-          During copy:
-
-             COPY 10
-             COPY 20
-             COPY 30
-
-          etc.
+          Documents/Postal2FullData
 
 
           BUNDLE ID
@@ -2005,29 +2314,41 @@ jobs:
           PLATFORM
           --------
 
-          ARM64 iPhone
+          ARM64
 
           iOS 15+
 
 
-          BUILD FIX
-          ---------
+          CURRENT STAGE
+          -------------
 
-          Previous workflow stopped because the verification grep
-          detected the text ".fileImporter" inside a COMMENT.
+          Full POSTAL 2 data importer.
 
-          This build only detects a real code call:
+          The complete playable engine is not implemented yet.
 
-             .fileImporter(
 
-          Comments no longer stop the build.
+          NEXT
+          ----
+
+          Package indexing
+
+          Unreal package reader
+
+          map dependencies
+
+          rendering
+
+          controls
+
+          gameplay runtime
 
 
           IPA is unsigned.
           EOF
 
+
       # ==========================================================
-      # FINAL ARTIFACT CHECK
+      # FINAL CHECK
       # ==========================================================
 
       - name: Final artifact check
@@ -2035,29 +2356,25 @@ jobs:
         run: |
           set -e
 
-          IPA="$GITHUB_WORKSPACE/output/POSTAL-2-iOS-Native-Folder-Picker-v4-FIXED.ipa"
+          IPA="$GITHUB_WORKSPACE/output/POSTAL-2-iOS-Native-Folder-Picker-v5.ipa"
 
           README="$GITHUB_WORKSPACE/output/README.txt"
 
-          test -f "$IPA"
+          test -f \
+            "$IPA"
 
-          test -f "$README"
+          test -f \
+            "$README"
 
           echo
           echo "======================================"
-          echo "FILES READY FOR ARTIFACT"
+          echo "READY FOR UPLOAD"
           echo "======================================"
 
           ls \
             -lh \
             "$GITHUB_WORKSPACE/output"
 
-          echo
-          echo "======================================"
-          echo "IPA PATH"
-          echo "======================================"
-
-          echo "$IPA"
 
       # ==========================================================
       # UPLOAD IPA
@@ -2066,13 +2383,21 @@ jobs:
       - name: Upload POSTAL 2 IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Postal2-iOS-Native-Folder-Picker-v4-FIXED-IPA
+
+          name: Postal2-iOS-Native-Folder-Picker-v5-IPA
+
           path: |
-            output/POSTAL-2-iOS-Native-Folder-Picker-v4-FIXED.ipa
+
+            output/POSTAL-2-iOS-Native-Folder-Picker-v5.ipa
+
             output/README.txt
+
           if-no-files-found: error
+
           compression-level: 0
+
           retention-days: 7
+
 
       # ==========================================================
       # DEBUG
@@ -2082,11 +2407,21 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: Postal2-iOS-v4-FIXED-BUILD-FAILED
+
+          name: Postal2-iOS-v5-BUILD-FAILED
+
           path: |
+
             Postal2iOS/project.yml
+
+            Postal2iOS/Postal2iOS.xcodeproj/project.pbxproj
+
             Postal2iOS/Sources/Postal2App.swift
+
             Postal2iOS/Sources/Info.plist
+
             build/xcodebuild.log
+
           if-no-files-found: ignore
+
           retention-days: 7
