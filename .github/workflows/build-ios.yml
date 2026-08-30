@@ -1,4 +1,4 @@
-name: POSTAL 2 WineGlass iOS FIX 7.1
+name: POSTAL 2 WineGlass iOS FIX 7.2
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   build:
-    name: Build POSTAL 2 FIX 7.1
+    name: Build POSTAL 2 FIX 7.2
     runs-on: macos-14
     timeout-minutes: 90
 
@@ -37,7 +37,7 @@ jobs:
           elif [ -d "/Applications/Xcode_15.4.0.app" ]; then
             sudo xcode-select -s "/Applications/Xcode_15.4.0.app/Contents/Developer"
           else
-            echo "ERROR: Xcode 15.4 not found on runner"
+            echo "ERROR: Xcode 15.4 not found"
             exit 1
           fi
 
@@ -52,6 +52,7 @@ jobs:
       # ==========================================================
 
       - name: Install tools
+        shell: bash
         run: |
           set -euxo pipefail
 
@@ -73,10 +74,11 @@ jobs:
           xcrun --sdk iphoneos --find clang
 
       # ==========================================================
-      # CLONE WINEGLASS + BLINK
+      # CLONE
       # ==========================================================
 
       - name: Clone WineGlass and blink
+        shell: bash
         run: |
           set -euxo pipefail
 
@@ -100,6 +102,12 @@ jobs:
 
       # ==========================================================
       # BUILD BLINK ARM64 IOS NO-JIT
+      #
+      # FIX 7.2:
+      # configure uses macOS compiler because it needs to build
+      # host tools like tool/flock.
+      #
+      # Actual blink.a is then rebuilt using iPhoneOS ARM64 clang.
       # ==========================================================
 
       - name: Build blink ARM64 no-JIT
@@ -111,24 +119,44 @@ jobs:
           BLINK="$ROOT/blink-src"
           WG="$ROOT/WineGlass"
 
-          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
-          CC="$(xcrun --sdk iphoneos --find clang)"
-          AR="$(xcrun --sdk iphoneos --find ar)"
+          IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          IOS_CC="$(xcrun --sdk iphoneos --find clang)"
+          IOS_AR="$(xcrun --sdk iphoneos --find ar)"
+
+          HOST_CC="$(xcrun --sdk macosx --find clang)"
+          HOST_AR="$(xcrun --sdk macosx --find ar)"
 
           cd "$BLINK"
 
           chmod +x configure
 
+          echo "========================================"
+          echo "HOST CONFIGURE"
+          echo "========================================"
+
+          echo "HOST_CC=$HOST_CC"
+          echo "HOST_AR=$HOST_AR"
+
+          CC="$HOST_CC" \
+          AR="$HOST_AR" \
           ./configure \
-            CC="$CC" \
-            AR="$AR" \
-            CFLAGS="-O2 -arch arm64 -isysroot $SDK -miphoneos-version-min=17.0 -D_FILE_OFFSET_BITS=64 -D_DARWIN_C_SOURCE -DTARGET_OS_IPHONE=1" \
             --disable-threads \
             --disable-sockets \
-            --disable-jit \
-            || true
+            --disable-jit
 
           test -f config.h
+
+          echo "===== HOST TOOLS ====="
+
+          find . \
+            -type f \
+            \( -name "flock" -o -name "flock.com" \) \
+            -print \
+            || true
+
+          # ------------------------------------------------------
+          # PATCH CONFIG FOR IOS
+          # ------------------------------------------------------
 
           python3 <<'PY'
           from pathlib import Path
@@ -153,13 +181,23 @@ jobs:
 
           for name in disable + enable:
               s = re.sub(
-                  rf'^\s*#\s*(?:define|undef)\s+{re.escape(name)}.*$',
+                  rf'^\s*#\s*define\s+{re.escape(name)}(?:\s+.*)?$',
                   '',
                   s,
                   flags=re.M
               )
 
-          s += "\n/* POSTAL 2 IOS FIX 7.1 */\n"
+              s = re.sub(
+                  rf'^\s*#\s*undef\s+{re.escape(name)}(?:\s+.*)?$',
+                  '',
+                  s,
+                  flags=re.M
+              )
+
+          s += "\n"
+          s += "/* ====================================== */\n"
+          s += "/* POSTAL 2 IOS FIX 7.2                  */\n"
+          s += "/* ====================================== */\n"
 
           for name in disable:
               s += f"#undef {name}\n"
@@ -168,27 +206,70 @@ jobs:
               s += f"#define {name} 1\n"
 
           p.write_text(s)
+
+          print("config.h patched for iPhone")
           PY
 
-          echo "===== CONFIG CHECK ====="
+          echo "========================================"
+          echo "IOS CONFIG"
+          echo "========================================"
 
           grep -E \
-            'HAVE_(DEV_URANDOM|SYS_MOUNT_H|GETENTROPY|GETRANDOM|SCHED_YIELD|KERN_ARND)' \
-            config.h || true
+            'HAVE_(DEV_URANDOM|SYS_MOUNT_H|GETENTROPY|SYS_GETENTROPY|GETRANDOM|SYS_GETRANDOM|SCHED_YIELD|KERN_ARND)' \
+            config.h \
+            || true
 
-          gmake -j2 o//blink/blink.a
+          # ------------------------------------------------------
+          # REMOVE HOST BLINK OBJECTS
+          # KEEP HOST HELPER PROGRAMS
+          # ------------------------------------------------------
+
+          rm -f o//blink/blink.a
+
+          find o \
+            -type f \
+            -name '*.o' \
+            -path '*/blink/*' \
+            -delete \
+            2>/dev/null \
+            || true
+
+          echo "========================================"
+          echo "BUILD BLINK FOR IPHONE ARM64"
+          echo "========================================"
+
+          IOS_CFLAGS="-O2 -arch arm64 -isysroot $IOS_SDK -miphoneos-version-min=17.0 -D_FILE_OFFSET_BITS=64 -D_DARWIN_C_SOURCE -DTARGET_OS_IPHONE=1"
+
+          gmake \
+            -j2 \
+            CC="$IOS_CC" \
+            AR="$IOS_AR" \
+            CFLAGS="$IOS_CFLAGS" \
+            o//blink/blink.a
 
           test -f o//blink/blink.a
 
-          echo "===== BLINK ARCH ====="
-          lipo -info o//blink/blink.a || true
+          echo "========================================"
+          echo "BLINK LIBRARY CREATED"
+          echo "========================================"
+
+          ls -lh o//blink/blink.a
+
+          mkdir -p "$WG/Vendor/blink/lib"
 
           cp \
             o//blink/blink.a \
             "$WG/Vendor/blink/lib/blink.a"
 
+          test -f \
+            "$WG/Vendor/blink/lib/blink.a"
+
+          echo "========================================"
+          echo "BLINK BUILD COMPLETE"
+          echo "========================================"
+
       # ==========================================================
-      # BLINK FIX7 DIAGNOSTICS
+      # BLINK DIAGNOSTICS
       # ==========================================================
 
       - name: Patch Blink FIX 7 diagnostics
@@ -213,7 +294,9 @@ jobs:
                   s_blink_initialized = 1;'''
 
           if old not in s:
-              raise SystemExit("ERROR: InitMap block changed upstream")
+              raise SystemExit(
+                  "ERROR: InitMap block changed upstream"
+              )
 
           s = s.replace(old, new, 1)
 
@@ -233,7 +316,9 @@ jobs:
               fflush(stderr);'''
 
           if old not in s:
-              raise SystemExit("ERROR: create_vm_with_mode changed upstream")
+              raise SystemExit(
+                  "ERROR: create_vm_with_mode changed upstream"
+              )
 
           s = s.replace(old, new, 1)
 
@@ -255,7 +340,9 @@ jobs:
               if (!vm) return NULL;'''
 
           if old not in s:
-              raise SystemExit("ERROR: VM calloc block changed upstream")
+              raise SystemExit(
+                  "ERROR: VM calloc block changed upstream"
+              )
 
           s = s.replace(old, new, 1)
 
@@ -277,12 +364,15 @@ jobs:
                   fprintf(stderr,
                           "[FIX7/BLINK] NewSystem returned NULL\\n");
                   fflush(stderr);
+
                   free(vm);
                   return NULL;
               }'''
 
           if old not in s:
-              raise SystemExit("ERROR: NewSystem block changed upstream")
+              raise SystemExit(
+                  "ERROR: NewSystem block changed upstream"
+              )
 
           s = s.replace(old, new, 1)
 
@@ -297,13 +387,15 @@ jobs:
                   fflush(stderr);
 
                   vm->s->real =
-                      Mmap(NULL,
-                           real_size,
-                           PROT_READ | PROT_WRITE,
-                           MAP_PRIVATE | MAP_ANONYMOUS_,
-                           -1,
-                           0,
-                           "real");
+                      Mmap(
+                          NULL,
+                          real_size,
+                          PROT_READ | PROT_WRITE,
+                          MAP_PRIVATE | MAP_ANONYMOUS_,
+                          -1,
+                          0,
+                          "real"
+                      );
 
                   fprintf(stderr,
                           "[FIX7/BLINK] AFTER real Mmap ptr=%p\\n",
@@ -317,11 +409,14 @@ jobs:
 
                       FreeSystem(vm->s);
                       free(vm);
+
                       return NULL;
                   }'''
 
           if old not in s:
-              raise SystemExit("ERROR: Mmap block changed upstream")
+              raise SystemExit(
+                  "ERROR: Mmap block changed upstream"
+              )
 
           s = s.replace(old, new, 1)
 
@@ -346,11 +441,14 @@ jobs:
 
                   FreeSystem(vm->s);
                   free(vm);
+
                   return NULL;
               }'''
 
           if old not in s:
-              raise SystemExit("ERROR: NewMachine block changed upstream")
+              raise SystemExit(
+                  "ERROR: NewMachine block changed upstream"
+              )
 
           s = s.replace(old, new, 1)
 
@@ -369,17 +467,19 @@ jobs:
               return vm;'''
 
           if old not in s:
-              raise SystemExit("ERROR: VM success block changed upstream")
+              raise SystemExit(
+                  "ERROR: VM success block changed upstream"
+              )
 
           s = s.replace(old, new, 1)
 
           p.write_text(s)
 
-          print("Blink FIX7 diagnostics patched")
+          print("Blink diagnostics patched")
           PY
 
       # ==========================================================
-      # BUILD BLINK BRIDGE OBJECT
+      # BUILD WINEGLASS BLINK BRIDGE OBJECT
       # ==========================================================
 
       - name: Build WineGlass Blink bridge
@@ -422,7 +522,7 @@ jobs:
             || true
 
       # ==========================================================
-      # FALLBACK X86 A0-A3
+      # FALLBACK X86 A0 / A1 / A2 / A3
       # ==========================================================
 
       - name: Add x86 A0 A1 A2 A3 fallback opcodes
@@ -567,11 +667,11 @@ jobs:
           p.write_text(s)
 
           print(
-              "A0/A1/A2/A3 added to fallback decoder"
+              "A0/A1/A2/A3 added"
           )
           PY
 
-          echo "===== CHECK A1 ====="
+          echo "===== CHECK ====="
 
           grep -n \
             "case 0xA1" \
@@ -617,6 +717,7 @@ jobs:
           lines = []
 
           for line in s.splitlines():
+
               if "CODE_SIGN_ENTITLEMENTS:" in line:
                   continue
 
@@ -640,7 +741,7 @@ jobs:
           cat project.yml
 
       # ==========================================================
-      # INFO PLIST
+      # INFO.PLIST
       # ==========================================================
 
       - name: Patch Info plist
@@ -664,11 +765,11 @@ jobs:
             "$PLIST"
 
           /usr/libexec/PlistBuddy \
-            -c "Set :CFBundleShortVersionString 0.7.1" \
+            -c "Set :CFBundleShortVersionString 0.7.2" \
             "$PLIST"
 
           /usr/libexec/PlistBuddy \
-            -c "Set :CFBundleVersion 71" \
+            -c "Set :CFBundleVersion 72" \
             "$PLIST"
 
           /usr/libexec/PlistBuddy \
@@ -682,7 +783,7 @@ jobs:
           plutil -lint "$PLIST"
 
       # ==========================================================
-      # POSTAL 2 LAUNCHER
+      # POSTAL 2 LAUNCHER + LOG
       # ==========================================================
 
       - name: Patch POSTAL 2 launcher and log
@@ -743,7 +844,7 @@ jobs:
               fprintf(
                   stderr,
                   "========================================\\n"
-                  "POSTAL 2 WineGlass FIX 7.1\\n"
+                  "POSTAL 2 WineGlass FIX 7.2\\n"
                   "Blink diagnostics enabled\\n"
                   "========================================\\n"
               );
@@ -763,7 +864,11 @@ jobs:
                   "ERROR: scene startup changed upstream"
               )
 
-          s = s.replace(old, new, 1)
+          s = s.replace(
+              old,
+              new,
+              1
+          )
 
           old = '''[_loadButton setTitle:@"  Load .exe  " forState:UIControlStateNormal];'''
 
@@ -774,7 +879,11 @@ jobs:
                   "ERROR: Load .exe title changed upstream"
               )
 
-          s = s.replace(old, new, 1)
+          s = s.replace(
+              old,
+              new,
+              1
+          )
 
           old = '''[_loadButton addTarget:self action:@selector(openFilePicker) forControlEvents:UIControlEventTouchUpInside];'''
 
@@ -785,7 +894,11 @@ jobs:
                   "ERROR: button action changed upstream"
               )
 
-          s = s.replace(old, new, 1)
+          s = s.replace(
+              old,
+              new,
+              1
+          )
 
           marker = \
               "#pragma mark - UIDocumentPickerDelegate"
@@ -935,7 +1048,7 @@ jobs:
 
           new = '''            WG_LOGI(
                           "POSTAL2",
-                          "FIX 7.1 auto-run"
+                          "FIX 7.2 auto-run"
                       );
 
                       [self runPostal2];'''
@@ -945,12 +1058,16 @@ jobs:
                   "ERROR: tryLoadBundledPE changed upstream"
               )
 
-          s = s.replace(old, new, 1)
+          s = s.replace(
+              old,
+              new,
+              1
+          )
 
           p.write_text(s)
 
           print(
-              "POSTAL 2 FIX7.1 launcher patched"
+              "POSTAL 2 FIX 7.2 launcher patched"
           )
           PY
 
@@ -961,7 +1078,7 @@ jobs:
             WineGlass/Sources/App/WGSceneDelegate.m
 
       # ==========================================================
-      # GENERATE PROJECT
+      # GENERATE XCODE PROJECT
       # ==========================================================
 
       - name: Generate Xcode project
@@ -994,10 +1111,10 @@ jobs:
           fi
 
       # ==========================================================
-      # BUILD
+      # BUILD APP
       # ==========================================================
 
-      - name: Build POSTAL 2 FIX 7.1
+      - name: Build POSTAL 2 FIX 7.2
         shell: bash
         run: |
           set -o pipefail
@@ -1061,8 +1178,14 @@ jobs:
             -c "Print :CFBundleShortVersionString" \
             "$APP/Info.plist"
 
+          echo "===== BUILD ====="
+
+          /usr/libexec/PlistBuddy \
+            -c "Print :CFBundleVersion" \
+            "$APP/Info.plist"
+
       # ==========================================================
-      # IPA
+      # PACKAGE IPA
       # ==========================================================
 
       - name: Package IPA
@@ -1088,21 +1211,21 @@ jobs:
           cd "$OUT"
 
           zip -qry \
-            "POSTAL-2-iOS-v7.1-BLINK-FIX.ipa" \
+            "POSTAL-2-iOS-v7.2-BLINK-HOST-CONFIG-FIX.ipa" \
             Payload
 
           ls -lh \
-            "POSTAL-2-iOS-v7.1-BLINK-FIX.ipa"
+            "POSTAL-2-iOS-v7.2-BLINK-HOST-CONFIG-FIX.ipa"
 
       # ==========================================================
       # UPLOAD IPA
       # ==========================================================
 
-      - name: Upload POSTAL 2 FIX 7.1 IPA
+      - name: Upload POSTAL 2 FIX 7.2 IPA
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-iOS-v7.1-BLINK-FIX
-          path: out/POSTAL-2-iOS-v7.1-BLINK-FIX.ipa
+          name: POSTAL-2-iOS-v7.2-BLINK-HOST-CONFIG-FIX
+          path: out/POSTAL-2-iOS-v7.2-BLINK-HOST-CONFIG-FIX.ipa
           if-no-files-found: error
           retention-days: 14
 
@@ -1114,53 +1237,53 @@ jobs:
         if: always()
         shell: bash
         run: |
-          mkdir -p debug-fix7
+          mkdir -p debug-fix7-2
 
           cp \
             WineGlass/xcodebuild.log \
-            debug-fix7/ \
+            debug-fix7-2/ \
             2>/dev/null || true
 
           cp \
             WineGlass/project.yml \
-            debug-fix7/ \
+            debug-fix7-2/ \
             2>/dev/null || true
 
           cp \
             WineGlass/Sources/App/WGSceneDelegate.m \
-            debug-fix7/ \
+            debug-fix7-2/ \
             2>/dev/null || true
 
           cp \
             WineGlass/Sources/App/Info.plist \
-            debug-fix7/ \
+            debug-fix7-2/ \
             2>/dev/null || true
 
           cp \
             WineGlass/Sources/CPU/wg_x86_decode.c \
-            debug-fix7/ \
+            debug-fix7-2/ \
             2>/dev/null || true
 
           cp \
             WineGlass/Vendor/blink/wg_blink_impl.c \
-            debug-fix7/ \
+            debug-fix7-2/ \
             2>/dev/null || true
 
           cp \
             blink-src/config.h \
-            debug-fix7/blink-config.h \
+            debug-fix7-2/blink-config.h \
             2>/dev/null || true
 
           cp \
             WineGlass/WineGlass.xcodeproj/project.pbxproj \
-            debug-fix7/ \
+            debug-fix7-2/ \
             2>/dev/null || true
 
-      - name: Upload FIX 7.1 debug
+      - name: Upload FIX 7.2 debug
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-FIX7.1-DEBUG
-          path: debug-fix7
+          name: POSTAL-2-FIX7.2-DEBUG
+          path: debug-fix7-2
           if-no-files-found: ignore
           retention-days: 7
