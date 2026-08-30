@@ -1,3 +1,359 @@
+name: POSTAL 2 WineGlass iOS FIX 7.7
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build POSTAL 2 FIX 7.7
+    runs-on: macos-14
+    timeout-minutes: 90
+
+    steps:
+
+      # ==========================================================
+      # CHECKOUT
+      # ==========================================================
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ==========================================================
+      # XCODE 15.4
+      # ==========================================================
+
+      - name: Select Xcode 15.4
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "===== AVAILABLE XCODE ====="
+          ls -1 /Applications | grep Xcode || true
+
+          if [ -d "/Applications/Xcode_15.4.app" ]; then
+            sudo xcode-select \
+              -s "/Applications/Xcode_15.4.app/Contents/Developer"
+          elif [ -d "/Applications/Xcode_15.4.0.app" ]; then
+            sudo xcode-select \
+              -s "/Applications/Xcode_15.4.0.app/Contents/Developer"
+          else
+            echo "ERROR: Xcode 15.4 not found"
+            exit 1
+          fi
+
+          echo "===== SELECTED XCODE ====="
+          xcodebuild -version
+
+          echo "===== XCODE PATH ====="
+          xcode-select -p
+
+      # ==========================================================
+      # TOOLS
+      # ==========================================================
+
+      - name: Install tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          brew install xcodegen make flock
+
+          export PATH="$(brew --prefix)/bin:$PATH"
+
+          echo "===== FLOCK ====="
+          command -v flock
+          flock --version || true
+
+          echo "===== XCODEGEN ====="
+          xcodegen --version
+
+          echo "===== IPHONE SDK ====="
+          xcrun --sdk iphoneos --show-sdk-version
+
+          echo "===== SDK PATH ====="
+          xcrun --sdk iphoneos --show-sdk-path
+
+      # ==========================================================
+      # CLONE WINEGLASS + BLINK
+      # ==========================================================
+
+      - name: Clone WineGlass and blink
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          rm -rf WineGlass blink-src
+
+          git clone \
+            --depth 1 \
+            https://github.com/Contonion/WineGlass.git \
+            WineGlass
+
+          git clone \
+            --depth 1 \
+            https://github.com/jart/blink.git \
+            blink-src
+
+          mkdir -p \
+            WineGlass/Vendor/blink/lib
+
+          echo "===== WINEGLASS COMMIT ====="
+          git -C WineGlass rev-parse HEAD
+
+          echo "===== BLINK COMMIT ====="
+          git -C blink-src rev-parse HEAD
+
+      # ==========================================================
+      # CONFIGURE BLINK FOR IPHONE ARM64
+      # ==========================================================
+
+      - name: Configure Blink for iPhone ARM64
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          export PATH="$(brew --prefix)/bin:$PATH"
+
+          ROOT="$GITHUB_WORKSPACE"
+          BLINK="$ROOT/blink-src"
+
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          CC="$(xcrun --sdk iphoneos --find clang)"
+          AR="$(xcrun --sdk iphoneos --find ar)"
+
+          cd "$BLINK"
+
+          chmod +x configure
+
+          echo "===== FLOCK ====="
+          command -v flock
+
+          echo "===== IOS CC ====="
+          echo "$CC"
+
+          echo "===== IOS SDK ====="
+          echo "$SDK"
+
+          ./configure \
+            CC="$CC" \
+            AR="$AR" \
+            CFLAGS="-O2 -arch arm64 -isysroot $SDK -miphoneos-version-min=17.0" \
+            --disable-threads \
+            --disable-sockets \
+            --disable-jit
+
+          test -f config.h
+          test -f config.mk
+
+          echo "===== CONFIGURE DONE ====="
+
+      # ==========================================================
+      # PATCH BLINK IOS CONFIG
+      # ==========================================================
+
+      - name: Patch Blink iOS config
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd blink-src
+
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("config.h")
+          s = p.read_text(errors="ignore")
+
+          disable = [
+              "HAVE_GETENTROPY",
+              "HAVE_SYS_GETENTROPY",
+              "HAVE_GETRANDOM",
+              "HAVE_SYS_GETRANDOM",
+              "HAVE_KERN_ARND",
+              "HAVE_SCHED_YIELD",
+              "HAVE_SCHED_H",
+          ]
+
+          enable = [
+              "HAVE_DEV_URANDOM",
+              "HAVE_SYS_MOUNT_H",
+          ]
+
+          for name in disable + enable:
+
+              s = re.sub(
+                  rf'(?m)^\s*#define\s+{re.escape(name)}\b.*$',
+                  '',
+                  s
+              )
+
+              s = re.sub(
+                  rf'(?m)^\s*#undef\s+{re.escape(name)}\b.*$',
+                  '',
+                  s
+              )
+
+          s += "\n/* POSTAL 2 IOS FIX 7.7 */\n"
+
+          for name in disable:
+              s += f"#undef {name}\n"
+
+          for name in enable:
+              s += f"#define {name} 1\n"
+
+          p.write_text(s)
+
+          print("Blink config patched for iOS")
+          PY
+
+          echo "===== CONFIG CHECK ====="
+
+          grep -n \
+            "HAVE_DEV_URANDOM\|HAVE_SYS_MOUNT_H\|HAVE_SCHED_YIELD\|HAVE_SCHED_H\|HAVE_GETENTROPY\|HAVE_GETRANDOM" \
+            config.h \
+            || true
+
+      # ==========================================================
+      # PATCH sched_yield
+      # ==========================================================
+
+      - name: Patch Blink sched_yield for iOS
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path(
+              "blink-src/blink/syscall.c"
+          )
+
+          s = p.read_text()
+
+          pattern = r'''
+          static\s+int\s+SysSchedYield
+          \s*\(
+              \s*struct\s+Machine\s*\*m
+          \s*\)
+          \s*\{
+          .*?
+          \n\}
+          '''
+
+          replacement = '''
+          static int SysSchedYield(struct Machine *m) {
+            (void)m;
+            return 0;
+          }
+          '''
+
+          s, count = re.subn(
+              pattern,
+              replacement,
+              s,
+              count=1,
+              flags=re.S | re.X
+          )
+
+          if count != 1:
+              raise SystemExit(
+                  "ERROR: SysSchedYield patch failed"
+              )
+
+          s = s.replace(
+              "        sched_yield();",
+              "        /* sched_yield disabled on iOS */"
+          )
+
+          if "return sched_yield();" in s:
+              raise SystemExit(
+                  "ERROR: sched_yield still present"
+              )
+
+          p.write_text(s)
+
+          print("sched_yield patched")
+          PY
+
+          echo "===== SCHED CHECK ====="
+
+          grep -n \
+            "SysSchedYield\|sched_yield" \
+            blink-src/blink/syscall.c \
+            || true
+
+      # ==========================================================
+      # BUILD BLINK ARM64
+      # ==========================================================
+
+      - name: Build blink ARM64 no-JIT
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          export PATH="$(brew --prefix)/bin:$PATH"
+
+          ROOT="$GITHUB_WORKSPACE"
+          BLINK="$ROOT/blink-src"
+          WG="$ROOT/WineGlass"
+
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          CC="$(xcrun --sdk iphoneos --find clang)"
+          AR="$(xcrun --sdk iphoneos --find ar)"
+
+          cd "$BLINK"
+
+          rm -f o//blink/blink.a
+
+          echo "========================================"
+          echo "BUILD BLINK ARM64 IOS"
+          echo "========================================"
+
+          gmake \
+            -j2 \
+            CC="$CC" \
+            AR="$AR" \
+            CFLAGS="-O2 -arch arm64 -isysroot $SDK -miphoneos-version-min=17.0" \
+            o//blink/blink.a
+
+          test -f o//blink/blink.a
+
+          echo "===== BLINK BUILT ====="
+
+          ls -lh \
+            o//blink/blink.a
+
+          mkdir -p \
+            "$WG/Vendor/blink/lib"
+
+          cp \
+            o//blink/blink.a \
+            "$WG/Vendor/blink/lib/blink.a"
+
+          test -f \
+            "$WG/Vendor/blink/lib/blink.a"
+
+      # ==========================================================
+      # BLINK DIAGNOSTICS
+      #
+      # Current upstream layout:
+      #
+      # InitMap()
+      # calloc
+      # NewSystem
+      # Mmap
+      # NewMachine
+      # AllocatePageTable
+      #
+      # DO NOT PATCH return vm / closing brace.
+      # ==========================================================
+
       - name: Patch Blink FIX 7.7 diagnostics
         shell: bash
         run: |
@@ -12,6 +368,7 @@
 
           s = p.read_text()
 
+          # stdio is already present upstream, but keep this safe.
           if "#include <stdio.h>" not in s:
               if "#include <string.h>" in s:
                   s = s.replace(
@@ -22,15 +379,21 @@
               else:
                   s = "#include <stdio.h>\n" + s
 
+          # ------------------------------------------------------
+          # InitMap
+          # ------------------------------------------------------
+
           old = '''        InitMap();
                   s_blink_initialized = 1;'''
 
-          new = '''        fprintf(stderr, "[FIX7/BLINK] BEFORE InitMap\\n");
+          new = '''        fprintf(stderr,
+                          "[FIX7/BLINK] BEFORE InitMap\\n");
                   fflush(stderr);
 
                   InitMap();
 
-                  fprintf(stderr, "[FIX7/BLINK] AFTER InitMap\\n");
+                  fprintf(stderr,
+                          "[FIX7/BLINK] AFTER InitMap\\n");
                   fflush(stderr);
 
                   s_blink_initialized = 1;'''
@@ -40,7 +403,15 @@
                   "ERROR: InitMap location missing"
               )
 
-          s = s.replace(old, new, 1)
+          s = s.replace(
+              old,
+              new,
+              1
+          )
+
+          # ------------------------------------------------------
+          # create_vm entry
+          # ------------------------------------------------------
 
           old = '''static struct WGBlinkVM *create_vm_with_mode(struct XedMachineMode mode) {
               ensure_initialized();'''
@@ -63,7 +434,15 @@
                   "ERROR: create_vm location missing"
               )
 
-          s = s.replace(old, new, 1)
+          s = s.replace(
+              old,
+              new,
+              1
+          )
+
+          # ------------------------------------------------------
+          # calloc
+          # ------------------------------------------------------
 
           old = '''    struct WGBlinkVM *vm = calloc(1, sizeof(struct WGBlinkVM));'''
 
@@ -84,7 +463,15 @@
                   "ERROR: calloc location missing"
               )
 
-          s = s.replace(old, new, 1)
+          s = s.replace(
+              old,
+              new,
+              1
+          )
+
+          # ------------------------------------------------------
+          # NewSystem
+          # ------------------------------------------------------
 
           old = '''    vm->s = NewSystem(mode);'''
 
@@ -104,7 +491,15 @@
                   "ERROR: NewSystem location missing"
               )
 
-          s = s.replace(old, new, 1)
+          s = s.replace(
+              old,
+              new,
+              1
+          )
+
+          # ------------------------------------------------------
+          # Mmap
+          # ------------------------------------------------------
 
           old = '''        vm->s->real = Mmap(NULL, real_size, PROT_READ | PROT_WRITE,
                                      MAP_PRIVATE | MAP_ANONYMOUS_, -1, 0, "real");'''
@@ -124,10 +519,18 @@
 
           if old not in s:
               raise SystemExit(
-                  "ERROR: real Mmap location missing"
+                  "ERROR: Mmap location missing"
               )
 
-          s = s.replace(old, new, 1)
+          s = s.replace(
+              old,
+              new,
+              1
+          )
+
+          # ------------------------------------------------------
+          # NewMachine
+          # ------------------------------------------------------
 
           old = '''    vm->m = NewMachine(vm->s, NULL);'''
 
@@ -147,7 +550,18 @@
                   "ERROR: NewMachine location missing"
               )
 
-          s = s.replace(old, new, 1)
+          s = s.replace(
+              old,
+              new,
+              1
+          )
+
+          # ------------------------------------------------------
+          # Page table
+          #
+          # Current WineGlass creates 32-bit VM via LONG system
+          # then switches decoder to 32-bit, so this stage matters.
+          # ------------------------------------------------------
 
           old = '''        vm->s->cr3 = AllocatePageTable(vm->s);'''
 
@@ -168,23 +582,902 @@
                   "ERROR: AllocatePageTable location missing"
               )
 
-          s = s.replace(old, new, 1)
+          s = s.replace(
+              old,
+              new,
+              1
+          )
+
+          # ------------------------------------------------------
+          # IMPORTANT:
+          # Do NOT modify:
+          #
+          # vm->m->flags |= (1 << 9);
+          # return vm;
+          # }
+          # ------------------------------------------------------
 
           p.write_text(s)
 
+          print("========================================")
           print("BLINK FIX 7.7 DIAGNOSTICS PATCHED")
-          print("return vm / closing brace untouched")
+          print("RETURN + CLOSING BRACE UNTOUCHED")
+          print("========================================")
           PY
 
-          echo "===== DIAGNOSTICS ====="
+          echo "===== DIAGNOSTICS CHECK ====="
 
           grep -n \
             "FIX7/BLINK" \
             WineGlass/Vendor/blink/wg_blink_impl.c
 
-          echo "===== FUNCTION END CHECK ====="
+          echo "===== CREATE VM SOURCE ====="
 
-          grep -n -A5 -B5 \
-            'flags |= (1 << 9)' \
+          nl -ba \
             WineGlass/Vendor/blink/wg_blink_impl.c \
+            | sed -n '25,100p'
+
+      # ==========================================================
+      # BUILD WINEGLASS BLINK BRIDGE OBJECT
+      # ==========================================================
+
+      - name: Build WineGlass Blink bridge
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          ROOT="$GITHUB_WORKSPACE"
+          BLINK="$ROOT/blink-src"
+          WG="$ROOT/WineGlass"
+
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          CC="$(xcrun --sdk iphoneos --find clang)"
+
+          cd "$BLINK"
+
+          "$CC" \
+            -c \
+            -std=c11 \
+            -O2 \
+            -arch arm64 \
+            -isysroot "$SDK" \
+            -miphoneos-version-min=17.0 \
+            -D_FILE_OFFSET_BITS=64 \
+            -D_DARWIN_C_SOURCE \
+            -DTARGET_OS_IPHONE=1 \
+            -I"$BLINK" \
+            -include "$BLINK/config.h" \
+            "$WG/Vendor/blink/wg_blink_impl.c" \
+            -o "$WG/Vendor/blink/lib/wg_blink_impl.o"
+
+          test -f \
+            "$WG/Vendor/blink/lib/wg_blink_impl.o"
+
+          echo "===== BRIDGE OBJECT ====="
+
+          file \
+            "$WG/Vendor/blink/lib/wg_blink_impl.o"
+
+          lipo -info \
+            "$WG/Vendor/blink/lib/wg_blink_impl.o" \
             || true
+
+      # ==========================================================
+      # BUILTIN FALLBACK A0-A3
+      #
+      # FIX 6 stopped at:
+      # A1 = MOV EAX, moffs32
+      # ==========================================================
+
+      - name: Add x86 A0 A1 A2 A3 fallback opcodes
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path(
+              "WineGlass/Sources/CPU/wg_x86_decode.c"
+          )
+
+          s = p.read_text()
+
+          marker = \
+              "    // TEST AL/rAX, imm (A8, A9)"
+
+          if marker not in s:
+              raise SystemExit(
+                  "ERROR: decoder A8/A9 marker missing"
+              )
+
+          patch = r'''
+              // =====================================================
+              // POSTAL 2 FIX 7.7
+              //
+              // A0 MOV AL, moffs
+              // A1 MOV EAX/RAX, moffs
+              // A2 MOV moffs, AL
+              // A3 MOV moffs, EAX/RAX
+              //
+              // Builtin fallback currently treats mem_base == -2
+              // as an already-resolved absolute memory address.
+              // =====================================================
+
+              case 0xA0: {
+                  uint32_t addr = fetch32(c);
+
+                  out->opcode = WG_OP_MOV;
+
+                  out->operands[0] = (WGOperand){
+                      .type = WG_OPERAND_REG,
+                      .reg_index = 0,
+                      .size = 1
+                  };
+
+                  out->operands[1] = (WGOperand){
+                      .type = WG_OPERAND_MEM,
+                      .mem_base = -2,
+                      .mem_index = -1,
+                      .mem_scale = 1,
+                      .mem_disp = (int64_t)addr,
+                      .mem_seg = c->seg_override,
+                      .size = 1
+                  };
+
+                  out->num_operands = 2;
+                  break;
+              }
+
+              case 0xA1: {
+                  uint32_t addr = fetch32(c);
+
+                  out->opcode = WG_OP_MOV;
+
+                  out->operands[0] = (WGOperand){
+                      .type = WG_OPERAND_REG,
+                      .reg_index = 0,
+                      .size = op_sz
+                  };
+
+                  out->operands[1] = (WGOperand){
+                      .type = WG_OPERAND_MEM,
+                      .mem_base = -2,
+                      .mem_index = -1,
+                      .mem_scale = 1,
+                      .mem_disp = (int64_t)addr,
+                      .mem_seg = c->seg_override,
+                      .size = op_sz
+                  };
+
+                  out->num_operands = 2;
+                  break;
+              }
+
+              case 0xA2: {
+                  uint32_t addr = fetch32(c);
+
+                  out->opcode = WG_OP_MOV;
+
+                  out->operands[0] = (WGOperand){
+                      .type = WG_OPERAND_MEM,
+                      .mem_base = -2,
+                      .mem_index = -1,
+                      .mem_scale = 1,
+                      .mem_disp = (int64_t)addr,
+                      .mem_seg = c->seg_override,
+                      .size = 1
+                  };
+
+                  out->operands[1] = (WGOperand){
+                      .type = WG_OPERAND_REG,
+                      .reg_index = 0,
+                      .size = 1
+                  };
+
+                  out->num_operands = 2;
+                  break;
+              }
+
+              case 0xA3: {
+                  uint32_t addr = fetch32(c);
+
+                  out->opcode = WG_OP_MOV;
+
+                  out->operands[0] = (WGOperand){
+                      .type = WG_OPERAND_MEM,
+                      .mem_base = -2,
+                      .mem_index = -1,
+                      .mem_scale = 1,
+                      .mem_disp = (int64_t)addr,
+                      .mem_seg = c->seg_override,
+                      .size = op_sz
+                  };
+
+                  out->operands[1] = (WGOperand){
+                      .type = WG_OPERAND_REG,
+                      .reg_index = 0,
+                      .size = op_sz
+                  };
+
+                  out->num_operands = 2;
+                  break;
+              }
+
+          '''
+
+          s = s.replace(
+              marker,
+              patch + marker,
+              1
+          )
+
+          p.write_text(s)
+
+          print("A0 A1 A2 A3 fallback opcodes added")
+          PY
+
+          echo "===== A0-A3 CHECK ====="
+
+          grep -n \
+            "case 0xA0\|case 0xA1\|case 0xA2\|case 0xA3" \
+            WineGlass/Sources/CPU/wg_x86_decode.c
+
+      # ==========================================================
+      # PATCH PROJECT
+      # ==========================================================
+
+      - name: Patch WineGlass project
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd WineGlass
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path("project.yml")
+          s = p.read_text()
+
+          s = s.replace(
+              "bundleIdPrefix: com.wineglass",
+              "bundleIdPrefix: com.postal2ios"
+          )
+
+          s = s.replace(
+              'xcodeVersion: "15.0"',
+              'xcodeVersion: "15.4"\n  projectFormat: xcode15_3'
+          )
+
+          s = s.replace(
+              "PRODUCT_BUNDLE_IDENTIFIER: com.wineglass.app",
+              "PRODUCT_BUNDLE_IDENTIFIER: com.postal2ios.native"
+          )
+
+          s = s.replace(
+              'TARGETED_DEVICE_FAMILY: "1,2"',
+              'TARGETED_DEVICE_FAMILY: "1"'
+          )
+
+          lines = []
+
+          for line in s.splitlines():
+
+              if "CODE_SIGN_ENTITLEMENTS:" in line:
+                  continue
+
+              if "DEVELOPMENT_TEAM:" in line:
+                  continue
+
+              if "CODE_SIGN_STYLE: Automatic" in line:
+                  line = line.replace(
+                      "CODE_SIGN_STYLE: Automatic",
+                      "CODE_SIGN_STYLE: Manual"
+                  )
+
+              lines.append(line)
+
+          p.write_text(
+              "\n".join(lines) + "\n"
+          )
+
+          print("project.yml patched")
+          PY
+
+          echo "===== PROJECT ====="
+          cat project.yml
+
+      # ==========================================================
+      # INFO.PLIST
+      # ==========================================================
+
+      - name: Patch Info plist
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          PLIST="WineGlass/Sources/App/Info.plist"
+
+          /usr/libexec/PlistBuddy \
+            -c "Set :CFBundleName POSTAL 2" \
+            "$PLIST"
+
+          /usr/libexec/PlistBuddy \
+            -c "Delete :CFBundleDisplayName" \
+            "$PLIST" \
+            || true
+
+          /usr/libexec/PlistBuddy \
+            -c "Add :CFBundleDisplayName string POSTAL 2" \
+            "$PLIST"
+
+          /usr/libexec/PlistBuddy \
+            -c "Set :CFBundleShortVersionString 0.7.7" \
+            "$PLIST"
+
+          /usr/libexec/PlistBuddy \
+            -c "Set :CFBundleVersion 77" \
+            "$PLIST"
+
+          /usr/libexec/PlistBuddy \
+            -c "Set :UIFileSharingEnabled true" \
+            "$PLIST"
+
+          /usr/libexec/PlistBuddy \
+            -c "Set :LSSupportsOpeningDocumentsInPlace true" \
+            "$PLIST"
+
+          plutil -lint "$PLIST"
+
+      # ==========================================================
+      # POSTAL 2 LAUNCHER + FILE LOG
+      # ==========================================================
+
+      - name: Patch POSTAL 2 launcher and log
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path(
+              "WineGlass/Sources/App/WGSceneDelegate.m"
+          )
+
+          s = p.read_text()
+
+          # ------------------------------------------------------
+          # stdio
+          # ------------------------------------------------------
+
+          if "#include <stdio.h>" not in s:
+              s = s.replace(
+                  "#include <unistd.h>",
+                  "#include <unistd.h>\n#include <stdio.h>",
+                  1
+              )
+
+          # ------------------------------------------------------
+          # Redirect stderr before self-tests.
+          # ------------------------------------------------------
+
+          old = '''    UIWindowScene *windowScene = (UIWindowScene *)scene;
+
+              wg_log_init();'''
+
+          new = '''    UIWindowScene *windowScene = (UIWindowScene *)scene;
+
+              NSString *docs =
+                  NSSearchPathForDirectoriesInDomains(
+                      NSDocumentDirectory,
+                      NSUserDomainMask,
+                      YES
+                  ).firstObject;
+
+              NSString *logPath =
+                  [docs stringByAppendingPathComponent:
+                      @"POSTAL2-WineGlass.log"];
+
+              [[NSFileManager defaultManager]
+                  removeItemAtPath:logPath
+                  error:nil];
+
+              freopen(
+                  logPath.fileSystemRepresentation,
+                  "a",
+                  stderr
+              );
+
+              setvbuf(
+                  stderr,
+                  NULL,
+                  _IONBF,
+                  0
+              );
+
+              fprintf(
+                  stderr,
+                  "========================================\\n"
+                  "POSTAL 2 WineGlass FIX 7.7\\n"
+                  "========================================\\n"
+              );
+
+              fflush(stderr);
+
+              wg_log_init();
+
+              WG_LOGI(
+                  "POSTAL2",
+                  "FIX 7.7 file logging started"
+              );'''
+
+          if old not in s:
+              raise SystemExit(
+                  "ERROR: scene startup marker missing"
+              )
+
+          s = s.replace(
+              old,
+              new,
+              1
+          )
+
+          # ------------------------------------------------------
+          # Change button.
+          # ------------------------------------------------------
+
+          old = \
+              '[_loadButton setTitle:@"  Load .exe  " forState:UIControlStateNormal];'
+
+          new = \
+              '[_loadButton setTitle:@"  RUN POSTAL 2  " forState:UIControlStateNormal];'
+
+          if old not in s:
+              raise SystemExit(
+                  "ERROR: Load .exe button title missing"
+              )
+
+          s = s.replace(
+              old,
+              new,
+              1
+          )
+
+          old = \
+              '[_loadButton addTarget:self action:@selector(openFilePicker) forControlEvents:UIControlEventTouchUpInside];'
+
+          new = \
+              '[_loadButton addTarget:self action:@selector(runPostal2) forControlEvents:UIControlEventTouchUpInside];'
+
+          if old not in s:
+              raise SystemExit(
+                  "ERROR: button action marker missing"
+              )
+
+          s = s.replace(
+              old,
+              new,
+              1
+          )
+
+          # ------------------------------------------------------
+          # Insert Postal2 finder and runner.
+          # ------------------------------------------------------
+
+          marker = \
+              "#pragma mark - UIDocumentPickerDelegate"
+
+          if marker not in s:
+              raise SystemExit(
+                  "ERROR: document picker marker missing"
+              )
+
+          postal_methods = r'''
+          // ============================================================
+          // POSTAL 2 FIX 7.7
+          // ============================================================
+
+          - (NSString *)findPostal2Exe {
+
+              NSString *docs =
+                  NSSearchPathForDirectoriesInDomains(
+                      NSDocumentDirectory,
+                      NSUserDomainMask,
+                      YES
+                  ).firstObject;
+
+              NSString *root =
+                  [docs stringByAppendingPathComponent:
+                      @"Postal2FullData"];
+
+              NSFileManager *fm =
+                  [NSFileManager defaultManager];
+
+              WG_LOGI(
+                  "POSTAL2",
+                  "Searching under: %s",
+                  root.UTF8String
+              );
+
+              NSString *normal =
+                  [root stringByAppendingPathComponent:
+                      @"System/Postal2.exe"];
+
+              if ([fm fileExistsAtPath:normal]) {
+
+                  WG_LOGI(
+                      "POSTAL2",
+                      "Found normal path: %s",
+                      normal.UTF8String
+                  );
+
+                  return normal;
+              }
+
+              NSDirectoryEnumerator *enumerator =
+                  [fm enumeratorAtPath:root];
+
+              for (NSString *relative in enumerator) {
+
+                  if ([[relative lastPathComponent]
+                          caseInsensitiveCompare:
+                              @"Postal2.exe"]
+                      == NSOrderedSame) {
+
+                      NSString *found =
+                          [root stringByAppendingPathComponent:
+                              relative];
+
+                      WG_LOGI(
+                          "POSTAL2",
+                          "Found recursively: %s",
+                          found.UTF8String
+                      );
+
+                      return found;
+                  }
+              }
+
+              WG_LOGE(
+                  "POSTAL2",
+                  "Postal2.exe NOT FOUND"
+              );
+
+              return nil;
+          }
+
+
+          - (void)runPostal2 {
+
+              if (!_engine) {
+
+                  WG_LOGE(
+                      "POSTAL2",
+                      "Engine not ready"
+                  );
+
+                  return;
+              }
+
+              NSString *exe =
+                  [self findPostal2Exe];
+
+              if (!exe) {
+
+                  [_loadButton
+                      setTitle:
+                          @"  POSTAL2.EXE NOT FOUND  "
+                      forState:
+                          UIControlStateNormal];
+
+                  return;
+              }
+
+              NSString *systemDir =
+                  [exe stringByDeletingLastPathComponent];
+
+              int cdResult =
+                  chdir(
+                      systemDir.fileSystemRepresentation
+                  );
+
+              WG_LOGI(
+                  "POSTAL2",
+                  "System directory: %s",
+                  systemDir.UTF8String
+              );
+
+              WG_LOGI(
+                  "POSTAL2",
+                  "chdir result = %d",
+                  cdResult
+              );
+
+              WG_LOGI(
+                  "POSTAL2",
+                  "Launching original Postal2.exe"
+              );
+
+              [_loadButton
+                  setTitle:
+                      @"  STARTING POSTAL 2...  "
+                  forState:
+                      UIControlStateNormal];
+
+              [self loadAndRunPE:exe];
+          }
+
+          '''
+
+          s = s.replace(
+              marker,
+              postal_methods + "\n" + marker,
+              1
+          )
+
+          # ------------------------------------------------------
+          # Auto-start after engine init.
+          # ------------------------------------------------------
+
+          old = \
+              "            [self tryLoadBundledPE];"
+
+          new = '''            WG_LOGI(
+                          "POSTAL2",
+                          "Engine ready — auto-start POSTAL 2"
+                      );
+
+                      [self runPostal2];'''
+
+          if old not in s:
+              raise SystemExit(
+                  "ERROR: tryLoadBundledPE call missing"
+              )
+
+          s = s.replace(
+              old,
+              new,
+              1
+          )
+
+          p.write_text(s)
+
+          print("POSTAL 2 launcher patched")
+          PY
+
+          echo "===== LAUNCHER CHECK ====="
+
+          grep -n \
+            "RUN POSTAL 2\|STARTING POSTAL 2\|findPostal2Exe\|POSTAL2-WineGlass" \
+            WineGlass/Sources/App/WGSceneDelegate.m
+
+      # ==========================================================
+      # GENERATE XCODE PROJECT
+      # ==========================================================
+
+      - name: Generate Xcode project
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd WineGlass
+
+          rm -rf \
+            WineGlass.xcodeproj
+
+          xcodegen generate
+
+          test -f \
+            WineGlass.xcodeproj/project.pbxproj
+
+          echo "===== OBJECT VERSION ====="
+
+          grep -m1 \
+            "objectVersion" \
+            WineGlass.xcodeproj/project.pbxproj \
+            || true
+
+          if grep -q \
+            "objectVersion = 77" \
+            WineGlass.xcodeproj/project.pbxproj; then
+
+            echo "ERROR: unsupported objectVersion 77"
+            exit 1
+          fi
+
+      # ==========================================================
+      # BUILD IOS APP
+      # ==========================================================
+
+      - name: Build POSTAL 2 FIX 7.7
+        shell: bash
+        run: |
+          set -o pipefail
+
+          cd WineGlass
+
+          rm -rf build
+
+          xcodebuild \
+            -project WineGlass.xcodeproj \
+            -scheme WineGlass \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath build \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            PRODUCT_BUNDLE_IDENTIFIER=com.postal2ios.native \
+            build \
+            2>&1 | tee xcodebuild.log
+
+      # ==========================================================
+      # VERIFY APP
+      # ==========================================================
+
+      - name: Verify POSTAL 2 app
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          APP="WineGlass/build/Build/Products/Release-iphoneos/WineGlass.app"
+
+          test -d "$APP"
+          test -f "$APP/WineGlass"
+
+          echo "===== APP ARCH ====="
+
+          lipo -info \
+            "$APP/WineGlass"
+
+          echo "===== BUNDLE ID ====="
+
+          ID=$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :CFBundleIdentifier" \
+              "$APP/Info.plist"
+          )
+
+          echo "$ID"
+
+          if [ "$ID" != "com.postal2ios.native" ]; then
+            echo "ERROR: wrong bundle ID: $ID"
+            exit 1
+          fi
+
+          echo "===== VERSION ====="
+
+          /usr/libexec/PlistBuddy \
+            -c "Print :CFBundleShortVersionString" \
+            "$APP/Info.plist"
+
+          echo "===== BUILD ====="
+
+          /usr/libexec/PlistBuddy \
+            -c "Print :CFBundleVersion" \
+            "$APP/Info.plist"
+
+      # ==========================================================
+      # PACKAGE IPA
+      # ==========================================================
+
+      - name: Package IPA
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          ROOT="$GITHUB_WORKSPACE"
+
+          APP="$ROOT/WineGlass/build/Build/Products/Release-iphoneos/WineGlass.app"
+
+          OUT="$ROOT/out"
+
+          rm -rf \
+            "$OUT"
+
+          mkdir -p \
+            "$OUT/Payload"
+
+          cp -R \
+            "$APP" \
+            "$OUT/Payload/POSTAL 2.app"
+
+          cd "$OUT"
+
+          zip \
+            -qry \
+            "POSTAL-2-iOS-v7.7-BLINK-RUNTIME-TEST.ipa" \
+            Payload
+
+          echo "===== IPA ====="
+
+          ls -lh \
+            "POSTAL-2-iOS-v7.7-BLINK-RUNTIME-TEST.ipa"
+
+      # ==========================================================
+      # UPLOAD IPA
+      # ==========================================================
+
+      - name: Upload POSTAL 2 FIX 7.7 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: POSTAL-2-iOS-v7.7-BLINK-RUNTIME-TEST
+          path: out/POSTAL-2-iOS-v7.7-BLINK-RUNTIME-TEST.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      # ==========================================================
+      # DEBUG
+      # ==========================================================
+
+      - name: Prepare debug files
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p \
+            debug-fix7-7
+
+          cp \
+            WineGlass/xcodebuild.log \
+            debug-fix7-7/ \
+            2>/dev/null || true
+
+          cp \
+            blink-src/config.h \
+            debug-fix7-7/blink-config.h \
+            2>/dev/null || true
+
+          cp \
+            blink-src/config.mk \
+            debug-fix7-7/blink-config.mk \
+            2>/dev/null || true
+
+          cp \
+            blink-src/config.log \
+            debug-fix7-7/blink-config.log \
+            2>/dev/null || true
+
+          cp \
+            blink-src/blink/syscall.c \
+            debug-fix7-7/blink-syscall.c \
+            2>/dev/null || true
+
+          cp \
+            WineGlass/Vendor/blink/wg_blink_impl.c \
+            debug-fix7-7/ \
+            2>/dev/null || true
+
+          cp \
+            WineGlass/Sources/CPU/wg_x86_decode.c \
+            debug-fix7-7/ \
+            2>/dev/null || true
+
+          cp \
+            WineGlass/Sources/App/WGSceneDelegate.m \
+            debug-fix7-7/ \
+            2>/dev/null || true
+
+          cp \
+            WineGlass/project.yml \
+            debug-fix7-7/ \
+            2>/dev/null || true
+
+          cp \
+            WineGlass/WineGlass.xcodeproj/project.pbxproj \
+            debug-fix7-7/ \
+            2>/dev/null || true
+
+      - name: Upload FIX 7.7 debug
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: POSTAL-2-FIX7.7-DEBUG
+          path: debug-fix7-7
+          if-no-files-found: ignore
+          retention-days: 7
