@@ -1,4 +1,4 @@
-name: POSTAL 2 WineGlass iOS FIX 7.4
+name: POSTAL 2 WineGlass iOS FIX 7.5
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   build:
-    name: Build POSTAL 2 FIX 7.4
+    name: Build POSTAL 2 FIX 7.5
     runs-on: macos-14
     timeout-minutes: 90
 
@@ -104,10 +104,7 @@ jobs:
           git -C blink-src rev-parse HEAD
 
       # ==========================================================
-      # CONFIGURE BLINK DIRECTLY FOR IPHONE
-      #
-      # flock is already installed, so configure won't try
-      # compiling its macOS helper using the iPhone compiler.
+      # CONFIGURE BLINK FOR IPHONE ARM64
       # ==========================================================
 
       - name: Configure Blink for iPhone ARM64
@@ -163,12 +160,6 @@ jobs:
 
       # ==========================================================
       # PATCH BLINK IOS CONFIG
-      #
-      # This contains the fixes that got Blink compiling before:
-      #
-      # random source
-      # sys/mount.h
-      # sched_yield
       # ==========================================================
 
       - name: Patch Blink iOS config
@@ -183,7 +174,6 @@ jobs:
           import re
 
           p = Path("config.h")
-
           s = p.read_text(errors="ignore")
 
           disable = [
@@ -220,7 +210,6 @@ jobs:
 
               return text
 
-
           def enable_macro(text, name):
               pattern = (
                   rf'(?m)^\s*(?://\s*)?'
@@ -240,7 +229,6 @@ jobs:
 
               return text
 
-
           for name in disable:
               s = disable_macro(s, name)
 
@@ -248,7 +236,7 @@ jobs:
               s = enable_macro(s, name)
 
           s += "\n"
-          s += "/* POSTAL 2 IOS FIX 7.4 */\n"
+          s += "/* POSTAL 2 IOS FIX 7.5 */\n"
 
           p.write_text(s)
 
@@ -266,9 +254,6 @@ jobs:
 
       # ==========================================================
       # HARD PATCH sched_yield
-      #
-      # Threads are disabled.
-      # Guest sched_yield simply succeeds with return 0.
       # ==========================================================
 
       - name: Patch Blink sched_yield for iOS
@@ -281,12 +266,7 @@ jobs:
           import re
 
           p = Path("blink-src/blink/syscall.c")
-
           s = p.read_text()
-
-          # ------------------------------------------------------
-          # Replace SysSchedYield completely.
-          # ------------------------------------------------------
 
           pattern = r'''
           static\s+int\s+SysSchedYield
@@ -317,11 +297,6 @@ jobs:
               raise SystemExit(
                   "ERROR: couldn't patch SysSchedYield"
               )
-
-          # ------------------------------------------------------
-          # There's another optional sched_yield() inside
-          # SigsuspendPolyfill. Make it a no-op too.
-          # ------------------------------------------------------
 
           s = s.replace(
               "        sched_yield();",
@@ -400,7 +375,7 @@ jobs:
             "$WG/Vendor/blink/lib/blink.a"
 
       # ==========================================================
-      # BLINK RUNTIME DIAGNOSTICS
+      # BLINK RUNTIME DIAGNOSTICS FIX 7.5
       # ==========================================================
 
       - name: Patch Blink FIX 7 diagnostics
@@ -410,6 +385,7 @@ jobs:
 
           python3 <<'PY'
           from pathlib import Path
+          import re
 
           p = Path(
               "WineGlass/Vendor/blink/wg_blink_impl.c"
@@ -417,43 +393,61 @@ jobs:
 
           s = p.read_text()
 
-          # ------------------------------------------------------
-          # InitMap
-          # ------------------------------------------------------
+          # ======================================================
+          # 1. InitMap
+          # ======================================================
 
-          old = '''        InitMap();
-                  s_blink_initialized = 1;'''
+          pattern = r'''
+          (?P<indent>[ \t]*)
+          InitMap\(\);
+          \s*
+          s_blink_initialized\s*=\s*1;
+          '''
 
-          new = '''        fprintf(stderr,
-                          "[FIX7/BLINK] BEFORE InitMap\\n");
-                  fflush(stderr);
+          replacement = r'''\g<indent>fprintf(stderr,
+          \g<indent>        "[FIX7/BLINK] BEFORE InitMap\n");
+          \g<indent>fflush(stderr);
 
-                  InitMap();
+          \g<indent>InitMap();
 
-                  fprintf(stderr,
-                          "[FIX7/BLINK] AFTER InitMap\\n");
-                  fflush(stderr);
+          \g<indent>fprintf(stderr,
+          \g<indent>        "[FIX7/BLINK] AFTER InitMap\n");
+          \g<indent>fflush(stderr);
 
-                  s_blink_initialized = 1;'''
+          \g<indent>s_blink_initialized = 1;'''
 
-          if old not in s:
+          s, count = re.subn(
+              pattern,
+              replacement,
+              s,
+              count=1,
+              flags=re.X
+          )
+
+          if count != 1:
               raise SystemExit(
-                  "ERROR: InitMap block changed upstream"
+                  "ERROR: couldn't patch InitMap"
               )
 
-          s = s.replace(old, new, 1)
+          # ======================================================
+          # 2. create_vm_with_mode entry
+          # ======================================================
 
-          # ------------------------------------------------------
-          # create_vm
-          # ------------------------------------------------------
+          pattern = r'''
+          static\s+struct\s+WGBlinkVM\s*\*
+          create_vm_with_mode
+          \(
+              struct\s+XedMachineMode\s+mode
+          \)
+          \s*\{
+          \s*
+          ensure_initialized\(\);
+          '''
 
-          old = '''static struct WGBlinkVM *create_vm_with_mode(struct XedMachineMode mode) {
-              ensure_initialized();'''
-
-          new = '''static struct WGBlinkVM *create_vm_with_mode(struct XedMachineMode mode) {
+          replacement = r'''static struct WGBlinkVM *create_vm_with_mode(struct XedMachineMode mode) {
 
               fprintf(stderr,
-                      "[FIX7/BLINK] create VM ENTER mode=%d\\n",
+                      "[FIX7/BLINK] create_vm ENTER mode=%d\n",
                       mode.omode);
 
               fflush(stderr);
@@ -461,40 +455,112 @@ jobs:
               ensure_initialized();
 
               fprintf(stderr,
-                      "[FIX7/BLINK] ensure_initialized OK\\n");
+                      "[FIX7/BLINK] ensure_initialized OK\n");
 
               fflush(stderr);'''
 
-          if old not in s:
+          s, count = re.subn(
+              pattern,
+              replacement,
+              s,
+              count=1,
+              flags=re.X
+          )
+
+          if count != 1:
               raise SystemExit(
-                  "ERROR: create VM changed upstream"
+                  "ERROR: couldn't patch create_vm entry"
               )
 
-          s = s.replace(old, new, 1)
+          # ======================================================
+          # 3. VM calloc
+          # ======================================================
 
-          # ------------------------------------------------------
-          # NewSystem
-          # ------------------------------------------------------
+          pattern = r'''
+          struct\s+WGBlinkVM\s*\*vm
+          \s*=\s*
+          calloc
+          \(
+              1,
+              \s*
+              sizeof
+              \(
+                  struct\s+WGBlinkVM
+              \)
+          \);
+          \s*
+          if\s*
+          \(
+              !vm
+          \)
+          \s*
+          return\s+NULL;
+          '''
 
-          old = '''    vm->s = NewSystem(mode);
-              if (!vm->s) { free(vm); return NULL; }'''
+          replacement = r'''fprintf(stderr,
+                      "[FIX7/BLINK] BEFORE VM calloc\n");
+              fflush(stderr);
 
-          new = '''    fprintf(stderr,
-                      "[FIX7/BLINK] BEFORE NewSystem\\n");
+              struct WGBlinkVM *vm =
+                  calloc(1, sizeof(struct WGBlinkVM));
 
+              fprintf(stderr,
+                      "[FIX7/BLINK] AFTER VM calloc ptr=%p\n",
+                      (void *)vm);
+
+              fflush(stderr);
+
+              if (!vm)
+                  return NULL;'''
+
+          s, count = re.subn(
+              pattern,
+              replacement,
+              s,
+              count=1,
+              flags=re.X
+          )
+
+          if count != 1:
+              raise SystemExit(
+                  "ERROR: couldn't patch VM calloc"
+              )
+
+          # ======================================================
+          # 4. NewSystem
+          # ======================================================
+
+          pattern = r'''
+          vm->s
+          \s*=\s*
+          NewSystem\(mode\);
+          \s*
+          if\s*\(!vm->s\)
+          \s*
+          \{
+              \s*
+              free\(vm\);
+              \s*
+              return\s+NULL;
+              \s*
+          \}
+          '''
+
+          replacement = r'''fprintf(stderr,
+                      "[FIX7/BLINK] BEFORE NewSystem\n");
               fflush(stderr);
 
               vm->s = NewSystem(mode);
 
               fprintf(stderr,
-                      "[FIX7/BLINK] AFTER NewSystem ptr=%p\\n",
+                      "[FIX7/BLINK] AFTER NewSystem ptr=%p\n",
                       (void *)vm->s);
 
               fflush(stderr);
 
               if (!vm->s) {
                   fprintf(stderr,
-                          "[FIX7/BLINK] NewSystem NULL\\n");
+                          "[FIX7/BLINK] NewSystem NULL\n");
 
                   fflush(stderr);
 
@@ -502,23 +568,58 @@ jobs:
                   return NULL;
               }'''
 
-          if old not in s:
+          s, count = re.subn(
+              pattern,
+              replacement,
+              s,
+              count=1,
+              flags=re.X
+          )
+
+          if count != 1:
               raise SystemExit(
-                  "ERROR: NewSystem changed upstream"
+                  "ERROR: couldn't patch NewSystem"
               )
 
-          s = s.replace(old, new, 1)
+          # ======================================================
+          # 5. Mmap
+          # ======================================================
 
-          # ------------------------------------------------------
-          # Mmap
-          # ------------------------------------------------------
+          pattern = r'''
+          vm->s->real
+          \s*=\s*
+          Mmap
+          \(
+              NULL,
+              \s*
+              real_size,
+              \s*
+              PROT_READ\s*\|\s*PROT_WRITE,
+              \s*
+              MAP_PRIVATE\s*\|\s*MAP_ANONYMOUS_,
+              \s*
+              -1,
+              \s*
+              0,
+              \s*
+              "real"
+          \);
+          \s*
+          if\s*\(!vm->s->real\)
+          \s*
+          \{
+              \s*
+              FreeSystem\(vm->s\);
+              \s*
+              free\(vm\);
+              \s*
+              return\s+NULL;
+              \s*
+          \}
+          '''
 
-          old = '''        vm->s->real = Mmap(NULL, real_size, PROT_READ | PROT_WRITE,
-                                     MAP_PRIVATE | MAP_ANONYMOUS_, -1, 0, "real");
-                  if (!vm->s->real) { FreeSystem(vm->s); free(vm); return NULL; }'''
-
-          new = '''        fprintf(stderr,
-                          "[FIX7/BLINK] BEFORE real Mmap size=%ld\\n",
+          replacement = r'''fprintf(stderr,
+                          "[FIX7/BLINK] BEFORE real Mmap size=%ld\n",
                           real_size);
 
                   fflush(stderr);
@@ -535,7 +636,7 @@ jobs:
                       );
 
                   fprintf(stderr,
-                          "[FIX7/BLINK] AFTER real Mmap ptr=%p\\n",
+                          "[FIX7/BLINK] AFTER real Mmap ptr=%p\n",
                           (void *)vm->s->real);
 
                   fflush(stderr);
@@ -543,7 +644,7 @@ jobs:
                   if (!vm->s->real) {
 
                       fprintf(stderr,
-                              "[FIX7/BLINK] real Mmap FAILED\\n");
+                              "[FIX7/BLINK] real Mmap FAILED\n");
 
                       fflush(stderr);
 
@@ -553,29 +654,56 @@ jobs:
                       return NULL;
                   }'''
 
-          if old not in s:
+          s, count = re.subn(
+              pattern,
+              replacement,
+              s,
+              count=1,
+              flags=re.X
+          )
+
+          if count != 1:
               raise SystemExit(
-                  "ERROR: real Mmap changed upstream"
+                  "ERROR: couldn't patch Mmap"
               )
 
-          s = s.replace(old, new, 1)
+          # ======================================================
+          # 6. NewMachine
+          # ======================================================
 
-          # ------------------------------------------------------
-          # NewMachine
-          # ------------------------------------------------------
+          pattern = r'''
+          vm->m
+          \s*=\s*
+          NewMachine
+          \(
+              vm->s,
+              \s*
+              NULL
+          \);
+          \s*
+          if\s*\(!vm->m\)
+          \s*
+          \{
+              \s*
+              FreeSystem\(vm->s\);
+              \s*
+              free\(vm\);
+              \s*
+              return\s+NULL;
+              \s*
+          \}
+          '''
 
-          old = '''    vm->m = NewMachine(vm->s, NULL);
-              if (!vm->m) { FreeSystem(vm->s); free(vm); return NULL; }'''
-
-          new = '''    fprintf(stderr,
-                      "[FIX7/BLINK] BEFORE NewMachine\\n");
+          replacement = r'''fprintf(stderr,
+                      "[FIX7/BLINK] BEFORE NewMachine\n");
 
               fflush(stderr);
 
-              vm->m = NewMachine(vm->s, NULL);
+              vm->m =
+                  NewMachine(vm->s, NULL);
 
               fprintf(stderr,
-                      "[FIX7/BLINK] AFTER NewMachine ptr=%p\\n",
+                      "[FIX7/BLINK] AFTER NewMachine ptr=%p\n",
                       (void *)vm->m);
 
               fflush(stderr);
@@ -583,7 +711,7 @@ jobs:
               if (!vm->m) {
 
                   fprintf(stderr,
-                          "[FIX7/BLINK] NewMachine NULL\\n");
+                          "[FIX7/BLINK] NewMachine NULL\n");
 
                   fflush(stderr);
 
@@ -593,22 +721,34 @@ jobs:
                   return NULL;
               }'''
 
-          if old not in s:
+          s, count = re.subn(
+              pattern,
+              replacement,
+              s,
+              count=1,
+              flags=re.X
+          )
+
+          if count != 1:
               raise SystemExit(
-                  "ERROR: NewMachine changed upstream"
+                  "ERROR: couldn't patch NewMachine"
               )
 
-          s = s.replace(old, new, 1)
+          # ======================================================
+          # 7. AllocatePageTable
+          # ======================================================
 
-          # ------------------------------------------------------
-          # AllocatePageTable
-          # ------------------------------------------------------
+          pattern = r'''
+          vm->s->cr3
+          \s*=\s*
+          AllocatePageTable
+          \(
+              vm->s
+          \);
+          '''
 
-          old = '''        vm->s->cr3 = AllocatePageTable(vm->s);
-                  if (vm->s->cr3 == (u64)-1) {'''
-
-          new = '''        fprintf(stderr,
-                          "[FIX7/BLINK] BEFORE AllocatePageTable\\n");
+          replacement = r'''fprintf(stderr,
+                          "[FIX7/BLINK] BEFORE AllocatePageTable\n");
 
                   fflush(stderr);
 
@@ -616,47 +756,72 @@ jobs:
                       AllocatePageTable(vm->s);
 
                   fprintf(stderr,
-                          "[FIX7/BLINK] AFTER AllocatePageTable cr3=%llu\\n",
+                          "[FIX7/BLINK] AFTER AllocatePageTable cr3=%llu\n",
                           (unsigned long long)vm->s->cr3);
 
-                  fflush(stderr);
+                  fflush(stderr);'''
 
-                  if (vm->s->cr3 == (u64)-1) {'''
+          s, count = re.subn(
+              pattern,
+              replacement,
+              s,
+              count=1,
+              flags=re.X
+          )
 
-          if old not in s:
+          if count != 1:
               raise SystemExit(
-                  "ERROR: AllocatePageTable changed upstream"
+                  "ERROR: couldn't patch AllocatePageTable"
               )
 
-          s = s.replace(old, new, 1)
+          # ======================================================
+          # 8. SUCCESS
+          # ======================================================
 
-          # ------------------------------------------------------
-          # success
-          # ------------------------------------------------------
+          pattern = r'''
+          vm->m->flags
+          \s*\|=\s*
+          \(1\s*<<\s*9\);
+          \s*
+          //\s*IF
+          \s*
+          return\s+vm;
+          '''
 
-          old = '''    vm->m->flags |= (1 << 9); // IF
-              return vm;'''
-
-          new = '''    vm->m->flags |= (1 << 9); // IF
+          replacement = r'''vm->m->flags |= (1 << 9); // IF
 
               fprintf(stderr,
-                      "[FIX7/BLINK] VM CREATE SUCCESS\\n");
+                      "[FIX7/BLINK] VM CREATE SUCCESS\n");
 
               fflush(stderr);
 
               return vm;'''
 
-          if old not in s:
-              raise SystemExit(
-                  "ERROR: VM success changed upstream"
-              )
+          s, count = re.subn(
+              pattern,
+              replacement,
+              s,
+              count=1,
+              flags=re.X
+          )
 
-          s = s.replace(old, new, 1)
+          if count != 1:
+              raise SystemExit(
+                  "ERROR: couldn't patch VM success"
+              )
 
           p.write_text(s)
 
-          print("Blink runtime diagnostics patched")
+          print("========================================")
+          print("BLINK FIX 7.5 DIAGNOSTICS PATCHED")
+          print("========================================")
           PY
+
+          echo "===== CHECK DIAGNOSTICS ====="
+
+          grep -n \
+            "FIX7/BLINK" \
+            WineGlass/Vendor/blink/wg_blink_impl.c
 
       # ==========================================================
       # BUILD WINEGLASS BLINK BRIDGE
@@ -703,8 +868,6 @@ jobs:
 
       # ==========================================================
       # FALLBACK A0 / A1 / A2 / A3
-      #
-      # FIX6 stopped on A1.
       # ==========================================================
 
       - name: Add x86 A0 A1 A2 A3 fallback opcodes
@@ -731,7 +894,7 @@ jobs:
 
           patch = r'''
               // =====================================================
-              // POSTAL 2 FIX 7.4
+              // POSTAL 2 FIX 7.5
               //
               // A0 = MOV AL, moffs8
               // A1 = MOV EAX, moffs32
@@ -947,11 +1110,11 @@ jobs:
             "$PLIST"
 
           /usr/libexec/PlistBuddy \
-            -c "Set :CFBundleShortVersionString 0.7.4" \
+            -c "Set :CFBundleShortVersionString 0.7.5" \
             "$PLIST"
 
           /usr/libexec/PlistBuddy \
-            -c "Set :CFBundleVersion 74" \
+            -c "Set :CFBundleVersion 75" \
             "$PLIST"
 
           /usr/libexec/PlistBuddy \
@@ -988,10 +1151,6 @@ jobs:
                   "#include <unistd.h>\n"
                   "#include <stdio.h>"
               )
-
-          # ------------------------------------------------------
-          # Redirect stderr before Blink self-test.
-          # ------------------------------------------------------
 
           old = '''    UIWindowScene *windowScene = (UIWindowScene *)scene;
 
@@ -1030,7 +1189,7 @@ jobs:
               fprintf(
                   stderr,
                   "========================================\\n"
-                  "POSTAL 2 WineGlass FIX 7.4\\n"
+                  "POSTAL 2 WineGlass FIX 7.5\\n"
                   "========================================\\n"
               );
 
@@ -1048,10 +1207,6 @@ jobs:
               new,
               1
           )
-
-          # ------------------------------------------------------
-          # Button
-          # ------------------------------------------------------
 
           old = \
               '[_loadButton setTitle:@"  Load .exe  " forState:UIControlStateNormal];'
@@ -1087,10 +1242,6 @@ jobs:
               1
           )
 
-          # ------------------------------------------------------
-          # POSTAL finder
-          # ------------------------------------------------------
-
           marker = \
               "#pragma mark - UIDocumentPickerDelegate"
 
@@ -1101,7 +1252,7 @@ jobs:
 
           postal = r'''
           // ============================================================
-          // POSTAL 2 FIX 7.4
+          // POSTAL 2 FIX 7.5
           // ============================================================
 
           - (NSString *)findPostal2Exe {
@@ -1236,10 +1387,6 @@ jobs:
               1
           )
 
-          # ------------------------------------------------------
-          # Auto run.
-          # ------------------------------------------------------
-
           old = \
               "            [self tryLoadBundledPE];"
 
@@ -1308,7 +1455,7 @@ jobs:
       # BUILD IOS APP
       # ==========================================================
 
-      - name: Build POSTAL 2 FIX 7.4
+      - name: Build POSTAL 2 FIX 7.5
         shell: bash
         run: |
           set -o pipefail
@@ -1374,6 +1521,12 @@ jobs:
             -c "Print :CFBundleShortVersionString" \
             "$APP/Info.plist"
 
+          echo "===== BUILD ====="
+
+          /usr/libexec/PlistBuddy \
+            -c "Print :CFBundleVersion" \
+            "$APP/Info.plist"
+
       # ==========================================================
       # IPA
       # ==========================================================
@@ -1402,21 +1555,21 @@ jobs:
 
           zip \
             -qry \
-            "POSTAL-2-iOS-v7.4-SCHED-FIX.ipa" \
+            "POSTAL-2-iOS-v7.5-BLINK-DIAG-FIX.ipa" \
             Payload
 
           ls -lh \
-            "POSTAL-2-iOS-v7.4-SCHED-FIX.ipa"
+            "POSTAL-2-iOS-v7.5-BLINK-DIAG-FIX.ipa"
 
       # ==========================================================
       # UPLOAD IPA
       # ==========================================================
 
-      - name: Upload POSTAL 2 FIX 7.4 IPA
+      - name: Upload POSTAL 2 FIX 7.5 IPA
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-iOS-v7.4-SCHED-FIX
-          path: out/POSTAL-2-iOS-v7.4-SCHED-FIX.ipa
+          name: POSTAL-2-iOS-v7.5-BLINK-DIAG-FIX
+          path: out/POSTAL-2-iOS-v7.5-BLINK-DIAG-FIX.ipa
           if-no-files-found: error
           retention-days: 14
 
@@ -1429,58 +1582,58 @@ jobs:
         shell: bash
         run: |
           mkdir -p \
-            debug-fix7-4
+            debug-fix7-5
 
           cp \
             WineGlass/xcodebuild.log \
-            debug-fix7-4/ \
+            debug-fix7-5/ \
             2>/dev/null || true
 
           cp \
             blink-src/config.h \
-            debug-fix7-4/blink-config.h \
+            debug-fix7-5/blink-config.h \
             2>/dev/null || true
 
           cp \
             blink-src/config.mk \
-            debug-fix7-4/blink-config.mk \
+            debug-fix7-5/blink-config.mk \
             2>/dev/null || true
 
           cp \
             blink-src/config.log \
-            debug-fix7-4/blink-config.log \
+            debug-fix7-5/blink-config.log \
             2>/dev/null || true
 
           cp \
             blink-src/blink/syscall.c \
-            debug-fix7-4/blink-syscall.c \
+            debug-fix7-5/blink-syscall.c \
             2>/dev/null || true
 
           cp \
             WineGlass/Vendor/blink/wg_blink_impl.c \
-            debug-fix7-4/ \
+            debug-fix7-5/ \
             2>/dev/null || true
 
           cp \
             WineGlass/Sources/CPU/wg_x86_decode.c \
-            debug-fix7-4/ \
+            debug-fix7-5/ \
             2>/dev/null || true
 
           cp \
             WineGlass/Sources/App/WGSceneDelegate.m \
-            debug-fix7-4/ \
+            debug-fix7-5/ \
             2>/dev/null || true
 
           cp \
             WineGlass/project.yml \
-            debug-fix7-4/ \
+            debug-fix7-5/ \
             2>/dev/null || true
 
-      - name: Upload FIX 7.4 debug
+      - name: Upload FIX 7.5 debug
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-FIX7.4-DEBUG
-          path: debug-fix7-4
+          name: POSTAL-2-FIX7.5-DEBUG
+          path: debug-fix7-5
           if-no-files-found: ignore
           retention-days: 7
