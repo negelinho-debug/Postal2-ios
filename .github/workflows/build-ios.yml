@@ -1,4 +1,4 @@
-name: POSTAL 2 iOS v6 ORIGINAL EXE TEST FIX 3
+name: POSTAL 2 iOS v6 ORIGINAL EXE TEST FIX 4
 
 on:
   workflow_dispatch:
@@ -50,7 +50,7 @@ jobs:
 
 
       # ==========================================================
-      # CLONE
+      # CLONE WINEGLASS + BLINK
       # ==========================================================
 
       - name: Clone WineGlass and blink
@@ -60,7 +60,8 @@ jobs:
 
           cd "$GITHUB_WORKSPACE"
 
-          rm -rf WineGlass blink
+          rm -rf WineGlass
+          rm -rf blink
 
           git clone \
             --depth 1 \
@@ -72,16 +73,19 @@ jobs:
             https://github.com/jart/blink.git \
             blink
 
+          echo
           echo "===== WINEGLASS COMMIT ====="
           git -C WineGlass rev-parse HEAD
 
+          echo
           echo "===== BLINK COMMIT ====="
           git -C blink rev-parse HEAD
 
 
       # ==========================================================
       # BUILD BLINK ARM64
-      # NO JIT
+      #
+      # FIRST TEST = NO JIT
       # ==========================================================
 
       - name: Build blink ARM64 no-JIT
@@ -100,11 +104,16 @@ jobs:
 
           echo
           echo "======================================"
-          echo "CONFIGURE BLINK"
+          echo "BLINK SOURCE CHECK"
           echo "======================================"
 
           test -f config.h.in
           test -f configure
+
+          echo
+          echo "======================================"
+          echo "CONFIGURE BLINK FOR IPHONE"
+          echo "======================================"
 
           ./configure \
             CC="$CC" \
@@ -120,21 +129,48 @@ jobs:
 
           echo
           echo "======================================"
-          echo "PATCH BLINK FOR IPHONE"
+          echo "PATCH BLINK IOS CONFIG"
           echo "======================================"
 
           python3 <<'PY'
           from pathlib import Path
           import re
 
-          p = Path("config.h")
-          s = p.read_text()
+          config = Path("config.h")
+          text = config.read_text()
+
 
           # ======================================================
-          # DO NOT USE getentropy/getrandom ON THIS IOS BUILD
+          # NO JIT / THREADS / SOCKETS
           # ======================================================
 
-          disable = [
+          force_enable = [
+              "DISABLE_JIT",
+              "DISABLE_THREADS",
+              "DISABLE_SOCKETS",
+          ]
+
+          for name in force_enable:
+
+              text = re.sub(
+                  rf'^[ \t]*//[ \t]*#define[ \t]+{re.escape(name)}.*$',
+                  f'#define {name}',
+                  text,
+                  flags=re.MULTILINE
+              )
+
+              if f"#define {name}" not in text:
+                  text += f"\n#define {name}\n"
+
+
+          # ======================================================
+          # RANDOM BACKEND FIX
+          #
+          # Do not use getentropy/getrandom.
+          # Use /dev/urandom.
+          # ======================================================
+
+          force_disable = [
               "HAVE_GETENTROPY",
               "HAVE_SYS_GETENTROPY",
               "HAVE_GETRANDOM",
@@ -142,57 +178,90 @@ jobs:
               "HAVE_KERN_ARND",
           ]
 
-          for name in disable:
+          for name in force_disable:
 
-              s = re.sub(
+              text = re.sub(
                   rf'^[ \t]*#define[ \t]+{re.escape(name)}.*$',
                   f'// #define {name}',
-                  s,
+                  text,
                   flags=re.MULTILINE
               )
 
-          # ======================================================
-          # USE /dev/urandom FALLBACK
-          # ======================================================
 
-          s = re.sub(
+          text = re.sub(
               r'^[ \t]*//[ \t]*#define[ \t]+HAVE_DEV_URANDOM.*$',
               '#define HAVE_DEV_URANDOM',
-              s,
+              text,
               flags=re.MULTILINE
           )
 
-          if "#define HAVE_DEV_URANDOM" not in s:
-              s += "\n#define HAVE_DEV_URANDOM\n"
+          if "#define HAVE_DEV_URANDOM" not in text:
+              text += "\n#define HAVE_DEV_URANDOM\n"
+
 
           # ======================================================
-          # FORCE NO JIT / NO THREADS / NO SOCKETS
+          # FIX 4
+          #
+          # Darwin / iOS struct statfs comes from sys/mount.h.
+          #
+          # Blink only includes that header when:
+          #
+          # HAVE_SYS_MOUNT_H
+          #
+          # is enabled.
           # ======================================================
 
-          force = [
-              "DISABLE_JIT",
-              "DISABLE_THREADS",
-              "DISABLE_SOCKETS",
+          text = re.sub(
+              r'^[ \t]*//[ \t]*#define[ \t]+HAVE_SYS_MOUNT_H.*$',
+              '#define HAVE_SYS_MOUNT_H',
+              text,
+              flags=re.MULTILINE
+          )
+
+          if "#define HAVE_SYS_MOUNT_H" not in text:
+              text += "\n#define HAVE_SYS_MOUNT_H\n"
+
+
+          # ======================================================
+          # OTHER DARWIN FEATURES WE KNOW ARE PRESENT
+          # ======================================================
+
+          optional_enable = [
+              "HAVE_INT128",
+              "HAVE_SYSCTL",
+              "HAVE_SA_LEN",
+              "HAVE_WCWIDTH",
+              "HAVE_MEMCCPY",
+              "HAVE_SEEKDIR",
+              "HAVE_REALPATH",
+              "HAVE_SCHED_YIELD",
+              "HAVE_MAP_ANONYMOUS",
+              "HAVE_MAP_SHARED",
+              "HAVE_STRUCT_TIMEZONE",
           ]
 
-          for name in force:
+          for name in optional_enable:
 
-              if f"#define {name}" not in s:
+              text = re.sub(
+                  rf'^[ \t]*//[ \t]*#define[ \t]+{re.escape(name)}.*$',
+                  f'#define {name}',
+                  text,
+                  flags=re.MULTILINE
+              )
 
-                  s = s.replace(
-                      f"// #define {name}",
-                      f"#define {name}"
-                  )
 
-          p.write_text(s)
+          config.write_text(text)
 
 
           # ======================================================
-          # HOST HELPER SETTINGS
+          # HOST BUILD HELPER
+          #
+          # Keep the same host helper settings as the previous
+          # build that already reached blink/statfs.c.
           # ======================================================
 
-          mk_path = Path("config.mk")
-          mk = mk_path.read_text()
+          config_mk = Path("config.mk")
+          mk = config_mk.read_text()
 
           mk = re.sub(
               r'^HOST_SYSTEM\s*=.*$',
@@ -208,19 +277,47 @@ jobs:
               flags=re.MULTILINE
           )
 
-          mk_path.write_text(mk)
+          config_mk.write_text(mk)
           PY
 
 
           echo
           echo "======================================"
-          echo "RANDOM BACKEND CHECK"
+          echo "IMPORTANT CONFIG FLAGS"
           echo "======================================"
 
           grep \
             -E \
-            "HAVE_GETENTROPY|HAVE_SYS_GETENTROPY|HAVE_GETRANDOM|HAVE_SYS_GETRANDOM|HAVE_KERN_ARND|HAVE_DEV_URANDOM" \
+            "DISABLE_JIT|DISABLE_THREADS|DISABLE_SOCKETS|HAVE_GETENTROPY|HAVE_GETRANDOM|HAVE_DEV_URANDOM|HAVE_SYS_MOUNT_H" \
             config.h \
+            || true
+
+
+          echo
+          echo "======================================"
+          echo "VERIFY STATFS FIX"
+          echo "======================================"
+
+          grep \
+            -n \
+            "HAVE_SYS_MOUNT_H" \
+            config.h
+
+          grep \
+            -n \
+            "sys/mount.h" \
+            blink/statfs.c
+
+
+          echo
+          echo "======================================"
+          echo "CONFIG.MK"
+          echo "======================================"
+
+          grep \
+            -E \
+            "^HOST_SYSTEM|^HOST_ARCH|^CC =|^AR =|^CFLAGS =" \
+            config.mk \
             || true
 
 
@@ -238,9 +335,13 @@ jobs:
             o//blink/blink.a
 
 
+          echo
+          echo "======================================"
+          echo "COPY BLINK TO WINEGLASS"
+          echo "======================================"
+
           mkdir -p \
             "$WG/Vendor/blink/lib"
-
 
           cp \
             o//blink/blink.a \
@@ -274,7 +375,7 @@ jobs:
 
           echo
           echo "======================================"
-          echo "VERIFY BLINK"
+          echo "VERIFY BLINK ARM64"
           echo "======================================"
 
           file \
@@ -285,15 +386,24 @@ jobs:
 
           file \
             "$WG/Vendor/blink/lib/wg_blink_impl.o" \
-            | grep -q "arm64"
+            | grep \
+                -q \
+                "arm64"
+
 
           echo
+          echo "======================================"
           echo "BLINK ARM64 NO-JIT READY"
+          echo "======================================"
 
 
       # ==========================================================
-      # PATCH WINEGLASS
-      # KEEP SAME BUNDLE ID AS v5
+      # PATCH WINEGLASS INTO POSTAL 2
+      #
+      # SAME BUNDLE ID AS v5:
+      #
+      # com.postal2ios.native
+      #
       # ==========================================================
 
       - name: Patch WineGlass into POSTAL 2 v6
@@ -310,31 +420,46 @@ jobs:
 
 
           # ======================================================
-          # PROJECT
+          # PROJECT.YML
           # ======================================================
 
           project = Path("project.yml")
           text = project.read_text()
+
 
           text = text.replace(
               "bundleIdPrefix: com.wineglass",
               "bundleIdPrefix: com.postal2ios"
           )
 
+
           text = text.replace(
               "PRODUCT_BUNDLE_IDENTIFIER: com.wineglass.app",
               "PRODUCT_BUNDLE_IDENTIFIER: com.postal2ios.native"
           )
 
+
           text = text.replace(
               'xcodeVersion: "15.0"',
-              'xcodeVersion: "15.4"\n  projectFormat: xcode15_3'
+              'xcodeVersion: "15.4"'
           )
+
+
+          if "projectFormat:" not in text:
+
+              text = text.replace(
+                  '  xcodeVersion: "15.4"',
+                  '  xcodeVersion: "15.4"\n'
+                  '  projectFormat: xcode15_3',
+                  1
+              )
+
 
           text = text.replace(
               'TARGETED_DEVICE_FAMILY: "1,2"',
               'TARGETED_DEVICE_FAMILY: "1"'
           )
+
 
           text = re.sub(
               r'^\s*CODE_SIGN_ENTITLEMENTS:.*\n',
@@ -343,6 +468,7 @@ jobs:
               flags=re.MULTILINE
           )
 
+
           text = re.sub(
               r'^\s*DEVELOPMENT_TEAM:.*\n',
               '',
@@ -350,33 +476,41 @@ jobs:
               flags=re.MULTILINE
           )
 
+
           text = text.replace(
               "CODE_SIGN_STYLE: Automatic",
               "CODE_SIGN_STYLE: Manual"
           )
 
+
           project.write_text(text)
 
 
           # ======================================================
-          # INFO PLIST
+          # INFO.PLIST
           # ======================================================
 
           plist_path = Path(
               "Sources/App/Info.plist"
           )
 
+
           with plist_path.open("rb") as f:
               info = plistlib.load(f)
 
+
           info["CFBundleName"] = "POSTAL 2"
           info["CFBundleDisplayName"] = "POSTAL 2"
+
           info["CFBundleShortVersionString"] = "0.6"
           info["CFBundleVersion"] = "6"
+
           info["UIFileSharingEnabled"] = True
           info["LSSupportsOpeningDocumentsInPlace"] = True
 
+
           with plist_path.open("wb") as f:
+
               plistlib.dump(
                   info,
                   f,
@@ -385,7 +519,9 @@ jobs:
 
 
           # ======================================================
-          # WRITE LOG TO DOCUMENTS
+          # LOG TO IOS FILES
+          #
+          # Documents/POSTAL2-WineGlass.log
           # ======================================================
 
           log_path = Path(
@@ -393,6 +529,7 @@ jobs:
           )
 
           log = log_path.read_text()
+
 
           if "#include <stdlib.h>" not in log:
 
@@ -403,35 +540,40 @@ jobs:
                   1
               )
 
-          old = (
+
+          mutex_old = (
               "static pthread_mutex_t s_mutex   = "
               "PTHREAD_MUTEX_INITIALIZER;"
           )
 
-          new = (
+          mutex_new = (
               "static pthread_mutex_t s_mutex   = "
               "PTHREAD_MUTEX_INITIALIZER;\n"
               "static FILE *s_postal_file = NULL;"
           )
 
-          if old not in log:
+
+          if mutex_old not in log:
               raise SystemExit(
-                  "wg_log mutex not found"
+                  "ERROR: WineGlass mutex line changed"
               )
 
+
           log = log.replace(
-              old,
-              new,
+              mutex_old,
+              mutex_new,
               1
           )
 
-          old_init = """void wg_log_init(void) {
+
+          init_old = """void wg_log_init(void) {
               s_callback = NULL;
               s_userdata = NULL;
               s_minLevel = WG_LOG_DEBUG;
           }"""
 
-          new_init = """void wg_log_init(void) {
+
+          init_new = """void wg_log_init(void) {
               s_callback = NULL;
               s_userdata = NULL;
               s_minLevel = WG_LOG_DEBUG;
@@ -448,6 +590,15 @@ jobs:
                       "%s/Documents/POSTAL2-WineGlass.log",
                       home
                   );
+
+                  if (s_postal_file) {
+
+                      fclose(
+                          s_postal_file
+                      );
+
+                      s_postal_file = NULL;
+                  }
 
                   s_postal_file =
                       fopen(
@@ -476,21 +627,25 @@ jobs:
               }
           }"""
 
-          if old_init not in log:
+
+          if init_old not in log:
               raise SystemExit(
-                  "wg_log_init not found"
+                  "ERROR: WineGlass wg_log_init changed"
               )
 
+
           log = log.replace(
-              old_init,
-              new_init,
+              init_old,
+              init_new,
               1
           )
 
-          old_write = """    fprintf(stderr, "[%s/%s] %s\\n", level_names[lvl], safe_tag, buf);
+
+          writer_old = """    fprintf(stderr, "[%s/%s] %s\\n", level_names[lvl], safe_tag, buf);
               pthread_mutex_lock(&s_mutex);"""
 
-          new_write = """    fprintf(stderr, "[%s/%s] %s\\n", level_names[lvl], safe_tag, buf);
+
+          writer_new = """    fprintf(stderr, "[%s/%s] %s\\n", level_names[lvl], safe_tag, buf);
 
               pthread_mutex_lock(&s_mutex);
 
@@ -509,22 +664,25 @@ jobs:
                   );
               }"""
 
-          if old_write not in log:
+
+          if writer_old not in log:
               raise SystemExit(
-                  "wg_log writer not found"
+                  "ERROR: WineGlass log writer changed"
               )
 
+
           log = log.replace(
-              old_write,
-              new_write,
+              writer_old,
+              writer_new,
               1
           )
+
 
           log_path.write_text(log)
 
 
           # ======================================================
-          # POSTAL2.EXE AUTORUN
+          # POSTAL 2 SCENE
           # ======================================================
 
           scene_path = Path(
@@ -534,19 +692,69 @@ jobs:
           scene = scene_path.read_text()
 
 
+          # ======================================================
+          # BUTTON TITLE
+          # ======================================================
+
+          old_title = (
+              '[_loadButton setTitle:@"  Load .exe  " '
+              'forState:UIControlStateNormal];'
+          )
+
+          new_title = (
+              '[_loadButton setTitle:@"  RUN POSTAL 2  " '
+              'forState:UIControlStateNormal];'
+          )
+
+
+          if old_title not in scene:
+
+              raise SystemExit(
+                  "ERROR: Load .exe title changed upstream"
+              )
+
+
           scene = scene.replace(
-              '[_loadButton setTitle:@"  Load .exe  " forState:UIControlStateNormal];',
-              '[_loadButton setTitle:@"  RUN POSTAL 2  " forState:UIControlStateNormal];',
+              old_title,
+              new_title,
               1
           )
 
 
+          # ======================================================
+          # BUTTON ACTION
+          # ======================================================
+
+          old_action = (
+              '[_loadButton addTarget:self '
+              'action:@selector(openFilePicker) '
+              'forControlEvents:UIControlEventTouchUpInside];'
+          )
+
+          new_action = (
+              '[_loadButton addTarget:self '
+              'action:@selector(runPostal2) '
+              'forControlEvents:UIControlEventTouchUpInside];'
+          )
+
+
+          if old_action not in scene:
+
+              raise SystemExit(
+                  "ERROR: Load button action changed upstream"
+              )
+
+
           scene = scene.replace(
-              '[_loadButton addTarget:self action:@selector(openFilePicker) forControlEvents:UIControlEventTouchUpInside];',
-              '[_loadButton addTarget:self action:@selector(runPostal2) forControlEvents:UIControlEventTouchUpInside];',
+              old_action,
+              new_action,
               1
           )
 
+
+          # ======================================================
+          # INSERT POSTAL METHODS
+          # ======================================================
 
           marker = (
               "#pragma mark - UIDocumentPickerDelegate"
@@ -554,15 +762,17 @@ jobs:
 
 
           if marker not in scene:
+
               raise SystemExit(
-                  "UIDocumentPicker marker not found"
+                  "ERROR: picker marker missing"
               )
 
 
           methods = r'''
           // =====================================================
-          // POSTAL 2
+          // POSTAL 2 v6
           // =====================================================
+
 
           - (NSString *)findPostal2Exe {
 
@@ -583,7 +793,7 @@ jobs:
 
                   WG_LOGE(
                       "POSTAL2",
-                      "Documents unavailable"
+                      "Documents directory unavailable"
                   );
 
                   return nil;
@@ -608,7 +818,7 @@ jobs:
                   ];
 
 
-              BOOL directory =
+              BOOL isDirectory =
                   NO;
 
 
@@ -621,25 +831,28 @@ jobs:
                           root
 
                       isDirectory:
-                          &directory
+                          &isDirectory
                   ]
 
                   ||
 
-                  !directory
+                  !isDirectory
 
               ) {
 
                   WG_LOGE(
-
                       "POSTAL2",
-
-                      "Postal2FullData missing"
+                      "Postal2FullData missing: %s",
+                      root.UTF8String
                   );
 
                   return nil;
               }
 
+
+              // ===============================================
+              // NORMAL GAME LAYOUT
+              // ===============================================
 
               NSString *normal =
 
@@ -663,11 +876,8 @@ jobs:
               ) {
 
                   WG_LOGI(
-
                       "POSTAL2",
-
                       "Found EXE: %s",
-
                       normal.UTF8String
                   );
 
@@ -675,7 +885,11 @@ jobs:
               }
 
 
-              NSDirectoryEnumerator *e =
+              // ===============================================
+              // RECURSIVE FALLBACK SEARCH
+              // ===============================================
+
+              NSDirectoryEnumerator *enumerator =
 
                   [
                       fm
@@ -685,7 +899,8 @@ jobs:
                   ];
 
 
-              NSString *relative;
+              NSString *relative =
+                  nil;
 
 
               while (
@@ -693,17 +908,21 @@ jobs:
                   (
                       relative =
                           [
-                              e
+                              enumerator
                               nextObject
                           ]
                   )
 
               ) {
 
+                  NSString *filename =
+                      relative.lastPathComponent;
+
+
                   if (
 
                       [
-                          relative.lastPathComponent
+                          filename
 
                           caseInsensitiveCompare:
                               @"Postal2.exe"
@@ -726,11 +945,8 @@ jobs:
 
 
                       WG_LOGI(
-
                           "POSTAL2",
-
                           "Found recursive EXE: %s",
-
                           found.UTF8String
                       );
 
@@ -740,9 +956,7 @@ jobs:
 
 
               WG_LOGE(
-
                   "POSTAL2",
-
                   "Postal2.exe not found"
               );
 
@@ -751,14 +965,18 @@ jobs:
           }
 
 
+
+          // =====================================================
+          // RUN ORIGINAL WINDOWS POSTAL2.EXE
+          // =====================================================
+
+
           - (void)runPostal2 {
 
               if (!_engine) {
 
                   WG_LOGW(
-
                       "POSTAL2",
-
                       "Engine not ready"
                   );
 
@@ -770,7 +988,6 @@ jobs:
 
                   [
                       self
-
                       findPostal2Exe
                   ];
 
@@ -781,11 +998,16 @@ jobs:
                       _loadButton
 
                       setTitle:
-                          @" POSTAL2.EXE NOT FOUND "
+                          @"  POSTAL2.EXE NOT FOUND  "
 
                       forState:
                           UIControlStateNormal
                   ];
+
+
+                  _loadButton.enabled =
+                      YES;
+
 
                   return;
               }
@@ -800,12 +1022,14 @@ jobs:
                   ];
 
 
+              // ===============================================
+              // UE2 EXPECTS SYSTEM AS WORKING DIRECTORY
+              // ===============================================
+
               if (
 
                   chdir(
-
-                      systemFolder
-                          .fileSystemRepresentation
+                      systemFolder.fileSystemRepresentation
                   )
 
                   !=
@@ -815,20 +1039,16 @@ jobs:
               ) {
 
                   WG_LOGE(
-
                       "POSTAL2",
-
-                      "Could not enter System folder"
+                      "Could not enter System folder: %s",
+                      systemFolder.UTF8String
                   );
 
               } else {
 
                   WG_LOGI(
-
                       "POSTAL2",
-
                       "Working directory: %s",
-
                       systemFolder.UTF8String
                   );
               }
@@ -838,7 +1058,7 @@ jobs:
                   _loadButton
 
                   setTitle:
-                      @" STARTING POSTAL 2... "
+                      @"  STARTING POSTAL 2...  "
 
                   forState:
                       UIControlStateNormal
@@ -850,10 +1070,15 @@ jobs:
 
 
               WG_LOGI(
-
                   "POSTAL2",
+                  "Launching ORIGINAL Windows Postal2.exe"
+              );
 
-                  "Launching original Postal2.exe"
+
+              WG_LOGI(
+                  "POSTAL2",
+                  "EXE = %s",
+                  exe.UTF8String
               );
 
 
@@ -876,10 +1101,29 @@ jobs:
           )
 
 
-          # Auto-run after WineGlass engine initialization.
+          # ======================================================
+          # AUTO RUN AFTER ENGINE INITIALIZES
+          # ======================================================
+
+          autorun_old = (
+              "[self tryLoadBundledPE];"
+          )
+
+          autorun_new = (
+              "[self runPostal2];"
+          )
+
+
+          if autorun_old not in scene:
+
+              raise SystemExit(
+                  "ERROR: tryLoadBundledPE call changed upstream"
+              )
+
+
           scene = scene.replace(
-              "[self tryLoadBundledPE];",
-              "[self runPostal2];",
+              autorun_old,
+              autorun_new,
               1
           )
 
@@ -890,12 +1134,15 @@ jobs:
 
 
           print(
-              "POSTAL 2 v6 FIX 3 patch complete"
+              "POSTAL 2 v6 FIX 4 patch complete"
           )
           PY
 
 
-          echo "===== BUNDLE ====="
+          echo
+          echo "======================================"
+          echo "BUNDLE ID"
+          echo "======================================"
 
           grep \
             -n \
@@ -903,15 +1150,21 @@ jobs:
             project.yml
 
 
-          echo "===== POSTAL PATCH ====="
+          echo
+          echo "======================================"
+          echo "POSTAL 2 METHODS"
+          echo "======================================"
 
           grep \
             -n \
-            "runPostal2\|findPostal2Exe\|Postal2FullData" \
+            "RUN POSTAL 2\|findPostal2Exe\|runPostal2\|Postal2FullData" \
             Sources/App/WGSceneDelegate.m
 
 
-          echo "===== LOG ====="
+          echo
+          echo "======================================"
+          echo "LOG"
+          echo "======================================"
 
           grep \
             -n \
@@ -920,7 +1173,7 @@ jobs:
 
 
       # ==========================================================
-      # XCODEGEN
+      # GENERATE XCODE PROJECT
       # ==========================================================
 
       - name: Generate Xcode project
@@ -932,13 +1185,19 @@ jobs:
 
           xcodegen generate
 
-          test -d WineGlass.xcodeproj
+          test -d \
+            WineGlass.xcodeproj
+
 
           PBX="$GITHUB_WORKSPACE/WineGlass/WineGlass.xcodeproj/project.pbxproj"
 
           test -f "$PBX"
 
-          echo "===== OBJECT VERSION ====="
+
+          echo
+          echo "======================================"
+          echo "OBJECT VERSION"
+          echo "======================================"
 
           grep \
             -n \
@@ -946,18 +1205,26 @@ jobs:
             "$PBX" \
             | head
 
+
           if grep \
             -q \
             "objectVersion = 77;" \
             "$PBX"; then
 
-              echo "ERROR: objectVersion 77"
+              echo
+              echo "ERROR:"
+              echo "XcodeGen created objectVersion 77"
+
               exit 1
           fi
 
 
+          echo
+          echo "Xcode project generated."
+
+
       # ==========================================================
-      # BUILD IOS APP
+      # BUILD APPLICATION
       # ==========================================================
 
       - name: Build POSTAL 2 v6 ARM64
@@ -966,13 +1233,22 @@ jobs:
           set +e
           set -o pipefail
 
+
           cd "$GITHUB_WORKSPACE/WineGlass"
+
 
           rm -rf \
             "$GITHUB_WORKSPACE/build"
 
+
           mkdir -p \
             "$GITHUB_WORKSPACE/build"
+
+
+          echo
+          echo "======================================"
+          echo "BUILD POSTAL 2 v6 FIX 4"
+          echo "======================================"
 
 
           xcodebuild \
@@ -1008,11 +1284,21 @@ jobs:
                 -E \
                 "error:|fatal error:" \
                 "$GITHUB_WORKSPACE/build/xcodebuild.log" \
-                | tail -250 \
+                | tail \
+                    -250 \
                 || true
+
+              echo
+              echo "======================================"
 
               exit "$STATUS"
           fi
+
+
+          echo
+          echo "======================================"
+          echo "XCODE BUILD SUCCESS"
+          echo "======================================"
 
 
       # ==========================================================
@@ -1024,38 +1310,78 @@ jobs:
         run: |
           set -euxo pipefail
 
+
           APP="$(
             find \
               "$GITHUB_WORKSPACE/build/DerivedData/Build/Products" \
               -type d \
               -name "WineGlass.app" \
-              | head -n 1
+              | head \
+                  -n 1
           )"
+
 
           if [ -z "$APP" ]; then
 
-              echo "ERROR: WineGlass.app missing"
+              echo
+              echo "ERROR:"
+              echo "WineGlass.app not found"
+
+              find \
+                "$GITHUB_WORKSPACE/build" \
+                -maxdepth 8 \
+                -print
+
               exit 1
           fi
 
-          echo "APP_PATH=$APP" \
+
+          echo \
+            "APP_PATH=$APP" \
             >> "$GITHUB_ENV"
+
+
+          echo
+          echo "======================================"
+          echo "APP"
+          echo "======================================"
+
+          echo "$APP"
+
+
+          echo
+          echo "======================================"
+          echo "EXECUTABLE"
+          echo "======================================"
 
           file \
             "$APP/WineGlass"
+
+
+          echo
+          echo "======================================"
+          echo "ARCHITECTURE"
+          echo "======================================"
 
           lipo \
             -info \
             "$APP/WineGlass" \
             || true
 
+
           file \
             "$APP/WineGlass" \
-            | grep -q "arm64"
+            | grep \
+                -q \
+                "arm64"
+
+
+          echo
+          echo "ARM64 confirmed."
 
 
       # ==========================================================
-      # VERIFY ID
+      # VERIFY SAME ID AS v5
       # ==========================================================
 
       - name: Verify v6 bundle identity
@@ -1063,7 +1389,9 @@ jobs:
         run: |
           set -euxo pipefail
 
+
           INFO="$APP_PATH/Info.plist"
+
 
           BUNDLE="$(
             /usr/libexec/PlistBuddy \
@@ -1071,11 +1399,13 @@ jobs:
               "$INFO"
           )"
 
+
           VERSION="$(
             /usr/libexec/PlistBuddy \
               -c "Print :CFBundleShortVersionString" \
               "$INFO"
           )"
+
 
           BUILD="$(
             /usr/libexec/PlistBuddy \
@@ -1083,21 +1413,40 @@ jobs:
               "$INFO"
           )"
 
-          echo "Bundle: $BUNDLE"
+
+          echo
+          echo "======================================"
+          echo "IDENTITY"
+          echo "======================================"
+
+          echo "Bundle:  $BUNDLE"
           echo "Version: $VERSION"
-          echo "Build: $BUILD"
+          echo "Build:   $BUILD"
+
 
           test \
             "$BUNDLE" = \
             "com.postal2ios.native"
 
+
           test \
             "$VERSION" = \
             "0.6"
 
+
           test \
             "$BUILD" = \
             "6"
+
+
+          echo
+          echo "======================================"
+          echo "FILE SHARING"
+          echo "======================================"
+
+          /usr/libexec/PlistBuddy \
+            -c "Print :UIFileSharingEnabled" \
+            "$INFO"
 
 
       # ==========================================================
@@ -1109,31 +1458,54 @@ jobs:
         run: |
           set -euxo pipefail
 
+
           OUTPUT="$GITHUB_WORKSPACE/output"
 
-          rm -rf "$OUTPUT"
+
+          rm -rf \
+            "$OUTPUT"
+
 
           mkdir -p \
             "$OUTPUT/Payload"
+
 
           cp -R \
             "$APP_PATH" \
             "$OUTPUT/Payload/Postal2iOS.app"
 
-          cd "$OUTPUT"
+
+          cd \
+            "$OUTPUT"
+
+
+          echo
+          echo "======================================"
+          echo "CREATE IPA"
+          echo "======================================"
 
           /usr/bin/zip \
             -qry \
-            "POSTAL-2-iOS-v6-ORIGINAL-EXE-TEST-FIX3.ipa" \
+            "POSTAL-2-iOS-v6-ORIGINAL-EXE-TEST-FIX4.ipa" \
             Payload
 
-          rm -rf Payload
+
+          rm -rf \
+            Payload
+
 
           test -f \
-            "POSTAL-2-iOS-v6-ORIGINAL-EXE-TEST-FIX3.ipa"
+            "POSTAL-2-iOS-v6-ORIGINAL-EXE-TEST-FIX4.ipa"
 
-          ls -lh \
-            "POSTAL-2-iOS-v6-ORIGINAL-EXE-TEST-FIX3.ipa"
+
+          echo
+          echo "======================================"
+          echo "IPA CREATED"
+          echo "======================================"
+
+          ls \
+            -lh \
+            "POSTAL-2-iOS-v6-ORIGINAL-EXE-TEST-FIX4.ipa"
 
 
       # ==========================================================
@@ -1148,69 +1520,158 @@ jobs:
           cat > \
             "$GITHUB_WORKSPACE/output/README.txt" \
             <<'EOF'
-          POSTAL 2 iOS v6 FIX 3
+          POSTAL 2 iOS v6
+          ORIGINAL EXE TEST FIX 4
+          ===============================
 
-          DO NOT DELETE v5.
 
-          SAME BUNDLE ID:
+          IMPORTANT
+          ---------
+
+          DO NOT DELETE YOUR OLD v5.
+
+
+          SAME BUNDLE ID
+          --------------
 
           com.postal2ios.native
 
 
-          v5 data location:
+          OLD IMPORT
+          ----------
 
           Documents/Postal2FullData
 
 
-          v6 searches for:
+          Your imported POSTAL 2 files should
+          remain there when v6 is installed
+          over v5 with the same signer.
+
+
+          POSTAL 2 EXE
+          ------------
+
+          v6 automatically searches:
 
           Documents/Postal2FullData/System/Postal2.exe
 
 
-          CPU:
+          There is also a recursive search
+          if Postal2.exe is stored elsewhere.
+
+
+          CPU
+          ---
 
           blink ARM64
 
-          no JIT
+          NO JIT for this first test.
 
 
-          RANDOM FIX:
+          FIX 3
+          -----
 
           getentropy/getrandom disabled
 
           /dev/urandom enabled
 
 
-          AFTER INSTALL:
+          FIX 4
+          -----
 
-          install OVER v5
+          HAVE_SYS_MOUNT_H enabled
 
-          open POSTAL 2
+          This gives Blink the Darwin/iOS
+          struct statfs definitions from:
 
-
-          LOG:
-
-          Documents/POSTAL2-WineGlass.log
+          sys/mount.h
 
 
-          Send the log to ChatGPT
-          after the launch attempt.
+          RUN
+          ---
+
+          Install v6 OVER v5.
+
+          Open POSTAL 2.
+
+          It should automatically attempt
+          to start Postal2.exe.
+
+          There is also a:
+
+          RUN POSTAL 2
+
+          button.
+
+
+          LOG
+          ---
+
+          Open the POSTAL 2 folder
+          in iOS Files.
+
+          Find:
+
+          POSTAL2-WineGlass.log
+
+
+          Send that log back to ChatGPT.
+
+
+          GOAL
+          ----
+
+          Get the ORIGINAL Windows
+          Postal2.exe through the PE/x86
+          compatibility layer.
+
+          This build is not guaranteed
+          to reach the POSTAL 2 menu yet.
           EOF
 
 
       # ==========================================================
-      # UPLOAD
+      # FINAL CHECK
+      # ==========================================================
+
+      - name: Final artifact check
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+
+          IPA="$GITHUB_WORKSPACE/output/POSTAL-2-iOS-v6-ORIGINAL-EXE-TEST-FIX4.ipa"
+
+          README="$GITHUB_WORKSPACE/output/README.txt"
+
+
+          test -f "$IPA"
+          test -f "$README"
+
+
+          echo
+          echo "======================================"
+          echo "READY FOR UPLOAD"
+          echo "======================================"
+
+          ls \
+            -lh \
+            "$GITHUB_WORKSPACE/output"
+
+
+      # ==========================================================
+      # UPLOAD IPA
       # ==========================================================
 
       - name: Upload POSTAL 2 v6 IPA
         uses: actions/upload-artifact@v4
         with:
 
-          name: POSTAL-2-iOS-v6-ORIGINAL-EXE-TEST-FIX3
+          name: POSTAL-2-iOS-v6-ORIGINAL-EXE-TEST-FIX4
 
           path: |
 
-            output/POSTAL-2-iOS-v6-ORIGINAL-EXE-TEST-FIX3.ipa
+            output/POSTAL-2-iOS-v6-ORIGINAL-EXE-TEST-FIX4.ipa
 
             output/README.txt
 
@@ -1230,7 +1691,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
 
-          name: POSTAL-2-iOS-v6-FIX3-BUILD-FAILED
+          name: POSTAL-2-iOS-v6-FIX4-BUILD-FAILED
 
           path: |
 
