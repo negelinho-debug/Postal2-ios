@@ -1,4 +1,4 @@
-name: POSTAL 2 WineGlass iOS FIX 8.0
+name: POSTAL 2 WineGlass iOS FIX 9.0
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   build:
-    name: Build POSTAL 2 FIX 8.0
+    name: Build POSTAL 2 FIX 9.0
     runs-on: macos-14
     timeout-minutes: 90
 
@@ -34,16 +34,20 @@ jobs:
           ls -1 /Applications | grep Xcode || true
 
           if [ -d "/Applications/Xcode_15.4.app" ]; then
+
             sudo xcode-select \
               -s "/Applications/Xcode_15.4.app/Contents/Developer"
 
           elif [ -d "/Applications/Xcode_15.4.0.app" ]; then
+
             sudo xcode-select \
               -s "/Applications/Xcode_15.4.0.app/Contents/Developer"
 
           else
+
             echo "ERROR: Xcode 15.4 not found"
             exit 1
+
           fi
 
           echo "===== SELECTED XCODE ====="
@@ -82,7 +86,7 @@ jobs:
           xcrun --sdk iphoneos --find clang
 
       # ==========================================================
-      # CLONE WINEGLASS + BLINK
+      # CLONE
       # ==========================================================
 
       - name: Clone WineGlass and blink
@@ -114,10 +118,7 @@ jobs:
           git -C blink-src rev-parse HEAD
 
       # ==========================================================
-      # CONFIGURE BLINK FOR IPHONE
-      #
-      # flock is installed on the host so configure doesn't try
-      # to build its own host helper using iPhone clang.
+      # CONFIGURE BLINK
       # ==========================================================
 
       - name: Configure Blink for iPhone ARM64
@@ -138,22 +139,13 @@ jobs:
 
           chmod +x configure
 
-          echo "========================================"
-          echo "FLOCK"
-          echo "========================================"
-
+          echo "===== FLOCK ====="
           command -v flock
 
-          echo "========================================"
-          echo "IOS SDK"
-          echo "========================================"
-
+          echo "===== IOS SDK ====="
           echo "$SDK"
 
-          echo "========================================"
-          echo "IOS CLANG"
-          echo "========================================"
-
+          echo "===== IOS CLANG ====="
           echo "$CC"
 
           ./configure \
@@ -167,23 +159,16 @@ jobs:
           test -f config.h
           test -f config.mk
 
-          echo "========================================"
-          echo "CONFIGURE FINISHED"
-          echo "========================================"
+          echo "===== CONFIGURE DONE ====="
 
       # ==========================================================
-      # FIX 8 CONFIG
+      # BLINK IOS CONFIG
       #
-      # Cross-compiled configure tests cannot execute the produced
-      # iPhone binaries on the macOS GitHub runner.
-      #
-      # Force capabilities known to exist on iOS.
-      #
-      # MOST IMPORTANT:
-      # HAVE_MAP_ANONYMOUS = 1
+      # FIX 8:
+      # force MAP_ANONYMOUS.
       # ==========================================================
 
-      - name: Patch Blink iOS config FIX 8
+      - name: Patch Blink iOS config
         shell: bash
         run: |
           set -euxo pipefail
@@ -193,7 +178,10 @@ jobs:
           import re
 
           p = Path("blink-src/config.h")
-          s = p.read_text(errors="ignore")
+
+          s = p.read_text(
+              errors="ignore"
+          )
 
           disable = [
               "HAVE_GETENTROPY",
@@ -211,7 +199,9 @@ jobs:
               "HAVE_MAP_ANONYMOUS",
           ]
 
-          targets = set(disable + enable)
+          targets = set(
+              disable + enable
+          )
 
           out = []
 
@@ -240,19 +230,10 @@ jobs:
               if not matched:
                   out.append(line)
 
-          # Insert before config include-guard end.
-          insert = []
-
-          insert.append("")
-          insert.append(
-              "/* ======================================== */"
-          )
-          insert.append(
-              "/* POSTAL 2 iOS FIX 8.0                    */"
-          )
-          insert.append(
-              "/* ======================================== */"
-          )
+          insert = [
+              "",
+              "/* POSTAL 2 IOS FIX 9.0 */",
+          ]
 
           for name in disable:
               insert.append(
@@ -265,17 +246,15 @@ jobs:
               )
 
           final = []
-
           inserted = False
 
           for line in out:
 
               if (
                   not inserted
-                  and line.strip().startswith(
-                      "#endif"
-                  )
+                  and line.strip().startswith("#endif")
               ):
+
                   final.extend(insert)
                   final.append("")
                   inserted = True
@@ -286,33 +265,28 @@ jobs:
               final.extend(insert)
 
           p.write_text(
-              "\n".join(final) + "\n"
+              "\n".join(final)
+              + "\n"
           )
 
           print(
-              "Blink FIX8 config patched"
+              "Blink config patched"
           )
           PY
 
-          echo "========================================"
-          echo "FIX8 CONFIG CHECK"
-          echo "========================================"
+          echo "===== CONFIG CHECK ====="
 
           grep -n \
             "HAVE_MAP_ANONYMOUS\|HAVE_DEV_URANDOM\|HAVE_SYS_MOUNT_H\|HAVE_SCHED_YIELD\|HAVE_GETENTROPY\|HAVE_GETRANDOM" \
             blink-src/config.h \
             || true
 
-          echo "========================================"
-          echo "REQUIRE MAP_ANONYMOUS"
-          echo "========================================"
-
           grep -q \
             '^#define HAVE_MAP_ANONYMOUS 1$' \
             blink-src/config.h
 
       # ==========================================================
-      # VERIFY IOS SDK REALLY HAS MAP_ANONYMOUS
+      # VERIFY MAP_ANONYMOUS
       # ==========================================================
 
       - name: Verify iOS MAP_ANONYMOUS
@@ -327,7 +301,7 @@ jobs:
           #include <sys/mman.h>
 
           #ifndef MAP_ANONYMOUS
-          #error MAP_ANONYMOUS is not available in this iPhone SDK
+          #error MAP_ANONYMOUS missing
           #endif
 
           int postal2_map_test(void) {
@@ -347,17 +321,13 @@ jobs:
           test -f \
             /tmp/postal2-map-test.o
 
-          echo "========================================"
-          echo "IOS MAP_ANONYMOUS AVAILABLE"
-          echo "========================================"
+          echo "MAP_ANONYMOUS OK"
 
       # ==========================================================
-      # PATCH sched_yield
-      #
-      # This is the fix that already made FIX 7.x Blink compile.
+      # sched_yield IOS PATCH
       # ==========================================================
 
-      - name: Patch Blink sched_yield for iOS
+      - name: Patch Blink sched_yield
         shell: bash
         run: |
           set -euxo pipefail
@@ -404,12 +374,12 @@ jobs:
 
           s = s.replace(
               "        sched_yield();",
-              "        /* sched_yield disabled on iOS */"
+              "        /* sched_yield disabled */"
           )
 
           if "return sched_yield();" in s:
               raise SystemExit(
-                  "ERROR: sched_yield still present"
+                  "ERROR: sched_yield remains"
               )
 
           p.write_text(s)
@@ -419,15 +389,8 @@ jobs:
           )
           PY
 
-          echo "===== SCHED CHECK ====="
-
-          grep -n \
-            "SysSchedYield\|sched_yield" \
-            blink-src/blink/syscall.c \
-            || true
-
       # ==========================================================
-      # BUILD BLINK ARM64
+      # BUILD BLINK
       # ==========================================================
 
       - name: Build blink ARM64 no-JIT
@@ -451,8 +414,7 @@ jobs:
             o//blink/blink.a
 
           echo "========================================"
-          echo "BUILD BLINK ARM64 IOS"
-          echo "HAVE_MAP_ANONYMOUS FORCED"
+          echo "BUILD BLINK ARM64"
           echo "========================================"
 
           gmake \
@@ -465,11 +427,6 @@ jobs:
           test -f \
             o//blink/blink.a
 
-          echo "===== BLINK BUILT ====="
-
-          ls -lh \
-            o//blink/blink.a
-
           mkdir -p \
             "$WG/Vendor/blink/lib"
 
@@ -477,24 +434,16 @@ jobs:
             o//blink/blink.a \
             "$WG/Vendor/blink/lib/blink.a"
 
-          test -f \
+          ls -lh \
             "$WG/Vendor/blink/lib/blink.a"
 
       # ==========================================================
-      # FIX 8 BLINK VM
+      # BLINK MMAP FIX
       #
-      # Replace only create_vm_with_mode().
-      #
-      # Changes:
-      #
-      # 1. Correct MAP_FAILED check
-      # 2. errno + strerror logging
-      # 3. Don't continue into NewMachine after mmap failure
-      # 4. Detailed page-table error
-      # 5. Do NOT alter the rest of wg_blink_impl.c
+      # This is the FIX 8 part that now works on device.
       # ==========================================================
 
-      - name: Patch Blink VM mmap FIX 8
+      - name: Patch Blink VM mmap
         shell: bash
         run: |
           set -euxo pipefail
@@ -507,10 +456,6 @@ jobs:
           )
 
           s = p.read_text()
-
-          # ------------------------------------------------------
-          # System headers MUST stay before Blink's headers.
-          # ------------------------------------------------------
 
           if "#include <errno.h>" not in s:
 
@@ -526,12 +471,6 @@ jobs:
                   "#include <sys/mman.h>",
                   1
               )
-
-          # ------------------------------------------------------
-          # Replace one complete function by markers.
-          #
-          # This is much safer than regexing individual braces.
-          # ------------------------------------------------------
 
           start_marker = (
               "static struct WGBlinkVM "
@@ -550,7 +489,7 @@ jobs:
 
           if start == -1:
               raise SystemExit(
-                  "ERROR: create_vm_with_mode start missing"
+                  "ERROR: create_vm start missing"
               )
 
           end = s.find(
@@ -560,21 +499,21 @@ jobs:
 
           if end == -1:
               raise SystemExit(
-                  "ERROR: WGBlinkVM_Create marker missing"
+                  "ERROR: Create marker missing"
               )
 
           new_function = r'''static struct WGBlinkVM *create_vm_with_mode(struct XedMachineMode mode) {
 
               fprintf(
                   stderr,
-                  "[FIX8/BLINK] CREATE VM mode=%d\n",
+                  "[FIX9/BLINK] CREATE VM mode=%d\n",
                   mode.omode
               );
               fflush(stderr);
 
               fprintf(
                   stderr,
-                  "[FIX8/BLINK] BEFORE InitMap\n"
+                  "[FIX9/BLINK] BEFORE InitMap\n"
               );
               fflush(stderr);
 
@@ -582,17 +521,11 @@ jobs:
 
               fprintf(
                   stderr,
-                  "[FIX8/BLINK] AFTER InitMap pagesize=%ld\n",
+                  "[FIX9/BLINK] AFTER InitMap pagesize=%ld\n",
                   FLAG_pagesize
               );
               fflush(stderr);
 
-
-              fprintf(
-                  stderr,
-                  "[FIX8/BLINK] BEFORE VM calloc\n"
-              );
-              fflush(stderr);
 
               struct WGBlinkVM *vm =
                   calloc(
@@ -602,33 +535,22 @@ jobs:
 
               fprintf(
                   stderr,
-                  "[FIX8/BLINK] AFTER VM calloc vm=%p\n",
+                  "[FIX9/BLINK] VM calloc=%p\n",
                   (void *)vm
               );
               fflush(stderr);
 
               if (!vm) {
-                  fprintf(
-                      stderr,
-                      "[FIX8/BLINK] VM calloc FAILED\n"
-                  );
-                  fflush(stderr);
                   return NULL;
               }
 
-
-              fprintf(
-                  stderr,
-                  "[FIX8/BLINK] BEFORE NewSystem\n"
-              );
-              fflush(stderr);
 
               vm->s =
                   NewSystem(mode);
 
               fprintf(
                   stderr,
-                  "[FIX8/BLINK] AFTER NewSystem system=%p real=%p\n",
+                  "[FIX9/BLINK] NewSystem=%p real=%p\n",
                   (void *)vm->s,
                   vm->s
                       ? (void *)vm->s->real
@@ -637,12 +559,6 @@ jobs:
               fflush(stderr);
 
               if (!vm->s) {
-
-                  fprintf(
-                      stderr,
-                      "[FIX8/BLINK] NewSystem FAILED\n"
-                  );
-                  fflush(stderr);
 
                   free(vm);
 
@@ -666,11 +582,9 @@ jobs:
 
                   fprintf(
                       stderr,
-                      "[FIX8/BLINK] BEFORE real Mmap size=%ld pagesize=%ld flags=0x%x anon=0x%x\n",
+                      "[FIX9/BLINK] BEFORE Mmap size=%ld flags=0x%x\n",
                       real_size,
-                      pagesize,
-                      MAP_PRIVATE | MAP_ANONYMOUS_,
-                      MAP_ANONYMOUS_
+                      MAP_PRIVATE | MAP_ANONYMOUS_
                   );
                   fflush(stderr);
 
@@ -694,7 +608,7 @@ jobs:
 
                   fprintf(
                       stderr,
-                      "[FIX8/BLINK] AFTER real Mmap real=%p errno=%d (%s)\n",
+                      "[FIX9/BLINK] AFTER Mmap real=%p errno=%d (%s)\n",
                       (void *)vm->s->real,
                       mmap_errno,
                       mmap_errno
@@ -711,15 +625,10 @@ jobs:
 
                       fprintf(
                           stderr,
-                          "[FIX8/BLINK] REAL MMAP FAILED — stopping VM creation\n"
+                          "[FIX9/BLINK] MMAP FAILED\n"
                       );
                       fflush(stderr);
 
-                      /*
-                       * MAP_FAILED is (void *)-1, not NULL.
-                       * Don't leave it stored in System during
-                       * cleanup.
-                       */
                       vm->s->real =
                           NULL;
 
@@ -731,23 +640,8 @@ jobs:
 
                       return NULL;
                   }
-
-              } else {
-
-                  fprintf(
-                      stderr,
-                      "[FIX8/BLINK] NewSystem already provided real memory=%p\n",
-                      (void *)vm->s->real
-                  );
-                  fflush(stderr);
               }
 
-
-              fprintf(
-                  stderr,
-                  "[FIX8/BLINK] BEFORE NewMachine\n"
-              );
-              fflush(stderr);
 
               vm->m =
                   NewMachine(
@@ -757,19 +651,13 @@ jobs:
 
               fprintf(
                   stderr,
-                  "[FIX8/BLINK] AFTER NewMachine machine=%p\n",
+                  "[FIX9/BLINK] NewMachine=%p\n",
                   (void *)vm->m
               );
               fflush(stderr);
 
 
               if (!vm->m) {
-
-                  fprintf(
-                      stderr,
-                      "[FIX8/BLINK] NewMachine FAILED\n"
-                  );
-                  fflush(stderr);
 
                   FreeSystem(
                       vm->s
@@ -793,13 +681,6 @@ jobs:
                       | CR0_PG;
 
 
-                  fprintf(
-                      stderr,
-                      "[FIX8/BLINK] BEFORE AllocatePageTable\n"
-                  );
-                  fflush(stderr);
-
-
                   errno = 0;
 
                   vm->s->cr3 =
@@ -813,7 +694,7 @@ jobs:
 
                   fprintf(
                       stderr,
-                      "[FIX8/BLINK] AFTER AllocatePageTable cr3=%llu errno=%d (%s)\n",
+                      "[FIX9/BLINK] PageTable cr3=%llu errno=%d (%s)\n",
                       (unsigned long long)
                           vm->s->cr3,
                       page_errno,
@@ -828,12 +709,6 @@ jobs:
                       vm->s->cr3
                       == (u64)-1
                   ) {
-
-                      fprintf(
-                          stderr,
-                          "[FIX8/BLINK] AllocatePageTable FAILED\n"
-                      );
-                      fflush(stderr);
 
                       FreeMachine(
                           vm->m
@@ -866,7 +741,7 @@ jobs:
 
               fprintf(
                   stderr,
-                  "[FIX8/BLINK] VM CREATE SUCCESS real=%p cr3=%llu\n",
+                  "[FIX9/BLINK] VM CREATE SUCCESS real=%p cr3=%llu\n",
                   (void *)vm->s->real,
                   (unsigned long long)
                       vm->s->cr3
@@ -889,27 +764,15 @@ jobs:
           p.write_text(s)
 
           print(
-              "========================================"
-          )
-          print(
-              "WINEGLASS BLINK VM FIX 8 PATCHED"
-          )
-          print(
-              "========================================"
+              "Blink VM FIX9 patched"
           )
           PY
 
-          echo "===== FIX8 SOURCE CHECK ====="
+          echo "===== BLINK CHECK ====="
 
           grep -n \
-            "FIX8/BLINK\|MAP_FAILED" \
+            "FIX9/BLINK\|MAP_FAILED" \
             WineGlass/Vendor/blink/wg_blink_impl.c
-
-          echo "===== CREATE VM AREA ====="
-
-          nl -ba \
-            WineGlass/Vendor/blink/wg_blink_impl.c \
-            | sed -n '25,180p'
 
       # ==========================================================
       # BUILD WINEGLASS BLINK BRIDGE
@@ -947,23 +810,14 @@ jobs:
           test -f \
             "$WG/Vendor/blink/lib/wg_blink_impl.o"
 
-          echo "===== BRIDGE OBJECT ====="
-
           file \
             "$WG/Vendor/blink/lib/wg_blink_impl.o"
 
-          lipo -info \
-            "$WG/Vendor/blink/lib/wg_blink_impl.o" \
-            || true
-
       # ==========================================================
-      # FALLBACK A0 / A1 / A2 / A3
-      #
-      # Keep this because if Blink still fails for another reason,
-      # builtin can at least pass the old A1 blocker.
+      # BUILTIN FALLBACK A0-A3
       # ==========================================================
 
-      - name: Add x86 A0 A1 A2 A3 fallback opcodes
+      - name: Add x86 A0 A1 A2 A3 fallback
         shell: bash
         run: |
           set -euxo pipefail
@@ -982,219 +836,112 @@ jobs:
 
           if marker not in s:
               raise SystemExit(
-                  "ERROR: decoder A8/A9 marker missing"
+                  "ERROR: A8/A9 marker missing"
               )
 
           patch = r'''
               // =====================================================
-              // POSTAL 2 FIX 8
-              //
-              // A0 MOV AL, moffs
-              // A1 MOV EAX/RAX, moffs
-              // A2 MOV moffs, AL
-              // A3 MOV moffs, EAX/RAX
+              // POSTAL 2 FIX 9 FALLBACK
+              // A0-A3 MOV moffs
               // =====================================================
 
               case 0xA0: {
+                  uint32_t addr = fetch32(c);
 
-                  uint32_t addr =
-                      fetch32(c);
+                  out->opcode = WG_OP_MOV;
 
-                  out->opcode =
-                      WG_OP_MOV;
+                  out->operands[0] = (WGOperand){
+                      .type = WG_OPERAND_REG,
+                      .reg_index = 0,
+                      .size = 1
+                  };
 
-                  out->operands[0] =
-                      (WGOperand){
-                          .type =
-                              WG_OPERAND_REG,
+                  out->operands[1] = (WGOperand){
+                      .type = WG_OPERAND_MEM,
+                      .mem_base = -2,
+                      .mem_index = -1,
+                      .mem_scale = 1,
+                      .mem_disp = (int64_t)addr,
+                      .mem_seg = c->seg_override,
+                      .size = 1
+                  };
 
-                          .reg_index =
-                              0,
-
-                          .size =
-                              1
-                      };
-
-                  out->operands[1] =
-                      (WGOperand){
-                          .type =
-                              WG_OPERAND_MEM,
-
-                          .mem_base =
-                              -2,
-
-                          .mem_index =
-                              -1,
-
-                          .mem_scale =
-                              1,
-
-                          .mem_disp =
-                              (int64_t)addr,
-
-                          .mem_seg =
-                              c->seg_override,
-
-                          .size =
-                              1
-                      };
-
-                  out->num_operands =
-                      2;
-
+                  out->num_operands = 2;
                   break;
               }
-
 
               case 0xA1: {
+                  uint32_t addr = fetch32(c);
 
-                  uint32_t addr =
-                      fetch32(c);
+                  out->opcode = WG_OP_MOV;
 
-                  out->opcode =
-                      WG_OP_MOV;
+                  out->operands[0] = (WGOperand){
+                      .type = WG_OPERAND_REG,
+                      .reg_index = 0,
+                      .size = op_sz
+                  };
 
-                  out->operands[0] =
-                      (WGOperand){
-                          .type =
-                              WG_OPERAND_REG,
+                  out->operands[1] = (WGOperand){
+                      .type = WG_OPERAND_MEM,
+                      .mem_base = -2,
+                      .mem_index = -1,
+                      .mem_scale = 1,
+                      .mem_disp = (int64_t)addr,
+                      .mem_seg = c->seg_override,
+                      .size = op_sz
+                  };
 
-                          .reg_index =
-                              0,
-
-                          .size =
-                              op_sz
-                      };
-
-                  out->operands[1] =
-                      (WGOperand){
-                          .type =
-                              WG_OPERAND_MEM,
-
-                          .mem_base =
-                              -2,
-
-                          .mem_index =
-                              -1,
-
-                          .mem_scale =
-                              1,
-
-                          .mem_disp =
-                              (int64_t)addr,
-
-                          .mem_seg =
-                              c->seg_override,
-
-                          .size =
-                              op_sz
-                      };
-
-                  out->num_operands =
-                      2;
-
+                  out->num_operands = 2;
                   break;
               }
-
 
               case 0xA2: {
+                  uint32_t addr = fetch32(c);
 
-                  uint32_t addr =
-                      fetch32(c);
+                  out->opcode = WG_OP_MOV;
 
-                  out->opcode =
-                      WG_OP_MOV;
+                  out->operands[0] = (WGOperand){
+                      .type = WG_OPERAND_MEM,
+                      .mem_base = -2,
+                      .mem_index = -1,
+                      .mem_scale = 1,
+                      .mem_disp = (int64_t)addr,
+                      .mem_seg = c->seg_override,
+                      .size = 1
+                  };
 
-                  out->operands[0] =
-                      (WGOperand){
-                          .type =
-                              WG_OPERAND_MEM,
+                  out->operands[1] = (WGOperand){
+                      .type = WG_OPERAND_REG,
+                      .reg_index = 0,
+                      .size = 1
+                  };
 
-                          .mem_base =
-                              -2,
-
-                          .mem_index =
-                              -1,
-
-                          .mem_scale =
-                              1,
-
-                          .mem_disp =
-                              (int64_t)addr,
-
-                          .mem_seg =
-                              c->seg_override,
-
-                          .size =
-                              1
-                      };
-
-                  out->operands[1] =
-                      (WGOperand){
-                          .type =
-                              WG_OPERAND_REG,
-
-                          .reg_index =
-                              0,
-
-                          .size =
-                              1
-                      };
-
-                  out->num_operands =
-                      2;
-
+                  out->num_operands = 2;
                   break;
               }
 
-
               case 0xA3: {
+                  uint32_t addr = fetch32(c);
 
-                  uint32_t addr =
-                      fetch32(c);
+                  out->opcode = WG_OP_MOV;
 
-                  out->opcode =
-                      WG_OP_MOV;
+                  out->operands[0] = (WGOperand){
+                      .type = WG_OPERAND_MEM,
+                      .mem_base = -2,
+                      .mem_index = -1,
+                      .mem_scale = 1,
+                      .mem_disp = (int64_t)addr,
+                      .mem_seg = c->seg_override,
+                      .size = op_sz
+                  };
 
-                  out->operands[0] =
-                      (WGOperand){
-                          .type =
-                              WG_OPERAND_MEM,
+                  out->operands[1] = (WGOperand){
+                      .type = WG_OPERAND_REG,
+                      .reg_index = 0,
+                      .size = op_sz
+                  };
 
-                          .mem_base =
-                              -2,
-
-                          .mem_index =
-                              -1,
-
-                          .mem_scale =
-                              1,
-
-                          .mem_disp =
-                              (int64_t)addr,
-
-                          .mem_seg =
-                              c->seg_override,
-
-                          .size =
-                              op_sz
-                      };
-
-                  out->operands[1] =
-                      (WGOperand){
-                          .type =
-                              WG_OPERAND_REG,
-
-                          .reg_index =
-                              0,
-
-                          .size =
-                              op_sz
-                      };
-
-                  out->num_operands =
-                      2;
-
+                  out->num_operands = 2;
                   break;
               }
 
@@ -1209,21 +956,838 @@ jobs:
           p.write_text(s)
 
           print(
-              "A0 A1 A2 A3 added"
+              "A0-A3 fallback added"
           )
           PY
 
-          echo "===== OPCODE CHECK ====="
+      # ==========================================================
+      # FIX 9
+      #
+      # MSVCR120 DATA IMPORTS
+      #
+      # Old behavior:
+      #
+      # _acmdln -> function HLT thunk
+      # thunk bytes -> F4 F4 F4 F4
+      #
+      # New behavior:
+      #
+      # _acmdln IAT ->
+      # 0xA00800 ->
+      # pointer 0xA00100 ->
+      # actual "Postal2.exe" command line
+      #
+      # Also:
+      # _wcmdln
+      # _fmode
+      # _commode
+      # __argc
+      # __argv
+      # __wargv
+      # _pgmptr
+      # _wpgmptr
+      # _environ
+      # _wenviron
+      #
+      # Plus:
+      # PE32 IAT entries are now written as FOUR bytes.
+      # ==========================================================
+
+      - name: Patch FIX 9 MSVCR120 data imports
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path(
+              "WineGlass/Sources/Core/wg_engine.c"
+          )
+
+          s = p.read_text()
+
+          # ======================================================
+          # INSERT FIX9 HELPERS
+          # ======================================================
+
+          marker = \
+              "static bool load_pe_blink(WGEngine *engine) {"
+
+          if marker not in s:
+              raise SystemExit(
+                  "ERROR: load_pe_blink marker missing"
+              )
+
+          helper = r'''
+          // ============================================================
+          // POSTAL 2 FIX 9
+          // MSVCR120 DATA IMPORT SUPPORT
+          // ============================================================
+
+          #define WG_FIX9_CRT_PAGE       0x00A00000u
+
+          #define WG_FIX9_WCMDLINE       0x00A00000u
+          #define WG_FIX9_ACMDLINE       0x00A00100u
+
+          #define WG_FIX9_ACMDLN_VAR     0x00A00800u
+          #define WG_FIX9_WCMDLN_VAR     0x00A00804u
+          #define WG_FIX9_FMODE_VAR      0x00A00808u
+          #define WG_FIX9_COMMODE_VAR    0x00A0080Cu
+
+          #define WG_FIX9_ARGC_VAR       0x00A00810u
+          #define WG_FIX9_ARGV_VAR       0x00A00814u
+          #define WG_FIX9_WARGV_VAR      0x00A00818u
+
+          #define WG_FIX9_PGMPTR_VAR     0x00A0081Cu
+          #define WG_FIX9_WPGMPTR_VAR    0x00A00820u
+
+          #define WG_FIX9_ENVIRON_VAR    0x00A00824u
+          #define WG_FIX9_WENVIRON_VAR   0x00A00828u
+
+          #define WG_FIX9_ARGV_ARRAY     0x00A00840u
+          #define WG_FIX9_WARGV_ARRAY    0x00A00848u
+
+          #define WG_FIX9_ENV_ARRAY      0x00A00850u
+          #define WG_FIX9_WENV_ARRAY     0x00A00858u
+
+
+          static void wg_fix9_page_put32(
+              uint8_t *page,
+              uint32_t guest_addr,
+              uint32_t value
+          ) {
+
+              uint32_t off =
+                  guest_addr
+                  - WG_FIX9_CRT_PAGE;
+
+              if (
+                  off + 4
+                  <= 0x1000
+              ) {
+
+                  memcpy(
+                      page + off,
+                      &value,
+                      4
+                  );
+              }
+          }
+
+
+          static bool wg_fix9_prepare_crt_page(
+              WGEngine *engine
+          ) {
+
+              if (
+                  !engine
+                  || !engine->blink
+              ) {
+                  return false;
+              }
+
+
+              uint8_t page[0x1000];
+
+              memset(
+                  page,
+                  0,
+                  sizeof(page)
+              );
+
+
+              const char *winpath =
+                  wg_files_exe_win_path();
+
+
+              if (
+                  !winpath
+                  || !winpath[0]
+              ) {
+                  winpath =
+                      "C:\\Postal2\\System\\Postal2.exe";
+              }
+
+
+              // --------------------------------------------------
+              // Wide command line
+              // --------------------------------------------------
+
+              uint16_t *wcmd =
+                  (uint16_t *)page;
+
+              wcmd[0] =
+                  '"';
+
+              int wi =
+                  0;
+
+              for (
+                  ;
+                  winpath[wi]
+                  && wi < 240;
+                  wi++
+              ) {
+
+                  wcmd[wi + 1] =
+                      (uint8_t)
+                          winpath[wi];
+              }
+
+              wcmd[wi + 1] =
+                  '"';
+
+              wcmd[wi + 2] =
+                  0;
+
+
+              // --------------------------------------------------
+              // ANSI command line
+              // --------------------------------------------------
+
+              char *acmd =
+                  (char *)(
+                      page
+                      + (
+                          WG_FIX9_ACMDLINE
+                          - WG_FIX9_CRT_PAGE
+                      )
+                  );
+
+              snprintf(
+                  acmd,
+                  512,
+                  "\"%s\"",
+                  winpath
+              );
+
+
+              // --------------------------------------------------
+              // _acmdln = char *
+              //
+              // Imported symbol points to THIS variable.
+              // Variable contains pointer to actual command line.
+              // --------------------------------------------------
+
+              wg_fix9_page_put32(
+                  page,
+                  WG_FIX9_ACMDLN_VAR,
+                  WG_FIX9_ACMDLINE
+              );
+
+
+              // _wcmdln = wchar_t *
+
+              wg_fix9_page_put32(
+                  page,
+                  WG_FIX9_WCMDLN_VAR,
+                  WG_FIX9_WCMDLINE
+              );
+
+
+              // --------------------------------------------------
+              // _fmode / _commode
+              // --------------------------------------------------
+
+              wg_fix9_page_put32(
+                  page,
+                  WG_FIX9_FMODE_VAR,
+                  0
+              );
+
+              wg_fix9_page_put32(
+                  page,
+                  WG_FIX9_COMMODE_VAR,
+                  0
+              );
+
+
+              // --------------------------------------------------
+              // argc = 1
+              // --------------------------------------------------
+
+              wg_fix9_page_put32(
+                  page,
+                  WG_FIX9_ARGC_VAR,
+                  1
+              );
+
+
+              // argv variable -> argv array
+
+              wg_fix9_page_put32(
+                  page,
+                  WG_FIX9_ARGV_VAR,
+                  WG_FIX9_ARGV_ARRAY
+              );
+
+              wg_fix9_page_put32(
+                  page,
+                  WG_FIX9_ARGV_ARRAY,
+                  WG_FIX9_ACMDLINE
+              );
+
+              wg_fix9_page_put32(
+                  page,
+                  WG_FIX9_ARGV_ARRAY + 4,
+                  0
+              );
+
+
+              // wargv variable -> wargv array
+
+              wg_fix9_page_put32(
+                  page,
+                  WG_FIX9_WARGV_VAR,
+                  WG_FIX9_WARGV_ARRAY
+              );
+
+              wg_fix9_page_put32(
+                  page,
+                  WG_FIX9_WARGV_ARRAY,
+                  WG_FIX9_WCMDLINE
+              );
+
+              wg_fix9_page_put32(
+                  page,
+                  WG_FIX9_WARGV_ARRAY + 4,
+                  0
+              );
+
+
+              // --------------------------------------------------
+              // _pgmptr / _wpgmptr
+              // --------------------------------------------------
+
+              wg_fix9_page_put32(
+                  page,
+                  WG_FIX9_PGMPTR_VAR,
+                  WG_FIX9_ACMDLINE
+              );
+
+              wg_fix9_page_put32(
+                  page,
+                  WG_FIX9_WPGMPTR_VAR,
+                  WG_FIX9_WCMDLINE
+              );
+
+
+              // --------------------------------------------------
+              // Empty environment arrays
+              // --------------------------------------------------
+
+              wg_fix9_page_put32(
+                  page,
+                  WG_FIX9_ENVIRON_VAR,
+                  WG_FIX9_ENV_ARRAY
+              );
+
+              wg_fix9_page_put32(
+                  page,
+                  WG_FIX9_ENV_ARRAY,
+                  0
+              );
+
+              wg_fix9_page_put32(
+                  page,
+                  WG_FIX9_WENVIRON_VAR,
+                  WG_FIX9_WENV_ARRAY
+              );
+
+              wg_fix9_page_put32(
+                  page,
+                  WG_FIX9_WENV_ARRAY,
+                  0
+              );
+
+
+              // --------------------------------------------------
+              // MAP PAGE INTO BLINK
+              // --------------------------------------------------
+
+              if (
+                  !wg_blink_load_code(
+                      engine->blink,
+                      WG_FIX9_CRT_PAGE,
+                      page,
+                      sizeof(page),
+                      0
+                  )
+              ) {
+
+                  WG_LOGE(
+                      TAG,
+                      "FIX9: CRT data page mapping failed"
+                  );
+
+                  return false;
+              }
+
+
+              s_cmdpage_mapped =
+                  true;
+
+
+              WG_LOGI(
+                  TAG,
+                  "FIX9 CRT DATA PAGE READY @0x%X",
+                  WG_FIX9_CRT_PAGE
+              );
+
+              WG_LOGI(
+                  TAG,
+                  "FIX9 _acmdln var=0x%X -> string=0x%X",
+                  WG_FIX9_ACMDLN_VAR,
+                  WG_FIX9_ACMDLINE
+              );
+
+
+              return true;
+          }
+
+
+          static uint32_t wg_fix9_msvcr_data_import(
+              const char *dll,
+              const char *name
+          ) {
+
+              if (
+                  !dll
+                  || !name
+              ) {
+                  return 0;
+              }
+
+
+              if (
+                  !strcasestr(
+                      dll,
+                      "msvcr120"
+                  )
+              ) {
+                  return 0;
+              }
+
+
+              if (
+                  strcmp(
+                      name,
+                      "_acmdln"
+                  ) == 0
+              ) {
+                  return WG_FIX9_ACMDLN_VAR;
+              }
+
+
+              if (
+                  strcmp(
+                      name,
+                      "_wcmdln"
+                  ) == 0
+              ) {
+                  return WG_FIX9_WCMDLN_VAR;
+              }
+
+
+              if (
+                  strcmp(
+                      name,
+                      "_fmode"
+                  ) == 0
+              ) {
+                  return WG_FIX9_FMODE_VAR;
+              }
+
+
+              if (
+                  strcmp(
+                      name,
+                      "_commode"
+                  ) == 0
+              ) {
+                  return WG_FIX9_COMMODE_VAR;
+              }
+
+
+              if (
+                  strcmp(
+                      name,
+                      "__argc"
+                  ) == 0
+              ) {
+                  return WG_FIX9_ARGC_VAR;
+              }
+
+
+              if (
+                  strcmp(
+                      name,
+                      "__argv"
+                  ) == 0
+              ) {
+                  return WG_FIX9_ARGV_VAR;
+              }
+
+
+              if (
+                  strcmp(
+                      name,
+                      "__wargv"
+                  ) == 0
+              ) {
+                  return WG_FIX9_WARGV_VAR;
+              }
+
+
+              if (
+                  strcmp(
+                      name,
+                      "_pgmptr"
+                  ) == 0
+              ) {
+                  return WG_FIX9_PGMPTR_VAR;
+              }
+
+
+              if (
+                  strcmp(
+                      name,
+                      "_wpgmptr"
+                  ) == 0
+              ) {
+                  return WG_FIX9_WPGMPTR_VAR;
+              }
+
+
+              if (
+                  strcmp(
+                      name,
+                      "_environ"
+                  ) == 0
+              ) {
+                  return WG_FIX9_ENVIRON_VAR;
+              }
+
+
+              if (
+                  strcmp(
+                      name,
+                      "_wenviron"
+                  ) == 0
+              ) {
+                  return WG_FIX9_WENVIRON_VAR;
+              }
+
+
+              return 0;
+          }
+
+
+          '''
+
+          s = s.replace(
+              marker,
+              helper
+              + "\n"
+              + marker,
+              1
+          )
+
+
+          # ======================================================
+          # RESET CMD PAGE PER NEW BLINK VM
+          # ======================================================
+
+          old = '''    s_nsis_data_patched = false;
+              s_nsis_exe_data_offset = 0;'''
+
+          new = '''    s_nsis_data_patched = false;
+              s_nsis_exe_data_offset = 0;
+
+              /*
+               * Blink VM is recreated for each PE load.
+               * Therefore this page MUST be recreated too.
+               */
+              s_cmdpage_mapped = false;'''
+
+          if old not in s:
+              raise SystemExit(
+                  "ERROR: load reset marker missing"
+              )
+
+          s = s.replace(
+              old,
+              new,
+              1
+          )
+
+
+          # ======================================================
+          # REPLACE MAIN EXE IMPORT RESOLVER
+          # ======================================================
+
+          old = '''    // Resolve imports — write thunk addresses into the IAT
+              if (pe->num_imports > 0) {
+                  WG_LOGI(TAG, "Resolving %d DLL imports...", pe->num_imports);
+                  for (int i = 0; i < pe->num_imports; i++) {
+                      WGPEImportDll *imp = &pe->imports[i];
+                      WG_LOGI(TAG, "  %s: %d functions", imp->dll_name, imp->num_functions);
+                      for (int j = 0; j < imp->num_functions; j++) {
+                          uint64_t stub_addr = wg_dll_mapper_resolve(
+                              engine->dll_mapper, imp->dll_name, imp->functions[j].name);
+                          if (stub_addr) {
+                              uint64_t iat_entry = pe->image_base + imp->functions[j].iat_rva;
+                              uint8_t addr_bytes[8];
+                              memcpy(addr_bytes, &stub_addr, 8);
+                              wg_blink_write_mem(engine->blink, iat_entry, addr_bytes, 8);
+                          }
+                      }
+                  }
+              }'''
+
+          new = '''    // ======================================================
+              // FIX 9 IMPORT RESOLUTION
+              //
+              // PE32:
+              //   IAT entries are 4 bytes.
+              //
+              // PE32+:
+              //   IAT entries are 8 bytes.
+              //
+              // MSVCR120 data imports must point to DATA, not HLT
+              // function thunks.
+              // ======================================================
+
+              if (!pe->is_64bit) {
+
+                  if (
+                      !wg_fix9_prepare_crt_page(
+                          engine
+                      )
+                  ) {
+
+                      WG_LOGE(
+                          TAG,
+                          "FIX9 CRT page setup failed"
+                      );
+
+                      return false;
+                  }
+              }
+
+
+              if (
+                  pe->num_imports
+                  > 0
+              ) {
+
+                  WG_LOGI(
+                      TAG,
+                      "Resolving %d DLL imports...",
+                      pe->num_imports
+                  );
+
+
+                  for (
+                      int i = 0;
+                      i < pe->num_imports;
+                      i++
+                  ) {
+
+                      WGPEImportDll *imp =
+                          &pe->imports[i];
+
+
+                      WG_LOGI(
+                          TAG,
+                          "  %s: %d functions",
+                          imp->dll_name,
+                          imp->num_functions
+                      );
+
+
+                      for (
+                          int j = 0;
+                          j < imp->num_functions;
+                          j++
+                      ) {
+
+                          const char *fn =
+                              imp->functions[j].name;
+
+
+                          uint64_t iat_entry =
+                              pe->image_base
+                              + imp->functions[j].iat_rva;
+
+
+                          // ------------------------------------------
+                          // MSVCR120 EXPORTED DATA
+                          // ------------------------------------------
+
+                          if (
+                              !pe->is_64bit
+                          ) {
+
+                              uint32_t data_addr =
+                                  wg_fix9_msvcr_data_import(
+                                      imp->dll_name,
+                                      fn
+                                  );
+
+
+                              if (
+                                  data_addr
+                              ) {
+
+                                  wg_blink_write_mem(
+                                      engine->blink,
+                                      iat_entry,
+                                      &data_addr,
+                                      4
+                                  );
+
+
+                                  WG_LOGI(
+                                      TAG,
+                                      "FIX9 DATA IMPORT: %s!%s IAT=0x%llX -> 0x%X",
+                                      imp->dll_name,
+                                      fn,
+                                      (unsigned long long)
+                                          iat_entry,
+                                      data_addr
+                                  );
+
+
+                                  continue;
+                              }
+                          }
+
+
+                          // ------------------------------------------
+                          // NORMAL FUNCTION IMPORT
+                          // ------------------------------------------
+
+                          uint64_t stub_addr =
+                              wg_dll_mapper_resolve(
+                                  engine->dll_mapper,
+                                  imp->dll_name,
+                                  fn
+                              );
+
+
+                          if (
+                              !stub_addr
+                          ) {
+                              continue;
+                          }
+
+
+                          if (
+                              pe->is_64bit
+                          ) {
+
+                              wg_blink_write_mem(
+                                  engine->blink,
+                                  iat_entry,
+                                  &stub_addr,
+                                  8
+                              );
+
+                          } else {
+
+                              uint32_t stub32 =
+                                  (uint32_t)
+                                      stub_addr;
+
+
+                              wg_blink_write_mem(
+                                  engine->blink,
+                                  iat_entry,
+                                  &stub32,
+                                  4
+                              );
+                          }
+                      }
+                  }
+              }'''
+
+          if old not in s:
+              raise SystemExit(
+                  "ERROR: main import resolver block missing"
+              )
+
+          s = s.replace(
+              old,
+              new,
+              1
+          )
+
+
+          p.write_text(s)
+
+
+          print(
+              "========================================"
+          )
+
+          print(
+              "FIX 9 CRT DATA IMPORTS PATCHED"
+          )
+
+          print(
+              "PE32 IAT WIDTH = 4 BYTES"
+          )
+
+          print(
+              "========================================"
+          )
+          PY
+
+          echo "===== FIX9 CHECK ====="
 
           grep -n \
-            "case 0xA0\|case 0xA1\|case 0xA2\|case 0xA3" \
-            WineGlass/Sources/CPU/wg_x86_decode.c
+            "FIX9 DATA IMPORT\|FIX9 CRT DATA\|wg_fix9_msvcr_data_import\|PE32 IAT" \
+            WineGlass/Sources/Core/wg_engine.c
+
+          echo "===== VERIFY OLD 8-BYTE MAIN IAT CODE GONE ====="
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          s = Path(
+              "WineGlass/Sources/Core/wg_engine.c"
+          ).read_text()
+
+          block_start = s.find(
+              "static bool load_pe_blink"
+          )
+
+          block_end = s.find(
+              "static bool load_pe_builtin",
+              block_start
+          )
+
+          area = s[
+              block_start:block_end
+          ]
+
+          if (
+              "memcpy(addr_bytes, &stub_addr, 8)"
+              in area
+          ):
+              raise SystemExit(
+                  "ERROR: old 8-byte PE32 IAT write remains"
+              )
+
+          print(
+              "FIX9 IAT check OK"
+          )
+          PY
 
       # ==========================================================
       # PROJECT
-      #
-      # Same bundle ID so existing imported POSTAL 2 data remains
-      # associated with the same app container when installed over.
       # ==========================================================
 
       - name: Patch WineGlass project
@@ -1283,6 +1847,7 @@ jobs:
                   "CODE_SIGN_STYLE: Automatic"
                   in line
               ):
+
                   line = line.replace(
                       "CODE_SIGN_STYLE: Automatic",
                       "CODE_SIGN_STYLE: Manual"
@@ -1299,10 +1864,6 @@ jobs:
               "project.yml patched"
           )
           PY
-
-          echo "===== PROJECT.YML ====="
-
-          cat project.yml
 
       # ==========================================================
       # INFO PLIST
@@ -1329,11 +1890,11 @@ jobs:
             "$PLIST"
 
           /usr/libexec/PlistBuddy \
-            -c "Set :CFBundleShortVersionString 0.8.0" \
+            -c "Set :CFBundleShortVersionString 0.9.0" \
             "$PLIST"
 
           /usr/libexec/PlistBuddy \
-            -c "Set :CFBundleVersion 80" \
+            -c "Set :CFBundleVersion 90" \
             "$PLIST"
 
           /usr/libexec/PlistBuddy \
@@ -1348,9 +1909,7 @@ jobs:
             "$PLIST"
 
       # ==========================================================
-      # POSTAL 2 LAUNCHER + LOG
-      #
-      # FIX 8 also prevents repeated launches from button tapping.
+      # POSTAL 2 LAUNCHER
       # ==========================================================
 
       - name: Patch POSTAL 2 launcher and log
@@ -1368,10 +1927,6 @@ jobs:
           s = p.read_text()
 
 
-          # ------------------------------------------------------
-          # stdio
-          # ------------------------------------------------------
-
           if "#include <stdio.h>" not in s:
 
               s = s.replace(
@@ -1381,10 +1936,6 @@ jobs:
                   1
               )
 
-
-          # ------------------------------------------------------
-          # File logging before Blink self-test.
-          # ------------------------------------------------------
 
           old = '''    UIWindowScene *windowScene = (UIWindowScene *)scene;
 
@@ -1425,8 +1976,8 @@ jobs:
               fprintf(
                   stderr,
                   "========================================\\n"
-                  "POSTAL 2 WineGlass FIX 8.0\\n"
-                  "MAP_ANONYMOUS + MAP_FAILED FIX\\n"
+                  "POSTAL 2 WineGlass FIX 9.0\\n"
+                  "CRT DATA IMPORTS + PE32 IAT FIX\\n"
                   "========================================\\n"
               );
 
@@ -1436,7 +1987,7 @@ jobs:
 
               WG_LOGI(
                   "POSTAL2",
-                  "FIX 8.0 logging started"
+                  "FIX 9.0 logging started"
               );'''
 
           if old not in s:
@@ -1450,10 +2001,6 @@ jobs:
               1
           )
 
-
-          # ------------------------------------------------------
-          # Button title.
-          # ------------------------------------------------------
 
           old = (
               '[_loadButton setTitle:'
@@ -1469,7 +2016,7 @@ jobs:
 
           if old not in s:
               raise SystemExit(
-                  "ERROR: Load .exe title missing"
+                  "ERROR: button title missing"
               )
 
           s = s.replace(
@@ -1478,10 +2025,6 @@ jobs:
               1
           )
 
-
-          # ------------------------------------------------------
-          # Button action.
-          # ------------------------------------------------------
 
           old = (
               '[_loadButton addTarget:self '
@@ -1509,14 +2052,8 @@ jobs:
           )
 
 
-          # ------------------------------------------------------
-          # POSTAL runner.
-          # ------------------------------------------------------
-
-          marker = (
-              "#pragma mark - "
-              "UIDocumentPickerDelegate"
-          )
+          marker = \
+              "#pragma mark - UIDocumentPickerDelegate"
 
           if marker not in s:
               raise SystemExit(
@@ -1524,9 +2061,9 @@ jobs:
               )
 
 
-          postal_methods = r'''
+          methods = r'''
           // ============================================================
-          // POSTAL 2 FIX 8.0
+          // POSTAL 2 FIX 9
           // ============================================================
 
           - (NSString *)findPostal2Exe {
@@ -1571,7 +2108,7 @@ jobs:
 
                   WG_LOGI(
                       "POSTAL2",
-                      "Found normal path: %s",
+                      "Found normal: %s",
                       normal.UTF8String
                   );
 
@@ -1728,34 +2265,27 @@ jobs:
 
           s = s.replace(
               marker,
-              postal_methods
+              methods
               + "\n"
               + marker,
               1
           )
 
 
-          # ------------------------------------------------------
-          # Auto-start.
-          # ------------------------------------------------------
-
-          old = (
-              "            "
-              "[self tryLoadBundledPE];"
-          )
+          old = \
+              "            [self tryLoadBundledPE];"
 
           new = '''            WG_LOGI(
                           "POSTAL2",
-                          "Engine ready — FIX8 auto-start"
+                          "Engine ready — FIX9 auto-start"
                       );
 
                       [self runPostal2];'''
 
           if old not in s:
               raise SystemExit(
-                  "ERROR: tryLoadBundledPE marker missing"
+                  "ERROR: auto-start marker missing"
               )
-
 
           s = s.replace(
               old,
@@ -1767,18 +2297,16 @@ jobs:
           p.write_text(s)
 
           print(
-              "POSTAL 2 FIX8 launcher patched"
+              "FIX9 launcher patched"
           )
           PY
 
-          echo "===== LAUNCHER CHECK ====="
-
           grep -n \
-            "FIX 8.0\|RUN POSTAL 2\|STARTING POSTAL 2\|findPostal2Exe\|postalStarted\|POSTAL2-WineGlass" \
+            "FIX 9.0\|findPostal2Exe\|STARTING POSTAL 2" \
             WineGlass/Sources/App/WGSceneDelegate.m
 
       # ==========================================================
-      # GENERATE PROJECT
+      # GENERATE XCODE PROJECT
       # ==========================================================
 
       - name: Generate Xcode project
@@ -1808,17 +2336,16 @@ jobs:
             WineGlass.xcodeproj/project.pbxproj
           then
 
-            echo \
-              "ERROR: unsupported objectVersion 77"
-
+            echo "ERROR: objectVersion 77"
             exit 1
+
           fi
 
       # ==========================================================
-      # BUILD APP
+      # BUILD
       # ==========================================================
 
-      - name: Build POSTAL 2 FIX 8.0
+      - name: Build POSTAL 2 FIX 9.0
         shell: bash
         run: |
           set -o pipefail
@@ -1847,7 +2374,7 @@ jobs:
             | tee xcodebuild.log
 
       # ==========================================================
-      # VERIFY APP
+      # VERIFY
       # ==========================================================
 
       - name: Verify POSTAL 2 app
@@ -1885,7 +2412,7 @@ jobs:
           ]; then
 
             echo \
-              "ERROR: wrong bundle ID: $ID"
+              "ERROR: wrong bundle ID $ID"
 
             exit 1
           fi
@@ -1931,23 +2458,23 @@ jobs:
 
           zip \
             -qry \
-            "POSTAL-2-iOS-v8.0-MAP-ANONYMOUS-FIX.ipa" \
+            "POSTAL-2-iOS-v9.0-CRT-DATA-FIX.ipa" \
             Payload
 
           echo "===== IPA ====="
 
           ls -lh \
-            "POSTAL-2-iOS-v8.0-MAP-ANONYMOUS-FIX.ipa"
+            "POSTAL-2-iOS-v9.0-CRT-DATA-FIX.ipa"
 
       # ==========================================================
       # UPLOAD IPA
       # ==========================================================
 
-      - name: Upload POSTAL 2 FIX 8.0 IPA
+      - name: Upload POSTAL 2 FIX 9.0 IPA
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-iOS-v8.0-MAP-ANONYMOUS-FIX
-          path: out/POSTAL-2-iOS-v8.0-MAP-ANONYMOUS-FIX.ipa
+          name: POSTAL-2-iOS-v9.0-CRT-DATA-FIX
+          path: out/POSTAL-2-iOS-v9.0-CRT-DATA-FIX.ipa
           if-no-files-found: error
           retention-days: 14
 
@@ -1960,85 +2487,79 @@ jobs:
         shell: bash
         run: |
           mkdir -p \
-            debug-fix8
+            debug-fix9
 
           cp \
             WineGlass/xcodebuild.log \
-            debug-fix8/ \
+            debug-fix9/ \
             2>/dev/null \
             || true
 
           cp \
             blink-src/config.h \
-            debug-fix8/blink-config.h \
+            debug-fix9/blink-config.h \
             2>/dev/null \
             || true
 
           cp \
             blink-src/config.mk \
-            debug-fix8/blink-config.mk \
+            debug-fix9/blink-config.mk \
             2>/dev/null \
             || true
 
           cp \
             blink-src/config.log \
-            debug-fix8/blink-config.log \
-            2>/dev/null \
-            || true
-
-          cp \
-            blink-src/blink/syscall.c \
-            debug-fix8/blink-syscall.c \
-            2>/dev/null \
-            || true
-
-          cp \
-            blink-src/blink/map.c \
-            debug-fix8/blink-map.c \
-            2>/dev/null \
-            || true
-
-          cp \
-            blink-src/blink/map.h \
-            debug-fix8/blink-map.h \
+            debug-fix9/blink-config.log \
             2>/dev/null \
             || true
 
           cp \
             WineGlass/Vendor/blink/wg_blink_impl.c \
-            debug-fix8/ \
+            debug-fix9/ \
+            2>/dev/null \
+            || true
+
+          cp \
+            WineGlass/Sources/Core/wg_engine.c \
+            debug-fix9/ \
+            2>/dev/null \
+            || true
+
+          cp \
+            WineGlass/Sources/Win32/wg_dll_mapper.c \
+            debug-fix9/ \
             2>/dev/null \
             || true
 
           cp \
             WineGlass/Sources/CPU/wg_x86_decode.c \
-            debug-fix8/ \
+            debug-fix9/ \
             2>/dev/null \
             || true
 
           cp \
             WineGlass/Sources/App/WGSceneDelegate.m \
-            debug-fix8/ \
+            debug-fix9/ \
             2>/dev/null \
             || true
 
           cp \
             WineGlass/project.yml \
-            debug-fix8/ \
+            debug-fix9/ \
             2>/dev/null \
             || true
 
           cp \
             WineGlass/WineGlass.xcodeproj/project.pbxproj \
-            debug-fix8/ \
+            debug-fix9/ \
             2>/dev/null \
             || true
 
-      - name: Upload FIX 8 debug
+      - name: Upload FIX 9 debug
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-FIX8-DEBUG
-          path: debug-fix8
+          name: POSTAL-2-FIX9-DEBUG
+          path: debug-fix9
           if-no-files-found: ignore
           retention-days: 7
