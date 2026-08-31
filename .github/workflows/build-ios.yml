@@ -1,4 +1,4 @@
-name: POSTAL 2 WineGlass iOS FIX 9.1
+name: POSTAL 2 WineGlass iOS FIX 10
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   build:
-    name: Build POSTAL 2 FIX 9.1
+    name: Build POSTAL 2 FIX 10
     runs-on: macos-14
     timeout-minutes: 90
 
@@ -103,7 +103,7 @@ jobs:
               s = re.sub(rf'(?m)^\s*#define\s+{re.escape(name)}\b.*$', '', s)
               s = re.sub(rf'(?m)^\s*#undef\s+{re.escape(name)}\b.*$', '', s)
 
-          s += "\n/* POSTAL 2 iOS FIX 9.1 */\n"
+          s += "\n/* POSTAL 2 iOS FIX 10 */\n"
           for name in disable:
               s += f"#undef {name}\n"
           for name in enable:
@@ -166,7 +166,7 @@ jobs:
           cp o//blink/blink.a "$WG/Vendor/blink/lib/blink.a"
           test -f "$WG/Vendor/blink/lib/blink.a"
 
-      - name: Patch Blink VM mmap FIX 9.1
+      - name: Patch Blink VM mmap FIX 10
         shell: bash
         run: |
           set -euxo pipefail
@@ -193,7 +193,7 @@ jobs:
               raise SystemExit("ERROR: create_vm_with_mode markers missing")
 
           new_function = r'''static struct WGBlinkVM *create_vm_with_mode(struct XedMachineMode mode) {
-              fprintf(stderr, "[FIX9/BLINK] CREATE VM mode=%d\n", mode.omode);
+              fprintf(stderr, "[FIX10/BLINK] CREATE VM mode=%d\n", mode.omode);
               fflush(stderr);
 
               ensure_initialized();
@@ -221,7 +221,7 @@ jobs:
                       "real"
                   );
                   int e = errno;
-                  fprintf(stderr, "[FIX9/BLINK] Mmap real=%p errno=%d (%s)\n",
+                  fprintf(stderr, "[FIX10/BLINK] Mmap real=%p errno=%d (%s)\n",
                           (void *)vm->s->real, e, e ? strerror(e) : "OK");
                   fflush(stderr);
 
@@ -254,7 +254,7 @@ jobs:
               }
 
               vm->m->flags |= (1 << 9);
-              fprintf(stderr, "[FIX9/BLINK] VM CREATE SUCCESS real=%p cr3=%llu\n",
+              fprintf(stderr, "[FIX10/BLINK] VM CREATE SUCCESS real=%p cr3=%llu\n",
                       (void *)vm->s->real, (unsigned long long)vm->s->cr3);
               fflush(stderr);
               return vm;
@@ -292,7 +292,7 @@ jobs:
             -o "$WG/Vendor/blink/lib/wg_blink_impl.o"
           test -f "$WG/Vendor/blink/lib/wg_blink_impl.o"
 
-      - name: Patch FIX 9.1 MSVCR120 data imports
+      - name: Patch FIX 10 real Unreal DLL loader
         shell: bash
         run: |
           set -euxo pipefail
@@ -302,42 +302,51 @@ jobs:
           p = Path("WineGlass/Sources/Core/wg_engine.c")
           s = p.read_text()
 
-          helper_marker = "static bool load_pe_blink(WGEngine *engine) {"
-          if helper_marker not in s:
-              raise SystemExit("ERROR: load_pe_blink marker missing")
+          # ============================================================
+          # 1) Replace the generic real-DLL loader with a FIX 10 version.
+          #    It keeps real module records BEFORE resolving dependencies,
+          #    resolves Core/Engine-to-Core imports to real exports, and
+          #    keeps system APIs on WineGlass Win32 thunks.
+          # ============================================================
 
-          helper = r'''
-          // ============================================================
-          // POSTAL 2 FIX 9.1 — MSVCR120 DATA IMPORTS
-          // ============================================================
+          start_marker = "// Load a DLL file into the VM. Returns the guest load base, or 0 on failure."
+          end_marker = "// Look up an export by name in a loaded module; returns its guest address or 0."
 
-          #define WG_FIX91_PAGE          0x00A00000u
-          #define WG_FIX91_WCMDLINE      0x00A00000u
-          #define WG_FIX91_ACMDLINE      0x00A00100u
-          #define WG_FIX91_APGMPTR       0x00A00300u
-          #define WG_FIX91_WPGMPTR       0x00A00500u
-          #define WG_FIX91_ACMDLN_VAR    0x00A00800u
-          #define WG_FIX91_WCMDLN_VAR    0x00A00804u
-          #define WG_FIX91_FMODE_VAR     0x00A00808u
-          #define WG_FIX91_COMMODE_VAR   0x00A0080Cu
-          #define WG_FIX91_ARGC_VAR      0x00A00810u
-          #define WG_FIX91_ARGV_VAR      0x00A00814u
-          #define WG_FIX91_WARGV_VAR     0x00A00818u
-          #define WG_FIX91_PGMPTR_VAR    0x00A0081Cu
-          #define WG_FIX91_WPGMPTR_VAR   0x00A00820u
-          #define WG_FIX91_ENVIRON_VAR   0x00A00824u
-          #define WG_FIX91_WENVIRON_VAR  0x00A00828u
-          #define WG_FIX91_ARGV_ARRAY    0x00A00840u
-          #define WG_FIX91_WARGV_ARRAY   0x00A00848u
-          #define WG_FIX91_ENV_ARRAY     0x00A00850u
-          #define WG_FIX91_WENV_ARRAY    0x00A00858u
+          start = s.find(start_marker)
+          end = s.find(end_marker, start)
 
-          static void wg_fix91_put32(uint8_t *page, uint32_t guest, uint32_t value) {
-              uint32_t off = guest - WG_FIX91_PAGE;
-              if (off + 4 <= 0x1000) memcpy(page + off, &value, 4);
-          }
+          if start == -1 or end == -1:
+              raise SystemExit("ERROR: real DLL loader markers missing")
 
-          static bool wg_fix91_is_msvcr120(const char *dll) {
+          real_loader = r'''// Load a DLL file into the VM. Returns the guest load base, or 0 on failure.
+          // FIX 10: this loader can wire game DLL imports to exports of other
+          // already-loaded game DLLs instead of turning them into Auto-stubs.
+
+          static uint32_t wg_module_export(uint32_t base, const char *func);
+          static uint32_t wg_module_find(const char *path);
+
+          #define WG_FIX10_PAGE          0x00A00000u
+          #define WG_FIX10_WCMDLINE      0x00A00000u
+          #define WG_FIX10_ACMDLINE      0x00A00100u
+          #define WG_FIX10_APGMPTR       0x00A00300u
+          #define WG_FIX10_WPGMPTR       0x00A00500u
+          #define WG_FIX10_ACMDLN_VAR    0x00A00800u
+          #define WG_FIX10_WCMDLN_VAR    0x00A00804u
+          #define WG_FIX10_FMODE_VAR     0x00A00808u
+          #define WG_FIX10_COMMODE_VAR   0x00A0080Cu
+          #define WG_FIX10_ARGC_VAR      0x00A00810u
+          #define WG_FIX10_ARGV_VAR      0x00A00814u
+          #define WG_FIX10_WARGV_VAR     0x00A00818u
+          #define WG_FIX10_PGMPTR_VAR    0x00A0081Cu
+          #define WG_FIX10_WPGMPTR_VAR   0x00A00820u
+          #define WG_FIX10_ENVIRON_VAR   0x00A00824u
+          #define WG_FIX10_WENVIRON_VAR  0x00A00828u
+          #define WG_FIX10_ARGV_ARRAY    0x00A00840u
+          #define WG_FIX10_WARGV_ARRAY   0x00A00848u
+          #define WG_FIX10_ENV_ARRAY     0x00A00850u
+          #define WG_FIX10_WENV_ARRAY    0x00A00858u
+
+          static bool wg_fix10_is_msvcr120(const char *dll) {
               if (!dll) return false;
               char lower[128];
               size_t n = strlen(dll);
@@ -349,7 +358,356 @@ jobs:
               return strstr(lower, "msvcr120") != NULL;
           }
 
-          static bool wg_fix91_prepare_crt_data(WGEngine *engine) {
+          static uint32_t wg_fix10_data_import(const char *dll, const char *name) {
+              if (!wg_fix10_is_msvcr120(dll) || !name) return 0;
+              if (!strcmp(name, "_acmdln"))   return WG_FIX10_ACMDLN_VAR;
+              if (!strcmp(name, "_wcmdln"))   return WG_FIX10_WCMDLN_VAR;
+              if (!strcmp(name, "_fmode"))    return WG_FIX10_FMODE_VAR;
+              if (!strcmp(name, "_commode"))  return WG_FIX10_COMMODE_VAR;
+              if (!strcmp(name, "__argc"))    return WG_FIX10_ARGC_VAR;
+              if (!strcmp(name, "__argv"))    return WG_FIX10_ARGV_VAR;
+              if (!strcmp(name, "__wargv"))   return WG_FIX10_WARGV_VAR;
+              if (!strcmp(name, "_pgmptr"))   return WG_FIX10_PGMPTR_VAR;
+              if (!strcmp(name, "_wpgmptr"))  return WG_FIX10_WPGMPTR_VAR;
+              if (!strcmp(name, "_environ"))  return WG_FIX10_ENVIRON_VAR;
+              if (!strcmp(name, "_wenviron")) return WG_FIX10_WENVIRON_VAR;
+              return 0;
+          }
+
+          static bool wg_fix10_find_local_dll(const char *guest_name,
+                                               char *out,
+                                               size_t outsz) {
+              if (!guest_name || !guest_name[0] || !out || outsz < 4) return false;
+
+              char wanted[64];
+              dll_basename(guest_name, wanted, sizeof(wanted));
+
+              char cwd[1024];
+              if (!getcwd(cwd, sizeof(cwd))) return false;
+
+              DIR *d = opendir(cwd);
+              if (!d) return false;
+
+              bool found = false;
+              struct dirent *e;
+              while ((e = readdir(d)) != NULL) {
+                  if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+
+                  char got[64];
+                  dll_basename(e->d_name, got, sizeof(got));
+                  if (strcmp(got, wanted) != 0) continue;
+
+                  snprintf(out, outsz, "%s/%s", cwd, e->d_name);
+                  found = true;
+                  break;
+              }
+
+              closedir(d);
+              return found;
+          }
+
+          static bool wg_fix10_is_unreal_boot_dll(const char *dll) {
+              if (!dll) return false;
+              char lower[64];
+              dll_basename(dll, lower, sizeof(lower));
+              return !strcmp(lower, "core.dll") || !strcmp(lower, "engine.dll");
+          }
+
+          static uint32_t wg_load_dll(WGBlinkInstance *blink,
+                                      WGDllMapper *mapper,
+                                      const char *real_path,
+                                      const char *guest_name) {
+              char base_name[64];
+              dll_basename(guest_name, base_name, sizeof(base_name));
+
+              for (int i = 0; i < 16; i++) {
+                  if (s_modules[i].in_use &&
+                      strcmp(s_modules[i].name, base_name) == 0) {
+                      return s_modules[i].base;
+                  }
+              }
+
+              WGPEImage *img = wg_pe_load_file(real_path);
+              if (!img) {
+                  WG_LOGE(TAG, "FIX10 failed to parse real DLL: %s", real_path);
+                  return 0;
+              }
+
+              if (img->is_64bit) {
+                  WG_LOGE(TAG, "FIX10 refusing 64-bit DLL in 32-bit process: %s", guest_name);
+                  wg_pe_image_free(img);
+                  return 0;
+              }
+
+              int slot_index = -1;
+              for (int i = 0; i < 16; i++) {
+                  if (!s_modules[i].in_use) {
+                      slot_index = i;
+                      break;
+                  }
+              }
+
+              if (slot_index < 0) {
+                  WG_LOGE(TAG, "FIX10 module table full while loading %s", guest_name);
+                  wg_pe_image_free(img);
+                  return 0;
+              }
+
+              uint32_t preferred = (uint32_t)img->image_base;
+              uint32_t img_size  = img->size_of_image ? img->size_of_image : 0x100000;
+              uint32_t load_base;
+              int32_t delta;
+
+              if (img->reloc_rva && img->reloc_size) {
+                  load_base = s_dll_next_base;
+                  s_dll_next_base =
+                      (s_dll_next_base + img_size + 0xFFFFu) & ~0xFFFFu;
+                  delta = (int32_t)(load_base - preferred);
+              } else {
+                  load_base = preferred;
+                  delta = 0;
+              }
+
+              WGLoadedModule *slot = &s_modules[slot_index];
+              memset(slot, 0, sizeof(*slot));
+              slot->in_use = true;
+              strncpy(slot->name, base_name, sizeof(slot->name) - 1);
+              slot->base = load_base;
+              slot->size = img_size;
+              slot->img = img;
+
+              WG_LOGI(TAG,
+                      "FIX10 mapping REAL DLL %s from %s preferred=0x%X load=0x%X size=0x%X",
+                      base_name,
+                      real_path,
+                      preferred,
+                      load_base,
+                      img_size);
+
+              if (img->size_of_headers &&
+                  img->raw_size >= img->size_of_headers) {
+                  if (!wg_blink_load_code(blink,
+                                          load_base,
+                                          img->raw_data,
+                                          img->size_of_headers,
+                                          0)) {
+                      WG_LOGE(TAG, "FIX10 header map failed for %s", base_name);
+                      slot->in_use = false;
+                      slot->img = NULL;
+                      wg_pe_image_free(img);
+                      return 0;
+                  }
+              }
+
+              for (int i = 0; i < img->num_sections; i++) {
+                  WGPESection *sec = &img->sections[i];
+                  uint32_t vs = sec->virtual_size ? sec->virtual_size : sec->raw_size;
+                  if (!vs) continue;
+
+                  uint64_t va = (uint64_t)load_base + sec->virtual_address;
+                  uint8_t *zeros = calloc(1, vs);
+                  if (!zeros) {
+                      WG_LOGE(TAG, "FIX10 OOM mapping %s:%s", base_name, sec->name);
+                      slot->in_use = false;
+                      slot->img = NULL;
+                      wg_pe_image_free(img);
+                      return 0;
+                  }
+
+                  bool mapped = wg_blink_load_code(blink, va, zeros, vs, 0);
+                  free(zeros);
+
+                  if (!mapped) {
+                      WG_LOGE(TAG,
+                              "FIX10 section map failed %s:%s @0x%llX size=0x%X",
+                              base_name,
+                              sec->name,
+                              (unsigned long long)va,
+                              vs);
+                      slot->in_use = false;
+                      slot->img = NULL;
+                      wg_pe_image_free(img);
+                      return 0;
+                  }
+
+                  if (sec->data && sec->raw_size) {
+                      uint32_t n = sec->raw_size < vs ? sec->raw_size : vs;
+                      if (!wg_blink_write_mem(blink, va, sec->data, n)) {
+                          WG_LOGE(TAG, "FIX10 section write failed %s:%s",
+                                  base_name, sec->name);
+                          slot->in_use = false;
+                          slot->img = NULL;
+                          wg_pe_image_free(img);
+                          return 0;
+                      }
+                  }
+              }
+
+              if (delta && img->reloc_rva && img->reloc_size) {
+                  uint32_t off = 0;
+
+                  while (off + 8 <= img->reloc_size) {
+                      const uint8_t *blk =
+                          pe_rva_ptr(img, img->reloc_rva + off, 8);
+                      if (!blk) break;
+
+                      uint32_t page_rva = 0;
+                      uint32_t blk_size = 0;
+                      memcpy(&page_rva, blk, 4);
+                      memcpy(&blk_size, blk + 4, 4);
+
+                      if (blk_size < 8 || off + blk_size > img->reloc_size) break;
+
+                      uint32_t nent = (blk_size - 8) / 2;
+                      const uint8_t *ents =
+                          pe_rva_ptr(img,
+                                     img->reloc_rva + off + 8,
+                                     nent * 2);
+                      if (!ents) break;
+
+                      for (uint32_t e = 0; e < nent; e++) {
+                          uint16_t v = 0;
+                          memcpy(&v, ents + e * 2, 2);
+
+                          if ((v >> 12) != 3) continue;
+
+                          uint32_t target =
+                              load_base + page_rva + (v & 0x0FFFu);
+                          uint32_t val = 0;
+
+                          if (!wg_blink_read_mem(blink, target, &val, 4)) {
+                              WG_LOGE(TAG,
+                                      "FIX10 relocation read failed %s @0x%X",
+                                      base_name,
+                                      target);
+                              return 0;
+                          }
+
+                          val += (uint32_t)delta;
+
+                          if (!wg_blink_write_mem(blink, target, &val, 4)) {
+                              WG_LOGE(TAG,
+                                      "FIX10 relocation write failed %s @0x%X",
+                                      base_name,
+                                      target);
+                              return 0;
+                          }
+                      }
+
+                      off += blk_size;
+                  }
+              }
+
+              for (int i = 0; i < img->num_imports; i++) {
+                  WGPEImportDll *imp = &img->imports[i];
+
+                  WG_LOGI(TAG,
+                          "FIX10 %s imports %s: %d functions",
+                          base_name,
+                          imp->dll_name,
+                          imp->num_functions);
+
+                  for (int j = 0; j < imp->num_functions; j++) {
+                      const char *fn = imp->functions[j].name;
+                      uint32_t resolved = 0;
+
+                      resolved = wg_fix10_data_import(imp->dll_name, fn);
+
+                      if (!resolved) {
+                          uint32_t dep_base = wg_module_find(imp->dll_name);
+                          if (dep_base) {
+                              resolved = wg_module_export(dep_base, fn);
+                              if (resolved) {
+                                  WG_LOGI(TAG,
+                                          "FIX10 REAL LINK %s!%s -> %s @0x%X",
+                                          base_name,
+                                          fn,
+                                          imp->dll_name,
+                                          resolved);
+                              }
+                          }
+                      }
+
+                      if (!resolved) {
+                          uint64_t stub =
+                              wg_dll_mapper_resolve(mapper,
+                                                    imp->dll_name,
+                                                    fn);
+                          resolved = (uint32_t)stub;
+                      }
+
+                      if (!resolved) {
+                          WG_LOGW(TAG,
+                                  "FIX10 unresolved DLL import %s -> %s!%s",
+                                  base_name,
+                                  imp->dll_name,
+                                  fn ? fn : "(ordinal)");
+                          continue;
+                      }
+
+                      uint32_t iat =
+                          load_base + imp->functions[j].iat_rva;
+
+                      if (!wg_blink_write_mem(blink,
+                                              iat,
+                                              &resolved,
+                                              4)) {
+                          WG_LOGE(TAG,
+                                  "FIX10 IAT write failed %s!%s @0x%X",
+                                  base_name,
+                                  fn ? fn : "(ordinal)",
+                                  iat);
+                          return 0;
+                      }
+                  }
+              }
+
+              WG_LOGI(TAG,
+                      "FIX10 REAL DLL READY %s base=0x%X entry=0x%X reloc_delta=0x%X",
+                      base_name,
+                      load_base,
+                      img->entry_point,
+                      (uint32_t)delta);
+
+              return load_base;
+          }
+
+          '''
+
+          s = s[:start] + real_loader + s[end:]
+
+          old = '''                WG_LOGD(TAG, "GetModuleHandleA('%s')", modname);
+                          if (strcasestr(modname, "kernel32") ||'''
+
+          new = '''                WG_LOGD(TAG, "GetModuleHandleA('%s')", modname);
+                          uint32_t loaded = wg_module_find(modname);
+                          if (loaded) {
+                              ret_val = loaded;
+                          } else if (strcasestr(modname, "kernel32") ||'''
+
+          if old not in s:
+              raise SystemExit("ERROR: GetModuleHandleA marker missing")
+          s = s.replace(old, new, 1)
+
+          helper_marker = "static bool load_pe_blink(WGEngine *engine) {"
+          if helper_marker not in s:
+              raise SystemExit("ERROR: load_pe_blink marker missing")
+
+          helpers = r'''
+          // ============================================================
+          // POSTAL 2 FIX 10 — REAL CORE/ENGINE DLLS
+          // ============================================================
+
+          static void wg_fix10_put32(uint8_t *page,
+                                     uint32_t guest,
+                                     uint32_t value) {
+              uint32_t off = guest - WG_FIX10_PAGE;
+              if (off + 4 <= 0x1000) {
+                  memcpy(page + off, &value, 4);
+              }
+          }
+
+          static bool wg_fix10_prepare_crt_data(WGEngine *engine) {
               if (!engine || !engine->blink) return false;
 
               uint8_t page[0x1000];
@@ -360,76 +718,204 @@ jobs:
                   winpath = "C:\\Postal2\\System\\Postal2.exe";
               }
 
-              uint16_t *wcmd = (uint16_t *)(page + (WG_FIX91_WCMDLINE - WG_FIX91_PAGE));
+              uint16_t *wcmd =
+                  (uint16_t *)(page +
+                      (WG_FIX10_WCMDLINE - WG_FIX10_PAGE));
               int wi = 0;
               wcmd[0] = '"';
-              for (; winpath[wi] && wi < 120; wi++) wcmd[wi + 1] = (uint8_t)winpath[wi];
+              for (; winpath[wi] && wi < 120; wi++) {
+                  wcmd[wi + 1] = (uint8_t)winpath[wi];
+              }
               wcmd[wi + 1] = '"';
               wcmd[wi + 2] = 0;
 
-              char *acmd = (char *)(page + (WG_FIX91_ACMDLINE - WG_FIX91_PAGE));
+              char *acmd =
+                  (char *)(page +
+                      (WG_FIX10_ACMDLINE - WG_FIX10_PAGE));
               snprintf(acmd, 500, "\"%s\"", winpath);
 
-              char *apgm = (char *)(page + (WG_FIX91_APGMPTR - WG_FIX91_PAGE));
+              char *apgm =
+                  (char *)(page +
+                      (WG_FIX10_APGMPTR - WG_FIX10_PAGE));
               snprintf(apgm, 500, "%s", winpath);
 
-              uint16_t *wpgm = (uint16_t *)(page + (WG_FIX91_WPGMPTR - WG_FIX91_PAGE));
+              uint16_t *wpgm =
+                  (uint16_t *)(page +
+                      (WG_FIX10_WPGMPTR - WG_FIX10_PAGE));
               int pi = 0;
-              for (; winpath[pi] && pi < 240; pi++) wpgm[pi] = (uint8_t)winpath[pi];
+              for (; winpath[pi] && pi < 240; pi++) {
+                  wpgm[pi] = (uint8_t)winpath[pi];
+              }
               wpgm[pi] = 0;
 
-              wg_fix91_put32(page, WG_FIX91_ACMDLN_VAR, WG_FIX91_ACMDLINE);
-              wg_fix91_put32(page, WG_FIX91_WCMDLN_VAR, WG_FIX91_WCMDLINE);
-              wg_fix91_put32(page, WG_FIX91_FMODE_VAR, 0);
-              wg_fix91_put32(page, WG_FIX91_COMMODE_VAR, 0);
-              wg_fix91_put32(page, WG_FIX91_ARGC_VAR, 1);
+              wg_fix10_put32(page, WG_FIX10_ACMDLN_VAR, WG_FIX10_ACMDLINE);
+              wg_fix10_put32(page, WG_FIX10_WCMDLN_VAR, WG_FIX10_WCMDLINE);
+              wg_fix10_put32(page, WG_FIX10_FMODE_VAR, 0);
+              wg_fix10_put32(page, WG_FIX10_COMMODE_VAR, 0);
+              wg_fix10_put32(page, WG_FIX10_ARGC_VAR, 1);
 
-              wg_fix91_put32(page, WG_FIX91_ARGV_VAR, WG_FIX91_ARGV_ARRAY);
-              wg_fix91_put32(page, WG_FIX91_ARGV_ARRAY, WG_FIX91_APGMPTR);
-              wg_fix91_put32(page, WG_FIX91_ARGV_ARRAY + 4, 0);
+              wg_fix10_put32(page, WG_FIX10_ARGV_VAR, WG_FIX10_ARGV_ARRAY);
+              wg_fix10_put32(page, WG_FIX10_ARGV_ARRAY, WG_FIX10_APGMPTR);
+              wg_fix10_put32(page, WG_FIX10_ARGV_ARRAY + 4, 0);
 
-              wg_fix91_put32(page, WG_FIX91_WARGV_VAR, WG_FIX91_WARGV_ARRAY);
-              wg_fix91_put32(page, WG_FIX91_WARGV_ARRAY, WG_FIX91_WPGMPTR);
-              wg_fix91_put32(page, WG_FIX91_WARGV_ARRAY + 4, 0);
+              wg_fix10_put32(page, WG_FIX10_WARGV_VAR, WG_FIX10_WARGV_ARRAY);
+              wg_fix10_put32(page, WG_FIX10_WARGV_ARRAY, WG_FIX10_WPGMPTR);
+              wg_fix10_put32(page, WG_FIX10_WARGV_ARRAY + 4, 0);
 
-              wg_fix91_put32(page, WG_FIX91_PGMPTR_VAR, WG_FIX91_APGMPTR);
-              wg_fix91_put32(page, WG_FIX91_WPGMPTR_VAR, WG_FIX91_WPGMPTR);
+              wg_fix10_put32(page, WG_FIX10_PGMPTR_VAR, WG_FIX10_APGMPTR);
+              wg_fix10_put32(page, WG_FIX10_WPGMPTR_VAR, WG_FIX10_WPGMPTR);
 
-              wg_fix91_put32(page, WG_FIX91_ENVIRON_VAR, WG_FIX91_ENV_ARRAY);
-              wg_fix91_put32(page, WG_FIX91_ENV_ARRAY, 0);
-              wg_fix91_put32(page, WG_FIX91_WENVIRON_VAR, WG_FIX91_WENV_ARRAY);
-              wg_fix91_put32(page, WG_FIX91_WENV_ARRAY, 0);
+              wg_fix10_put32(page, WG_FIX10_ENVIRON_VAR, WG_FIX10_ENV_ARRAY);
+              wg_fix10_put32(page, WG_FIX10_ENV_ARRAY, 0);
+              wg_fix10_put32(page, WG_FIX10_WENVIRON_VAR, WG_FIX10_WENV_ARRAY);
+              wg_fix10_put32(page, WG_FIX10_WENV_ARRAY, 0);
 
-              if (!wg_blink_load_code(engine->blink, WG_FIX91_PAGE, page, sizeof(page), 0)) {
-                  WG_LOGE(TAG, "FIX9.1 CRT page map FAILED");
+              if (!wg_blink_load_code(engine->blink,
+                                      WG_FIX10_PAGE,
+                                      page,
+                                      sizeof(page),
+                                      0)) {
+                  WG_LOGE(TAG, "FIX10 CRT page map FAILED");
                   return false;
               }
 
               s_cmdpage_mapped = true;
-              WG_LOGI(TAG, "FIX9.1 CRT DATA PAGE READY @0x%X", WG_FIX91_PAGE);
-              WG_LOGI(TAG, "FIX9.1 _acmdln @0x%X -> 0x%X", WG_FIX91_ACMDLN_VAR, WG_FIX91_ACMDLINE);
+              WG_LOGI(TAG, "FIX10 CRT DATA PAGE READY @0x%X", WG_FIX10_PAGE);
               return true;
           }
 
-          static uint32_t wg_fix91_data_import(const char *dll, const char *name) {
-              if (!wg_fix91_is_msvcr120(dll) || !name) return 0;
-              if (!strcmp(name, "_acmdln"))   return WG_FIX91_ACMDLN_VAR;
-              if (!strcmp(name, "_wcmdln"))   return WG_FIX91_WCMDLN_VAR;
-              if (!strcmp(name, "_fmode"))    return WG_FIX91_FMODE_VAR;
-              if (!strcmp(name, "_commode"))  return WG_FIX91_COMMODE_VAR;
-              if (!strcmp(name, "__argc"))    return WG_FIX91_ARGC_VAR;
-              if (!strcmp(name, "__argv"))    return WG_FIX91_ARGV_VAR;
-              if (!strcmp(name, "__wargv"))   return WG_FIX91_WARGV_VAR;
-              if (!strcmp(name, "_pgmptr"))   return WG_FIX91_PGMPTR_VAR;
-              if (!strcmp(name, "_wpgmptr"))  return WG_FIX91_WPGMPTR_VAR;
-              if (!strcmp(name, "_environ"))  return WG_FIX91_ENVIRON_VAR;
-              if (!strcmp(name, "_wenviron")) return WG_FIX91_WENVIRON_VAR;
-              return 0;
+          #define WG_FIX10_DLL_RETURN 0x00C30000u
+
+          static bool wg_fix10_call_dll_entry(WGEngine *engine,
+                                              WGLoadedModule *m) {
+              if (!engine || !engine->blink || !m || !m->in_use ||
+                  !m->img || !m->img->entry_point) {
+                  return true;
+              }
+
+              uint32_t entry = m->base + m->img->entry_point;
+              uint64_t saved_regs[16];
+              for (int i = 0; i < 16; i++) {
+                  saved_regs[i] = wg_blink_get_reg(engine->blink, i);
+              }
+              uint64_t saved_rip = wg_blink_get_rip(engine->blink);
+
+              uint8_t hlt = 0xF4;
+              if (!wg_blink_load_code(engine->blink,
+                                      WG_FIX10_DLL_RETURN,
+                                      &hlt,
+                                      1,
+                                      0)) {
+                  WG_LOGE(TAG, "FIX10 failed to map DLL return sentinel");
+                  return false;
+              }
+
+              uint32_t esp = (uint32_t)wg_blink_get_reg(engine->blink, 4);
+              uint32_t call_esp = esp - 16;
+              uint32_t frame[4] = {
+                  WG_FIX10_DLL_RETURN,
+                  m->base,
+                  1u,
+                  0u
+              };
+
+              if (!wg_blink_write_mem(engine->blink,
+                                      call_esp,
+                                      frame,
+                                      sizeof(frame))) {
+                  WG_LOGE(TAG, "FIX10 failed to build DllMain stack for %s", m->name);
+                  return false;
+              }
+
+              wg_blink_set_reg(engine->blink, 4, call_esp);
+              wg_blink_set_rip(engine->blink, entry);
+
+              WG_LOGI(TAG,
+                      "FIX10 DllMain START %s entry=0x%X base=0x%X",
+                      m->name,
+                      entry,
+                      m->base);
+
+              bool ok = false;
+
+              for (int loops = 0; loops < 2000; loops++) {
+                  WGBlinkResult r = wg_blink_run(engine->blink, 100000);
+
+                  if (r == WG_BLINK_OK) continue;
+
+                  if (r == WG_BLINK_HALT) {
+                      uint32_t rip = (uint32_t)wg_blink_get_rip(engine->blink);
+
+                      if (rip == WG_FIX10_DLL_RETURN) {
+                          ok = true;
+                          break;
+                      }
+
+                      if (handle_blink_thunk(engine)) continue;
+
+                      int stop = wg_blink_get_stop_reason(engine->blink);
+                      uint32_t fault =
+                          (uint32_t)wg_blink_get_fault_addr(engine->blink);
+
+                      WG_LOGE(TAG,
+                              "FIX10 DllMain HALT %s rip=0x%X stop=%d fault=0x%X",
+                              m->name,
+                              rip,
+                              stop,
+                              fault);
+                      break;
+                  }
+
+                  WG_LOGE(TAG,
+                          "FIX10 DllMain backend result=%d for %s",
+                          (int)r,
+                          m->name);
+                  break;
+              }
+
+              uint32_t dll_result =
+                  (uint32_t)wg_blink_get_reg(engine->blink, 0);
+
+              for (int i = 0; i < 16; i++) {
+                  wg_blink_set_reg(engine->blink, i, saved_regs[i]);
+              }
+              wg_blink_set_rip(engine->blink, saved_rip);
+
+              if (!ok) {
+                  WG_LOGE(TAG, "FIX10 DllMain FAILED for %s", m->name);
+                  return false;
+              }
+
+              WG_LOGI(TAG,
+                      "FIX10 DllMain DONE %s result=0x%X",
+                      m->name,
+                      dll_result);
+              return true;
+          }
+
+          static bool wg_fix10_init_loaded_dlls(WGEngine *engine) {
+              const char *order[] = {
+                  "core.dll",
+                  "engine.dll",
+                  NULL
+              };
+
+              for (int oi = 0; order[oi]; oi++) {
+                  for (int i = 0; i < 16; i++) {
+                      if (!s_modules[i].in_use) continue;
+                      if (strcmp(s_modules[i].name, order[oi]) != 0) continue;
+
+                      if (!wg_fix10_call_dll_entry(engine, &s_modules[i])) {
+                          return false;
+                      }
+                  }
+              }
+              return true;
           }
 
           '''
 
-          s = s.replace(helper_marker, helper + "\n" + helper_marker, 1)
+          s = s.replace(helper_marker, helpers + "\n" + helper_marker, 1)
 
           function_start = s.find(helper_marker)
           start_marker = "// Resolve imports — write thunk addresses into the IAT"
@@ -437,72 +923,164 @@ jobs:
 
           start = s.find(start_marker, function_start)
           if start == -1:
-              raise SystemExit("ERROR: import resolver START marker missing")
+              raise SystemExit("ERROR: EXE import resolver START missing")
 
           line_start = s.rfind("\n", function_start, start)
           line_start = start if line_start == -1 else line_start + 1
 
           end = s.find(end_marker, start)
           if end == -1:
-              raise SystemExit("ERROR: import resolver END marker missing")
+              raise SystemExit("ERROR: EXE import resolver END missing")
 
-          replacement = r'''    // POSTAL 2 FIX 9.1 IMPORT RESOLUTION
-              // PE32 IAT = 4 bytes; PE32+ IAT = 8 bytes.
-              // MSVCR120 data exports point to DATA, not HLT thunks.
+          replacement = r'''    // POSTAL 2 FIX 10 IMPORT RESOLUTION
+              // Real Core.dll / Engine.dll exports first; Win32 APIs remain thunks.
 
               if (!pe->is_64bit) {
-                  if (!wg_fix91_prepare_crt_data(engine)) {
-                      WG_LOGE(TAG, "FIX9.1 CRT data setup failed");
+                  if (!wg_fix10_prepare_crt_data(engine)) {
+                      WG_LOGE(TAG, "FIX10 CRT DATA setup failed");
                       return false;
+                  }
+
+                  const char *boot_dlls[] = {
+                      "Core.dll",
+                      "Engine.dll",
+                      NULL
+                  };
+
+                  for (int bi = 0; boot_dlls[bi]; bi++) {
+                      char real_path[1200] = {0};
+
+                      if (!wg_fix10_find_local_dll(boot_dlls[bi],
+                                                   real_path,
+                                                   sizeof(real_path))) {
+                          WG_LOGW(TAG,
+                                  "FIX10 %s not found in current System directory",
+                                  boot_dlls[bi]);
+                          continue;
+                      }
+
+                      uint32_t base =
+                          wg_load_dll(engine->blink,
+                                      engine->dll_mapper,
+                                      real_path,
+                                      boot_dlls[bi]);
+
+                      if (!base) {
+                          WG_LOGE(TAG,
+                                  "FIX10 failed to load REAL %s from %s",
+                                  boot_dlls[bi],
+                                  real_path);
+                          return false;
+                      }
+
+                      WG_LOGI(TAG,
+                              "FIX10 PRELOAD %s -> 0x%X",
+                              boot_dlls[bi],
+                              base);
                   }
               }
 
               if (pe->num_imports > 0) {
-                  WG_LOGI(TAG, "Resolving %d DLL imports...", pe->num_imports);
+                  WG_LOGI(TAG,
+                          "FIX10 resolving %d EXE DLL imports...",
+                          pe->num_imports);
 
                   for (int i = 0; i < pe->num_imports; i++) {
                       WGPEImportDll *imp = &pe->imports[i];
-                      WG_LOGI(TAG, "  %s: %d functions", imp->dll_name, imp->num_functions);
+
+                      WG_LOGI(TAG,
+                              "  %s: %d functions",
+                              imp->dll_name,
+                              imp->num_functions);
 
                       for (int j = 0; j < imp->num_functions; j++) {
                           const char *fn = imp->functions[j].name;
-                          uint64_t iat_entry = pe->image_base + imp->functions[j].iat_rva;
+                          uint64_t resolved = 0;
+                          bool real_game_export = false;
 
                           if (!pe->is_64bit) {
-                              uint32_t data_addr = wg_fix91_data_import(imp->dll_name, fn);
+                              uint32_t data_addr =
+                                  wg_fix10_data_import(imp->dll_name, fn);
+
                               if (data_addr) {
-                                  bool ok = wg_blink_write_mem(engine->blink, iat_entry, &data_addr, 4);
-                                  WG_LOGI(
-                                      TAG,
-                                      "FIX9.1 DATA IMPORT: %s!%s IAT=0x%llX -> DATA 0x%X write=%d",
-                                      imp->dll_name,
-                                      fn,
-                                      (unsigned long long)iat_entry,
-                                      data_addr,
-                                      ok ? 1 : 0
-                                  );
-                                  if (!ok) return false;
-                                  continue;
+                                  resolved = data_addr;
+                                  WG_LOGI(TAG,
+                                          "FIX10 DATA IMPORT %s!%s -> 0x%X",
+                                          imp->dll_name,
+                                          fn,
+                                          data_addr);
                               }
                           }
 
-                          uint64_t stub_addr = wg_dll_mapper_resolve(
-                              engine->dll_mapper,
-                              imp->dll_name,
-                              fn
-                          );
+                          if (!resolved &&
+                              !pe->is_64bit &&
+                              wg_fix10_is_unreal_boot_dll(imp->dll_name)) {
+                              uint32_t mod = wg_module_find(imp->dll_name);
 
-                          if (!stub_addr) {
-                              WG_LOGW(TAG, "FIX9.1 unresolved import: %s!%s", imp->dll_name, fn);
+                              if (mod) {
+                                  uint32_t exp = wg_module_export(mod, fn);
+
+                                  if (exp) {
+                                      resolved = exp;
+                                      real_game_export = true;
+                                      WG_LOGI(TAG,
+                                              "FIX10 REAL EXE IMPORT %s!%s -> 0x%X",
+                                              imp->dll_name,
+                                              fn,
+                                              exp);
+                                  }
+                              }
+                          }
+
+                          if (!resolved) {
+                              resolved =
+                                  wg_dll_mapper_resolve(engine->dll_mapper,
+                                                        imp->dll_name,
+                                                        fn);
+                          }
+
+                          if (!resolved) {
+                              WG_LOGW(TAG,
+                                      "FIX10 unresolved EXE import %s!%s",
+                                      imp->dll_name,
+                                      fn ? fn : "(ordinal)");
                               continue;
                           }
 
+                          uint64_t iat_entry =
+                              pe->image_base + imp->functions[j].iat_rva;
+                          bool write_ok = false;
+
                           if (pe->is_64bit) {
-                              uint64_t stub64 = stub_addr;
-                              wg_blink_write_mem(engine->blink, iat_entry, &stub64, 8);
+                              uint64_t v64 = resolved;
+                              write_ok =
+                                  wg_blink_write_mem(engine->blink,
+                                                     iat_entry,
+                                                     &v64,
+                                                     8);
                           } else {
-                              uint32_t stub32 = (uint32_t)stub_addr;
-                              wg_blink_write_mem(engine->blink, iat_entry, &stub32, 4);
+                              uint32_t v32 = (uint32_t)resolved;
+                              write_ok =
+                                  wg_blink_write_mem(engine->blink,
+                                                     iat_entry,
+                                                     &v32,
+                                                     4);
+                          }
+
+                          if (!write_ok) {
+                              WG_LOGE(TAG,
+                                      "FIX10 IAT write failed %s!%s @0x%llX",
+                                      imp->dll_name,
+                                      fn ? fn : "(ordinal)",
+                                      (unsigned long long)iat_entry);
+                              return false;
+                          }
+
+                          if (real_game_export) {
+                              WG_LOGI(TAG,
+                                      "FIX10 IAT REAL OK %s!%s",
+                                      imp->dll_name,
+                                      fn);
                           }
                       }
                   }
@@ -511,13 +1089,37 @@ jobs:
           '''
 
           s = s[:line_start] + replacement + s[end:]
+
+          init_marker = '''    WG_LOGI(TAG, "PE mapped via blink. Entry: 0x%llx", (unsigned long long)entry);'''
+
+          init_code = r'''    if (!pe->is_64bit) {
+                  if (!wg_fix10_init_loaded_dlls(engine)) {
+                      WG_LOGE(TAG, "FIX10 REAL DLL initialization failed");
+                      return false;
+                  }
+
+                  wg_blink_set_rip(engine->blink, entry);
+              }
+
+              WG_LOGI(TAG,
+                      "FIX10 REAL CORE/ENGINE READY — EXE entry 0x%llx",
+                      (unsigned long long)entry);
+          '''
+
+          if init_marker not in s:
+              raise SystemExit("ERROR: PE mapped log marker missing")
+
+          s = s.replace(init_marker, init_code + "\n" + init_marker, 1)
+
           p.write_text(s)
-          print("FIX 9.1 CRT data + PE32 IAT patch installed")
+          print("FIX 10 REAL CORE/ENGINE DLL PATCH INSTALLED")
           PY
 
+          echo "===== FIX10 SOURCE CHECK ====="
+
           grep -n \
-            "FIX9.1 CRT DATA PAGE\|FIX9.1 DATA IMPORT\|POSTAL 2 FIX 9.1 IMPORT" \
-            WineGlass/Sources/Core/wg_engine.c
+            "FIX10 REAL DLL READY\|FIX10 REAL EXE IMPORT\|FIX10 DllMain\|FIX10 REAL CORE/ENGINE READY" \
+            WineGlass/Sources/Core/wg_engine.c | head -80
 
       - name: Patch WineGlass project
         shell: bash
@@ -555,8 +1157,8 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleName POSTAL 2" "$PLIST"
           /usr/libexec/PlistBuddy -c "Delete :CFBundleDisplayName" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string POSTAL 2" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.9.1" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 91" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.10.0" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 100" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :UIFileSharingEnabled true" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :LSSupportsOpeningDocumentsInPlace true" "$PLIST"
           plutil -lint "$PLIST"
@@ -593,13 +1195,13 @@ jobs:
 
               fprintf(stderr,
                       "========================================\\n"
-                      "POSTAL 2 WineGlass FIX 9.1\\n"
-                      "CRT DATA IMPORTS + PE32 IAT FIX\\n"
+                      "POSTAL 2 WineGlass FIX 10\\n"
+                      "REAL CORE/ENGINE DLLS + CRT DATA + PE32 IAT\\n"
                       "========================================\\n");
               fflush(stderr);
 
               wg_log_init();
-              WG_LOGI("POSTAL2", "FIX 9.1 logging started");'''
+              WG_LOGI("POSTAL2", "FIX 10 logging started");'''
 
           if old not in s:
               raise SystemExit("ERROR: scene startup marker missing")
@@ -685,7 +1287,7 @@ jobs:
           s = s.replace(marker, methods + "\n" + marker, 1)
 
           old = "            [self tryLoadBundledPE];"
-          new = '''            WG_LOGI("POSTAL2", "Engine ready — FIX9.1 auto-start");
+          new = '''            WG_LOGI("POSTAL2", "Engine ready — FIX10 auto-start");
                       [self runPostal2];'''
           if old not in s:
               raise SystemExit("ERROR: auto-start marker missing")
@@ -708,7 +1310,7 @@ jobs:
             exit 1
           fi
 
-      - name: Build POSTAL 2 FIX 9.1
+      - name: Build POSTAL 2 FIX 10
         shell: bash
         run: |
           set -o pipefail
@@ -754,14 +1356,14 @@ jobs:
           mkdir -p "$OUT/Payload"
           cp -R "$APP" "$OUT/Payload/POSTAL 2.app"
           cd "$OUT"
-          zip -qry "POSTAL-2-iOS-v9.1-CRT-DATA-FIX.ipa" Payload
-          ls -lh "POSTAL-2-iOS-v9.1-CRT-DATA-FIX.ipa"
+          zip -qry "POSTAL-2-iOS-v10-REAL-DLLS.ipa" Payload
+          ls -lh "POSTAL-2-iOS-v10-REAL-DLLS.ipa"
 
-      - name: Upload POSTAL 2 FIX 9.1 IPA
+      - name: Upload POSTAL 2 FIX 10 IPA
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-iOS-v9.1-CRT-DATA-FIX
-          path: out/POSTAL-2-iOS-v9.1-CRT-DATA-FIX.ipa
+          name: POSTAL-2-iOS-v10-REAL-DLLS
+          path: out/POSTAL-2-iOS-v10-REAL-DLLS.ipa
           if-no-files-found: error
           retention-days: 14
 
@@ -769,19 +1371,19 @@ jobs:
         if: always()
         shell: bash
         run: |
-          mkdir -p debug-fix9-1
-          cp WineGlass/xcodebuild.log debug-fix9-1/ 2>/dev/null || true
-          cp blink-src/config.h debug-fix9-1/blink-config.h 2>/dev/null || true
-          cp WineGlass/Vendor/blink/wg_blink_impl.c debug-fix9-1/ 2>/dev/null || true
-          cp WineGlass/Sources/Core/wg_engine.c debug-fix9-1/ 2>/dev/null || true
-          cp WineGlass/Sources/App/WGSceneDelegate.m debug-fix9-1/ 2>/dev/null || true
-          cp WineGlass/project.yml debug-fix9-1/ 2>/dev/null || true
+          mkdir -p debug-fix10
+          cp WineGlass/xcodebuild.log debug-fix10/ 2>/dev/null || true
+          cp blink-src/config.h debug-fix10/blink-config.h 2>/dev/null || true
+          cp WineGlass/Vendor/blink/wg_blink_impl.c debug-fix10/ 2>/dev/null || true
+          cp WineGlass/Sources/Core/wg_engine.c debug-fix10/ 2>/dev/null || true
+          cp WineGlass/Sources/App/WGSceneDelegate.m debug-fix10/ 2>/dev/null || true
+          cp WineGlass/project.yml debug-fix10/ 2>/dev/null || true
 
-      - name: Upload FIX 9.1 debug
+      - name: Upload FIX 10 debug
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-FIX9.1-DEBUG
-          path: debug-fix9-1
+          name: POSTAL-2-FIX10-DEBUG
+          path: debug-fix10
           if-no-files-found: ignore
           retention-days: 7
