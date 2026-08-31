@@ -1,4 +1,4 @@
-name: POSTAL 2 WineGlass iOS FIX 11
+name: POSTAL 2 WineGlass iOS FIX 11.1
 
 on:
   workflow_dispatch:
@@ -7,14 +7,133 @@ permissions:
   contents: read
 
 jobs:
+  vc120:
+    name: Prepare VC++ 2013 x86 runtime
+    runs-on: windows-2022
+    timeout-minutes: 20
+
+    steps:
+      - name: Download and install official VC++ 2013 x86
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $root = $env:GITHUB_WORKSPACE
+          $exe = Join-Path $root "vcredist_x86.exe"
+          $out = Join-Path $root "vc120-runtime"
+
+          Remove-Item $out -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+
+          $urls = @(
+            "https://download.visualstudio.microsoft.com/download/pr/10912113/5da66ddebb0ad32ebd4b922fd82e8e25/vcredist_x86.exe",
+            "https://download.microsoft.com/download/2/E/6/2E61CFA4-993B-4DD4-91DA-3737CD5CD6E3/vcredist_x86.exe"
+          )
+
+          $downloaded = $false
+
+          foreach ($url in $urls) {
+            try {
+              Write-Host "Downloading $url"
+              Invoke-WebRequest -Uri $url -OutFile $exe
+              if ((Test-Path $exe) -and ((Get-Item $exe).Length -gt 100000)) {
+                $downloaded = $true
+                break
+              }
+            }
+            catch {
+              Write-Warning $_
+            }
+          }
+
+          if (-not $downloaded) {
+            throw "Could not download official VC++ 2013 x86 redistributable"
+          }
+
+          Write-Host "Installing VC++ 2013 x86 runtime..."
+
+          $proc = Start-Process `
+            -FilePath $exe `
+            -ArgumentList "/install","/quiet","/norestart" `
+            -Wait `
+            -PassThru
+
+          Write-Host "vcredist exit code: $($proc.ExitCode)"
+
+          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 1638) {
+            throw "vcredist_x86 failed with exit code $($proc.ExitCode)"
+          }
+
+          $candidates = @(
+            "$env:WINDIR\SysWOW64\msvcr120.dll",
+            "$env:WINDIR\System32\msvcr120.dll"
+          )
+
+          $msvcr = $candidates |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
+
+          $candidates = @(
+            "$env:WINDIR\SysWOW64\msvcp120.dll",
+            "$env:WINDIR\System32\msvcp120.dll"
+          )
+
+          $msvcp = $candidates |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
+
+          if (-not $msvcr) {
+            throw "msvcr120.dll was not found after installing VC++ 2013 x86"
+          }
+
+          if (-not $msvcp) {
+            throw "msvcp120.dll was not found after installing VC++ 2013 x86"
+          }
+
+          Write-Host "MSVCR: $msvcr"
+          Write-Host "MSVCP: $msvcp"
+
+          Copy-Item $msvcr (Join-Path $out "msvcr120.dll") -Force
+          Copy-Item $msvcp (Join-Path $out "msvcp120.dll") -Force
+
+          Get-Item `
+            (Join-Path $out "msvcr120.dll"), `
+            (Join-Path $out "msvcp120.dll") |
+            Format-List FullName,Length
+
+      - name: Upload VC120 runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: POSTAL2-VC120-x86
+          path: vc120-runtime
+          if-no-files-found: error
+          retention-days: 1
+
   build:
-    name: Build POSTAL 2 FIX 11
+    needs: vc120
+    name: Build POSTAL 2 FIX 11.1
     runs-on: macos-14
     timeout-minutes: 90
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download VC120 runtime from Windows job
+        uses: actions/download-artifact@v4
+        with:
+          name: POSTAL2-VC120-x86
+          path: vc120-runtime
+
+      - name: Verify VC120 runtime
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -s vc120-runtime/msvcr120.dll
+          test -s vc120-runtime/msvcp120.dll
+          file vc120-runtime/msvcr120.dll vc120-runtime/msvcp120.dll
+          grep -a -q 'This program cannot be run in DOS mode' vc120-runtime/msvcr120.dll
+          grep -a -q 'This program cannot be run in DOS mode' vc120-runtime/msvcp120.dll
 
       - name: Select Xcode 15.4
         shell: bash
@@ -36,11 +155,9 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          brew install xcodegen make flock sevenzip msitools
+          brew install xcodegen make flock
           export PATH="$(brew --prefix)/bin:$PATH"
           command -v flock
-          command -v 7zz
-          command -v msiextract
           xcodegen --version
           xcrun --sdk iphoneos --show-sdk-version
 
@@ -54,225 +171,6 @@ jobs:
           mkdir -p WineGlass/Vendor/blink/lib
           git -C WineGlass rev-parse HEAD
           git -C blink-src rev-parse HEAD
-
-      - name: Download official VC++ 2013 x86 runtime
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          ROOT="$GITHUB_WORKSPACE"
-          REDIST="$ROOT/vcredist_x86.exe"
-          STAGE="$ROOT/vc120-stage"
-          OUT="$ROOT/vc120-runtime"
-
-          rm -rf "$STAGE" "$OUT" "$REDIST"
-
-          mkdir -p \
-            "$STAGE/bundle" \
-            "$STAGE/pass1" \
-            "$STAGE/pass2" \
-            "$OUT"
-
-          URL1="https://download.visualstudio.microsoft.com/download/pr/10912113/5da66ddebb0ad32ebd4b922fd82e8e25/vcredist_x86.exe"
-          URL2="https://download.microsoft.com/download/2/E/6/2E61CFA4-993B-4DD4-91DA-3737CD5CD6E3/vcredist_x86.exe"
-
-          echo "===== DOWNLOAD VC++ 2013 X86 ====="
-
-          if ! curl \
-            -fL \
-            --retry 3 \
-            --connect-timeout 20 \
-            "$URL1" \
-            -o "$REDIST"
-          then
-            curl \
-              -fL \
-              --retry 3 \
-              --connect-timeout 20 \
-              "$URL2" \
-              -o "$REDIST"
-          fi
-
-          test -s "$REDIST"
-
-          echo "===== REDIST FILE ====="
-
-          ls -lh "$REDIST"
-          file "$REDIST" || true
-
-          echo "===== EXTRACT BUNDLE ====="
-
-          7zz x \
-            -y \
-            "$REDIST" \
-            -o"$STAGE/bundle"
-
-          echo "===== BUNDLE CONTENT ====="
-
-          find \
-            "$STAGE/bundle" \
-            -type f \
-            -print
-
-          echo "===== PASS 1 ====="
-
-          INDEX=0
-
-          while IFS= read -r FILE
-          do
-            INDEX=$((INDEX + 1))
-
-            DEST="$STAGE/pass1/$INDEX"
-
-            mkdir -p "$DEST"
-
-            echo
-            echo "----------------------------------------"
-            echo "PASS1 FILE: $FILE"
-            echo "TYPE:"
-            file "$FILE" || true
-            echo "----------------------------------------"
-
-            7zz x \
-              -y \
-              "$FILE" \
-              -o"$DEST" \
-              >/dev/null 2>&1 || true
-
-          done < <(
-            find \
-              "$STAGE/bundle" \
-              -type f \
-              -print
-          )
-
-          echo "===== PASS 1 CONTENT ====="
-
-          find \
-            "$STAGE/pass1" \
-            -type f \
-            -print | head -300
-
-          echo "===== PASS 2 ====="
-
-          INDEX=0
-
-          while IFS= read -r FILE
-          do
-            INDEX=$((INDEX + 1))
-
-            DEST="$STAGE/pass2/$INDEX"
-
-            mkdir -p "$DEST"
-
-            7zz x \
-              -y \
-              "$FILE" \
-              -o"$DEST" \
-              >/dev/null 2>&1 || true
-
-          done < <(
-            find \
-              "$STAGE/pass1" \
-              -type f \
-              -print
-          )
-
-          echo "===== SEARCH VC120 ====="
-
-          find \
-            "$STAGE" \
-            -type f \
-            -print | grep -Ei \
-            'msvc(r|p)120|cab|msi' || true
-
-          MSVCR="$(
-            find \
-              "$STAGE" \
-              -type f \
-              -iname 'msvcr120.dll' \
-              -print \
-              | head -1
-          )"
-
-          MSVCP="$(
-            find \
-              "$STAGE" \
-              -type f \
-              -iname 'msvcp120.dll' \
-              -print \
-              | head -1
-          )"
-
-          if [ -z "$MSVCR" ]; then
-            echo "ERROR: msvcr120.dll NOT FOUND"
-
-            echo "===== ALL EXTRACTED FILES ====="
-
-            find \
-              "$STAGE" \
-              -type f \
-              -print | tail -500
-
-            exit 1
-          fi
-
-          if [ -z "$MSVCP" ]; then
-            echo "ERROR: msvcp120.dll NOT FOUND"
-
-            echo "===== ALL EXTRACTED FILES ====="
-
-            find \
-              "$STAGE" \
-              -type f \
-              -print | tail -500
-
-            exit 1
-          fi
-
-          echo "FOUND MSVCR:"
-          echo "$MSVCR"
-
-          echo "FOUND MSVCP:"
-          echo "$MSVCP"
-
-          cp \
-            "$MSVCR" \
-            "$OUT/msvcr120.dll"
-
-          cp \
-            "$MSVCP" \
-            "$OUT/msvcp120.dll"
-
-          echo "===== VC120 READY ====="
-
-          ls -lh "$OUT"
-
-          file \
-            "$OUT/msvcr120.dll" \
-            "$OUT/msvcp120.dll"
-
-          test -s \
-            "$OUT/msvcr120.dll"
-
-          test -s \
-            "$OUT/msvcp120.dll"
-
-          grep \
-            -a \
-            -q \
-            'This program cannot be run in DOS mode' \
-            "$OUT/msvcr120.dll"
-
-          grep \
-            -a \
-            -q \
-            'This program cannot be run in DOS mode' \
-            "$OUT/msvcp120.dll"
-
-          echo "========================================"
-          echo "FIX11 VC++ 2013 X86 RUNTIME READY"
-          echo "========================================"
 
       - name: Configure Blink for iPhone ARM64
         shell: bash
@@ -533,7 +431,8 @@ jobs:
               raise SystemExit("ERROR: real DLL loader markers missing")
 
           real_loader = r'''// Load a DLL file into the VM. Returns the guest load base, or 0 on failure.
-          // FIX 11: real VC++ 2013 + Unreal game DLL loader.
+          // FIX 11: this loader can wire game DLL imports to exports of other
+          // already-loaded game DLLs instead of turning them into Auto-stubs.
 
           static uint32_t wg_module_export(uint32_t base, const char *func);
           static uint32_t wg_module_find(const char *path);
@@ -561,127 +460,56 @@ jobs:
 
           static bool wg_fix11_is_msvcr120(const char *dll) {
               if (!dll) return false;
-
               char lower[128];
               size_t n = strlen(dll);
-
-              if (n >= sizeof(lower))
-                  n = sizeof(lower) - 1;
-
+              if (n >= sizeof(lower)) n = sizeof(lower) - 1;
               for (size_t i = 0; i < n; i++) {
-                  lower[i] =
-                      (char)tolower((unsigned char)dll[i]);
+                  lower[i] = (char)tolower((unsigned char)dll[i]);
               }
-
               lower[n] = '\0';
-
               return strstr(lower, "msvcr120") != NULL;
           }
 
-          static uint32_t wg_fix11_data_import(
-              const char *dll,
-              const char *name
-          ) {
-              if (!wg_fix11_is_msvcr120(dll) || !name)
-                  return 0;
-
-              if (!strcmp(name, "_acmdln"))
-                  return WG_FIX11_ACMDLN_VAR;
-
-              if (!strcmp(name, "_wcmdln"))
-                  return WG_FIX11_WCMDLN_VAR;
-
-              if (!strcmp(name, "_fmode"))
-                  return WG_FIX11_FMODE_VAR;
-
-              if (!strcmp(name, "_commode"))
-                  return WG_FIX11_COMMODE_VAR;
-
-              if (!strcmp(name, "__argc"))
-                  return WG_FIX11_ARGC_VAR;
-
-              if (!strcmp(name, "__argv"))
-                  return WG_FIX11_ARGV_VAR;
-
-              if (!strcmp(name, "__wargv"))
-                  return WG_FIX11_WARGV_VAR;
-
-              if (!strcmp(name, "_pgmptr"))
-                  return WG_FIX11_PGMPTR_VAR;
-
-              if (!strcmp(name, "_wpgmptr"))
-                  return WG_FIX11_WPGMPTR_VAR;
-
-              if (!strcmp(name, "_environ"))
-                  return WG_FIX11_ENVIRON_VAR;
-
-              if (!strcmp(name, "_wenviron"))
-                  return WG_FIX11_WENVIRON_VAR;
-
+          static uint32_t wg_fix11_data_import(const char *dll, const char *name) {
+              if (!wg_fix11_is_msvcr120(dll) || !name) return 0;
+              if (!strcmp(name, "_acmdln"))   return WG_FIX11_ACMDLN_VAR;
+              if (!strcmp(name, "_wcmdln"))   return WG_FIX11_WCMDLN_VAR;
+              if (!strcmp(name, "_fmode"))    return WG_FIX11_FMODE_VAR;
+              if (!strcmp(name, "_commode"))  return WG_FIX11_COMMODE_VAR;
+              if (!strcmp(name, "__argc"))    return WG_FIX11_ARGC_VAR;
+              if (!strcmp(name, "__argv"))    return WG_FIX11_ARGV_VAR;
+              if (!strcmp(name, "__wargv"))   return WG_FIX11_WARGV_VAR;
+              if (!strcmp(name, "_pgmptr"))   return WG_FIX11_PGMPTR_VAR;
+              if (!strcmp(name, "_wpgmptr"))  return WG_FIX11_WPGMPTR_VAR;
+              if (!strcmp(name, "_environ"))  return WG_FIX11_ENVIRON_VAR;
+              if (!strcmp(name, "_wenviron")) return WG_FIX11_WENVIRON_VAR;
               return 0;
           }
 
-          static bool wg_fix11_find_local_dll(
-              const char *guest_name,
-              char *out,
-              size_t outsz
-          ) {
-              if (
-                  !guest_name ||
-                  !guest_name[0] ||
-                  !out ||
-                  outsz < 4
-              ) {
-                  return false;
-              }
+          static bool wg_fix11_find_local_dll(const char *guest_name,
+                                               char *out,
+                                               size_t outsz) {
+              if (!guest_name || !guest_name[0] || !out || outsz < 4) return false;
 
               char wanted[64];
-              dll_basename(
-                  guest_name,
-                  wanted,
-                  sizeof(wanted)
-              );
+              dll_basename(guest_name, wanted, sizeof(wanted));
 
               char cwd[1024];
-
-              if (!getcwd(cwd, sizeof(cwd)))
-                  return false;
+              if (!getcwd(cwd, sizeof(cwd))) return false;
 
               DIR *d = opendir(cwd);
-
-              if (!d)
-                  return false;
+              if (!d) return false;
 
               bool found = false;
               struct dirent *e;
-
               while ((e = readdir(d)) != NULL) {
-                  if (
-                      !strcmp(e->d_name, ".") ||
-                      !strcmp(e->d_name, "..")
-                  ) {
-                      continue;
-                  }
+                  if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
 
                   char got[64];
+                  dll_basename(e->d_name, got, sizeof(got));
+                  if (strcmp(got, wanted) != 0) continue;
 
-                  dll_basename(
-                      e->d_name,
-                      got,
-                      sizeof(got)
-                  );
-
-                  if (strcmp(got, wanted) != 0)
-                      continue;
-
-                  snprintf(
-                      out,
-                      outsz,
-                      "%s/%s",
-                      cwd,
-                      e->d_name
-                  );
-
+                  snprintf(out, outsz, "%s/%s", cwd, e->d_name);
                   found = true;
                   break;
               }
@@ -690,78 +518,43 @@ jobs:
               return found;
           }
 
-          static bool wg_fix11_is_real_preload_dll(
-              const char *dll
-          ) {
-              if (!dll)
-                  return false;
-
+          static bool wg_fix11_is_real_preload_dll(const char *dll) {
+              if (!dll) return false;
               char lower[64];
-
-              dll_basename(
-                  dll,
-                  lower,
-                  sizeof(lower)
-              );
-
-              return
-                  !strcmp(lower, "msvcr120.dll") ||
-                  !strcmp(lower, "msvcp120.dll") ||
-                  !strcmp(lower, "core.dll") ||
-                  !strcmp(lower, "engine.dll");
+              dll_basename(dll, lower, sizeof(lower));
+              return !strcmp(lower, "msvcr120.dll") ||
+                     !strcmp(lower, "msvcp120.dll") ||
+                     !strcmp(lower, "core.dll") ||
+                     !strcmp(lower, "engine.dll");
           }
 
-          static uint32_t wg_load_dll(
-              WGBlinkInstance *blink,
-              WGDllMapper *mapper,
-              const char *real_path,
-              const char *guest_name
-          ) {
+          static uint32_t wg_load_dll(WGBlinkInstance *blink,
+                                      WGDllMapper *mapper,
+                                      const char *real_path,
+                                      const char *guest_name) {
               char base_name[64];
-
-              dll_basename(
-                  guest_name,
-                  base_name,
-                  sizeof(base_name)
-              );
+              dll_basename(guest_name, base_name, sizeof(base_name));
 
               for (int i = 0; i < 16; i++) {
-                  if (
-                      s_modules[i].in_use &&
-                      strcmp(
-                          s_modules[i].name,
-                          base_name
-                      ) == 0
-                  ) {
+                  if (s_modules[i].in_use &&
+                      strcmp(s_modules[i].name, base_name) == 0) {
                       return s_modules[i].base;
                   }
               }
 
-              WGPEImage *img =
-                  wg_pe_load_file(real_path);
-
+              WGPEImage *img = wg_pe_load_file(real_path);
               if (!img) {
-                  WG_LOGE(
-                      TAG,
-                      "FIX11 failed to parse real DLL: %s",
-                      real_path
-                  );
+                  WG_LOGE(TAG, "FIX11 failed to parse real DLL: %s", real_path);
                   return 0;
               }
 
               if (img->is_64bit) {
-                  WG_LOGE(
-                      TAG,
-                      "FIX11 refusing 64-bit DLL in 32-bit process: %s",
-                      guest_name
-                  );
-
+                  WG_LOGE(TAG, "FIX11 refusing 64-bit DLL in 32-bit process: %s", guest_name);
                   wg_pe_image_free(img);
                   return 0;
               }
 
               int slot_index = -1;
-
               for (int i = 0; i < 16; i++) {
                   if (!s_modules[i].in_use) {
                       slot_index = i;
@@ -770,333 +563,148 @@ jobs:
               }
 
               if (slot_index < 0) {
-                  WG_LOGE(
-                      TAG,
-                      "FIX11 module table full while loading %s",
-                      guest_name
-                  );
-
+                  WG_LOGE(TAG, "FIX11 module table full while loading %s", guest_name);
                   wg_pe_image_free(img);
                   return 0;
               }
 
-              uint32_t preferred =
-                  (uint32_t)img->image_base;
-
-              uint32_t img_size =
-                  img->size_of_image
-                      ? img->size_of_image
-                      : 0x100000;
-
+              uint32_t preferred = (uint32_t)img->image_base;
+              uint32_t img_size  = img->size_of_image ? img->size_of_image : 0x100000;
               uint32_t load_base;
               int32_t delta;
 
-              if (
-                  img->reloc_rva &&
-                  img->reloc_size
-              ) {
-                  load_base =
-                      s_dll_next_base;
-
+              if (img->reloc_rva && img->reloc_size) {
+                  load_base = s_dll_next_base;
                   s_dll_next_base =
-                      (
-                          s_dll_next_base +
-                          img_size +
-                          0xFFFFu
-                      ) & ~0xFFFFu;
-
-                  delta =
-                      (int32_t)(
-                          load_base -
-                          preferred
-                      );
+                      (s_dll_next_base + img_size + 0xFFFFu) & ~0xFFFFu;
+                  delta = (int32_t)(load_base - preferred);
               } else {
-                  load_base =
-                      preferred;
-
+                  load_base = preferred;
                   delta = 0;
               }
 
-              WGLoadedModule *slot =
-                  &s_modules[slot_index];
-
-              memset(
-                  slot,
-                  0,
-                  sizeof(*slot)
-              );
-
+              WGLoadedModule *slot = &s_modules[slot_index];
+              memset(slot, 0, sizeof(*slot));
               slot->in_use = true;
+              strncpy(slot->name, base_name, sizeof(slot->name) - 1);
+              slot->base = load_base;
+              slot->size = img_size;
+              slot->img = img;
 
-              strncpy(
-                  slot->name,
-                  base_name,
-                  sizeof(slot->name) - 1
-              );
+              WG_LOGI(TAG,
+                      "FIX11 mapping REAL DLL %s from %s preferred=0x%X load=0x%X size=0x%X",
+                      base_name,
+                      real_path,
+                      preferred,
+                      load_base,
+                      img_size);
 
-              slot->base =
-                  load_base;
-
-              slot->size =
-                  img_size;
-
-              slot->img =
-                  img;
-
-              WG_LOGI(
-                  TAG,
-                  "FIX11 mapping REAL DLL %s from %s preferred=0x%X load=0x%X size=0x%X",
-                  base_name,
-                  real_path,
-                  preferred,
-                  load_base,
-                  img_size
-              );
-
-              if (
-                  img->size_of_headers &&
-                  img->raw_size >= img->size_of_headers
-              ) {
-                  if (
-                      !wg_blink_load_code(
-                          blink,
-                          load_base,
-                          img->raw_data,
-                          img->size_of_headers,
-                          0
-                      )
-                  ) {
-                      WG_LOGE(
-                          TAG,
-                          "FIX11 header map failed for %s",
-                          base_name
-                      );
-
+              if (img->size_of_headers &&
+                  img->raw_size >= img->size_of_headers) {
+                  if (!wg_blink_load_code(blink,
+                                          load_base,
+                                          img->raw_data,
+                                          img->size_of_headers,
+                                          0)) {
+                      WG_LOGE(TAG, "FIX11 header map failed for %s", base_name);
                       slot->in_use = false;
                       slot->img = NULL;
-
                       wg_pe_image_free(img);
                       return 0;
                   }
               }
 
-              for (
-                  int i = 0;
-                  i < img->num_sections;
-                  i++
-              ) {
-                  WGPESection *sec =
-                      &img->sections[i];
+              for (int i = 0; i < img->num_sections; i++) {
+                  WGPESection *sec = &img->sections[i];
+                  uint32_t vs = sec->virtual_size ? sec->virtual_size : sec->raw_size;
+                  if (!vs) continue;
 
-                  uint32_t vs =
-                      sec->virtual_size
-                          ? sec->virtual_size
-                          : sec->raw_size;
-
-                  if (!vs)
-                      continue;
-
-                  uint64_t va =
-                      (uint64_t)load_base +
-                      sec->virtual_address;
-
-                  uint8_t *zeros =
-                      calloc(1, vs);
-
+                  uint64_t va = (uint64_t)load_base + sec->virtual_address;
+                  uint8_t *zeros = calloc(1, vs);
                   if (!zeros) {
-                      WG_LOGE(
-                          TAG,
-                          "FIX11 OOM mapping %s:%s",
-                          base_name,
-                          sec->name
-                      );
-
+                      WG_LOGE(TAG, "FIX11 OOM mapping %s:%s", base_name, sec->name);
                       slot->in_use = false;
                       slot->img = NULL;
-
                       wg_pe_image_free(img);
                       return 0;
                   }
 
-                  bool mapped =
-                      wg_blink_load_code(
-                          blink,
-                          va,
-                          zeros,
-                          vs,
-                          0
-                      );
-
+                  bool mapped = wg_blink_load_code(blink, va, zeros, vs, 0);
                   free(zeros);
 
                   if (!mapped) {
-                      WG_LOGE(
-                          TAG,
-                          "FIX11 section map failed %s:%s @0x%llX size=0x%X",
-                          base_name,
-                          sec->name,
-                          (unsigned long long)va,
-                          vs
-                      );
-
+                      WG_LOGE(TAG,
+                              "FIX11 section map failed %s:%s @0x%llX size=0x%X",
+                              base_name,
+                              sec->name,
+                              (unsigned long long)va,
+                              vs);
                       slot->in_use = false;
                       slot->img = NULL;
-
                       wg_pe_image_free(img);
                       return 0;
                   }
 
-                  if (
-                      sec->data &&
-                      sec->raw_size
-                  ) {
-                      uint32_t n =
-                          sec->raw_size < vs
-                              ? sec->raw_size
-                              : vs;
-
-                      if (
-                          !wg_blink_write_mem(
-                              blink,
-                              va,
-                              sec->data,
-                              n
-                          )
-                      ) {
-                          WG_LOGE(
-                              TAG,
-                              "FIX11 section write failed %s:%s",
-                              base_name,
-                              sec->name
-                          );
-
+                  if (sec->data && sec->raw_size) {
+                      uint32_t n = sec->raw_size < vs ? sec->raw_size : vs;
+                      if (!wg_blink_write_mem(blink, va, sec->data, n)) {
+                          WG_LOGE(TAG, "FIX11 section write failed %s:%s",
+                                  base_name, sec->name);
                           slot->in_use = false;
                           slot->img = NULL;
-
                           wg_pe_image_free(img);
                           return 0;
                       }
                   }
               }
 
-              if (
-                  delta &&
-                  img->reloc_rva &&
-                  img->reloc_size
-              ) {
+              if (delta && img->reloc_rva && img->reloc_size) {
                   uint32_t off = 0;
 
-                  while (
-                      off + 8 <=
-                      img->reloc_size
-                  ) {
+                  while (off + 8 <= img->reloc_size) {
                       const uint8_t *blk =
-                          pe_rva_ptr(
-                              img,
-                              img->reloc_rva + off,
-                              8
-                          );
-
-                      if (!blk)
-                          break;
+                          pe_rva_ptr(img, img->reloc_rva + off, 8);
+                      if (!blk) break;
 
                       uint32_t page_rva = 0;
                       uint32_t blk_size = 0;
+                      memcpy(&page_rva, blk, 4);
+                      memcpy(&blk_size, blk + 4, 4);
 
-                      memcpy(
-                          &page_rva,
-                          blk,
-                          4
-                      );
+                      if (blk_size < 8 || off + blk_size > img->reloc_size) break;
 
-                      memcpy(
-                          &blk_size,
-                          blk + 4,
-                          4
-                      );
-
-                      if (
-                          blk_size < 8 ||
-                          off + blk_size >
-                              img->reloc_size
-                      ) {
-                          break;
-                      }
-
-                      uint32_t nent =
-                          (blk_size - 8) / 2;
-
+                      uint32_t nent = (blk_size - 8) / 2;
                       const uint8_t *ents =
-                          pe_rva_ptr(
-                              img,
-                              img->reloc_rva +
-                                  off +
-                                  8,
-                              nent * 2
-                          );
+                          pe_rva_ptr(img,
+                                     img->reloc_rva + off + 8,
+                                     nent * 2);
+                      if (!ents) break;
 
-                      if (!ents)
-                          break;
-
-                      for (
-                          uint32_t e = 0;
-                          e < nent;
-                          e++
-                      ) {
+                      for (uint32_t e = 0; e < nent; e++) {
                           uint16_t v = 0;
+                          memcpy(&v, ents + e * 2, 2);
 
-                          memcpy(
-                              &v,
-                              ents + e * 2,
-                              2
-                          );
-
-                          if ((v >> 12) != 3)
-                              continue;
+                          if ((v >> 12) != 3) continue;
 
                           uint32_t target =
-                              load_base +
-                              page_rva +
-                              (v & 0x0FFFu);
-
+                              load_base + page_rva + (v & 0x0FFFu);
                           uint32_t val = 0;
 
-                          if (
-                              !wg_blink_read_mem(
-                                  blink,
-                                  target,
-                                  &val,
-                                  4
-                              )
-                          ) {
-                              WG_LOGE(
-                                  TAG,
-                                  "FIX11 relocation read failed %s @0x%X",
-                                  base_name,
-                                  target
-                              );
-
+                          if (!wg_blink_read_mem(blink, target, &val, 4)) {
+                              WG_LOGE(TAG,
+                                      "FIX11 relocation read failed %s @0x%X",
+                                      base_name,
+                                      target);
                               return 0;
                           }
 
-                          val +=
-                              (uint32_t)delta;
+                          val += (uint32_t)delta;
 
-                          if (
-                              !wg_blink_write_mem(
-                                  blink,
-                                  target,
-                                  &val,
-                                  4
-                              )
-                          ) {
-                              WG_LOGE(
-                                  TAG,
-                                  "FIX11 relocation write failed %s @0x%X",
-                                  base_name,
-                                  target
-                              );
-
+                          if (!wg_blink_write_mem(blink, target, &val, 4)) {
+                              WG_LOGE(TAG,
+                                      "FIX11 relocation write failed %s @0x%X",
+                                      base_name,
+                                      target);
                               return 0;
                           }
                       }
@@ -1105,127 +713,78 @@ jobs:
                   }
               }
 
-              for (
-                  int i = 0;
-                  i < img->num_imports;
-                  i++
-              ) {
-                  WGPEImportDll *imp =
-                      &img->imports[i];
+              for (int i = 0; i < img->num_imports; i++) {
+                  WGPEImportDll *imp = &img->imports[i];
 
-                  WG_LOGI(
-                      TAG,
-                      "FIX11 %s imports %s: %d functions",
-                      base_name,
-                      imp->dll_name,
-                      imp->num_functions
-                  );
+                  WG_LOGI(TAG,
+                          "FIX11 %s imports %s: %d functions",
+                          base_name,
+                          imp->dll_name,
+                          imp->num_functions);
 
-                  for (
-                      int j = 0;
-                      j < imp->num_functions;
-                      j++
-                  ) {
-                      const char *fn =
-                          imp->functions[j].name;
-
+                  for (int j = 0; j < imp->num_functions; j++) {
+                      const char *fn = imp->functions[j].name;
                       uint32_t resolved = 0;
 
                       if (fn) {
-                          uint32_t dep_base =
-                              wg_module_find(
-                                  imp->dll_name
-                              );
-
+                          uint32_t dep_base = wg_module_find(imp->dll_name);
                           if (dep_base) {
-                              resolved =
-                                  wg_module_export(
-                                      dep_base,
-                                      fn
-                                  );
-
+                              resolved = wg_module_export(dep_base, fn);
                               if (resolved) {
-                                  WG_LOGI(
-                                      TAG,
-                                      "FIX11 REAL LINK %s!%s -> %s @0x%X",
-                                      base_name,
-                                      fn,
-                                      imp->dll_name,
-                                      resolved
-                                  );
+                                  WG_LOGI(TAG,
+                                          "FIX11 REAL LINK %s!%s -> %s @0x%X",
+                                          base_name,
+                                          fn,
+                                          imp->dll_name,
+                                          resolved);
                               }
                           }
                       }
 
                       if (!resolved) {
-                          resolved =
-                              wg_fix11_data_import(
-                                  imp->dll_name,
-                                  fn
-                              );
+                          resolved = wg_fix11_data_import(imp->dll_name, fn);
                       }
 
                       if (!resolved) {
                           uint64_t stub =
-                              wg_dll_mapper_resolve(
-                                  mapper,
-                                  imp->dll_name,
-                                  fn
-                              );
-
-                          resolved =
-                              (uint32_t)stub;
+                              wg_dll_mapper_resolve(mapper,
+                                                    imp->dll_name,
+                                                    fn);
+                          resolved = (uint32_t)stub;
                       }
 
                       if (!resolved) {
-                          WG_LOGW(
-                              TAG,
-                              "FIX11 unresolved DLL import %s -> %s!%s",
-                              base_name,
-                              imp->dll_name,
-                              fn
-                                  ? fn
-                                  : "(ordinal)"
-                          );
-
+                          WG_LOGW(TAG,
+                                  "FIX11 unresolved DLL import %s -> %s!%s",
+                                  base_name,
+                                  imp->dll_name,
+                                  fn ? fn : "(ordinal)");
                           continue;
                       }
 
                       uint32_t iat =
-                          load_base +
-                          imp->functions[j].iat_rva;
+                          load_base + imp->functions[j].iat_rva;
 
-                      if (
-                          !wg_blink_write_mem(
-                              blink,
-                              iat,
-                              &resolved,
-                              4
-                          )
-                      ) {
-                          WG_LOGE(
-                              TAG,
-                              "FIX11 IAT write failed %s!%s @0x%X",
-                              base_name,
-                              fn
-                                  ? fn
-                                  : "(ordinal)",
-                              iat
-                          );
-
+                      if (!wg_blink_write_mem(blink,
+                                              iat,
+                                              &resolved,
+                                              4)) {
+                          WG_LOGE(TAG,
+                                  "FIX11 IAT write failed %s!%s @0x%X",
+                                  base_name,
+                                  fn ? fn : "(ordinal)",
+                                  iat);
                           return 0;
                       }
                   }
               }
 
-              WG_LOGI(
-                  TAG,
-                  "FIX11 REAL DLL READY %s base=0x%X entry=0x%X reloc_delta=0x%X",
-                  base_name,
-                  load_base,
-                  img->entry_point,
-                  (uint32_t)delta
-              );
+              WG_LOGI(TAG,
+                      "FIX11 REAL DLL READY %s base=0x%X entry=0x%X reloc_delta=0x%X",
+                      base_name,
+                      load_base,
+                      img->entry_point,
+                      (uint32_t)delta);
 
               return load_base;
           }
@@ -1244,356 +803,132 @@ jobs:
                           } else if (strcasestr(modname, "kernel32") ||'''
 
           if old not in s:
-              raise SystemExit(
-                  "ERROR: GetModuleHandleA marker missing"
-              )
+              raise SystemExit("ERROR: GetModuleHandleA marker missing")
+          s = s.replace(old, new, 1)
 
-          s = s.replace(
-              old,
-              new,
-              1
-          )
-
-          helper_marker =
-              "static bool load_pe_blink(WGEngine *engine) {"
-
+          helper_marker = "static bool load_pe_blink(WGEngine *engine) {"
           if helper_marker not in s:
-              raise SystemExit(
-                  "ERROR: load_pe_blink marker missing"
-              )
+              raise SystemExit("ERROR: load_pe_blink marker missing")
 
           helpers = r'''
           // ============================================================
           // POSTAL 2 FIX 11 — REAL VC120 + CORE/ENGINE DLLS
           // ============================================================
 
-          static void wg_fix11_put32(
-              uint8_t *page,
-              uint32_t guest,
-              uint32_t value
-          ) {
-              uint32_t off =
-                  guest -
-                  WG_FIX11_PAGE;
-
+          static void wg_fix11_put32(uint8_t *page,
+                                     uint32_t guest,
+                                     uint32_t value) {
+              uint32_t off = guest - WG_FIX11_PAGE;
               if (off + 4 <= 0x1000) {
-                  memcpy(
-                      page + off,
-                      &value,
-                      4
-                  );
+                  memcpy(page + off, &value, 4);
               }
           }
 
-          static bool wg_fix11_prepare_crt_data(
-              WGEngine *engine
-          ) {
-              if (
-                  !engine ||
-                  !engine->blink
-              ) {
-                  return false;
-              }
+          static bool wg_fix11_prepare_crt_data(WGEngine *engine) {
+              if (!engine || !engine->blink) return false;
 
               uint8_t page[0x1000];
+              memset(page, 0, sizeof(page));
 
-              memset(
-                  page,
-                  0,
-                  sizeof(page)
-              );
-
-              const char *winpath =
-                  wg_files_exe_win_path();
-
-              if (
-                  !winpath ||
-                  !winpath[0]
-              ) {
-                  winpath =
-                      "C:\\Postal2\\System\\Postal2.exe";
+              const char *winpath = wg_files_exe_win_path();
+              if (!winpath || !winpath[0]) {
+                  winpath = "C:\\Postal2\\System\\Postal2.exe";
               }
 
               uint16_t *wcmd =
-                  (uint16_t *)(
-                      page +
-                      (
-                          WG_FIX11_WCMDLINE -
-                          WG_FIX11_PAGE
-                      )
-                  );
-
+                  (uint16_t *)(page +
+                      (WG_FIX11_WCMDLINE - WG_FIX11_PAGE));
               int wi = 0;
-
               wcmd[0] = '"';
-
-              for (
-                  ;
-                  winpath[wi] &&
-                  wi < 120;
-                  wi++
-              ) {
-                  wcmd[wi + 1] =
-                      (uint8_t)winpath[wi];
+              for (; winpath[wi] && wi < 120; wi++) {
+                  wcmd[wi + 1] = (uint8_t)winpath[wi];
               }
-
               wcmd[wi + 1] = '"';
               wcmd[wi + 2] = 0;
 
               char *acmd =
-                  (char *)(
-                      page +
-                      (
-                          WG_FIX11_ACMDLINE -
-                          WG_FIX11_PAGE
-                      )
-                  );
-
-              snprintf(
-                  acmd,
-                  500,
-                  "\"%s\"",
-                  winpath
-              );
+                  (char *)(page +
+                      (WG_FIX11_ACMDLINE - WG_FIX11_PAGE));
+              snprintf(acmd, 500, "\"%s\"", winpath);
 
               char *apgm =
-                  (char *)(
-                      page +
-                      (
-                          WG_FIX11_APGMPTR -
-                          WG_FIX11_PAGE
-                      )
-                  );
-
-              snprintf(
-                  apgm,
-                  500,
-                  "%s",
-                  winpath
-              );
+                  (char *)(page +
+                      (WG_FIX11_APGMPTR - WG_FIX11_PAGE));
+              snprintf(apgm, 500, "%s", winpath);
 
               uint16_t *wpgm =
-                  (uint16_t *)(
-                      page +
-                      (
-                          WG_FIX11_WPGMPTR -
-                          WG_FIX11_PAGE
-                      )
-                  );
-
+                  (uint16_t *)(page +
+                      (WG_FIX11_WPGMPTR - WG_FIX11_PAGE));
               int pi = 0;
-
-              for (
-                  ;
-                  winpath[pi] &&
-                  pi < 240;
-                  pi++
-              ) {
-                  wpgm[pi] =
-                      (uint8_t)winpath[pi];
+              for (; winpath[pi] && pi < 240; pi++) {
+                  wpgm[pi] = (uint8_t)winpath[pi];
               }
-
               wpgm[pi] = 0;
 
-              wg_fix11_put32(
-                  page,
-                  WG_FIX11_ACMDLN_VAR,
-                  WG_FIX11_ACMDLINE
-              );
+              wg_fix11_put32(page, WG_FIX11_ACMDLN_VAR, WG_FIX11_ACMDLINE);
+              wg_fix11_put32(page, WG_FIX11_WCMDLN_VAR, WG_FIX11_WCMDLINE);
+              wg_fix11_put32(page, WG_FIX11_FMODE_VAR, 0);
+              wg_fix11_put32(page, WG_FIX11_COMMODE_VAR, 0);
+              wg_fix11_put32(page, WG_FIX11_ARGC_VAR, 1);
 
-              wg_fix11_put32(
-                  page,
-                  WG_FIX11_WCMDLN_VAR,
-                  WG_FIX11_WCMDLINE
-              );
+              wg_fix11_put32(page, WG_FIX11_ARGV_VAR, WG_FIX11_ARGV_ARRAY);
+              wg_fix11_put32(page, WG_FIX11_ARGV_ARRAY, WG_FIX11_APGMPTR);
+              wg_fix11_put32(page, WG_FIX11_ARGV_ARRAY + 4, 0);
 
-              wg_fix11_put32(
-                  page,
-                  WG_FIX11_FMODE_VAR,
-                  0
-              );
+              wg_fix11_put32(page, WG_FIX11_WARGV_VAR, WG_FIX11_WARGV_ARRAY);
+              wg_fix11_put32(page, WG_FIX11_WARGV_ARRAY, WG_FIX11_WPGMPTR);
+              wg_fix11_put32(page, WG_FIX11_WARGV_ARRAY + 4, 0);
 
-              wg_fix11_put32(
-                  page,
-                  WG_FIX11_COMMODE_VAR,
-                  0
-              );
+              wg_fix11_put32(page, WG_FIX11_PGMPTR_VAR, WG_FIX11_APGMPTR);
+              wg_fix11_put32(page, WG_FIX11_WPGMPTR_VAR, WG_FIX11_WPGMPTR);
 
-              wg_fix11_put32(
-                  page,
-                  WG_FIX11_ARGC_VAR,
-                  1
-              );
+              wg_fix11_put32(page, WG_FIX11_ENVIRON_VAR, WG_FIX11_ENV_ARRAY);
+              wg_fix11_put32(page, WG_FIX11_ENV_ARRAY, 0);
+              wg_fix11_put32(page, WG_FIX11_WENVIRON_VAR, WG_FIX11_WENV_ARRAY);
+              wg_fix11_put32(page, WG_FIX11_WENV_ARRAY, 0);
 
-              wg_fix11_put32(
-                  page,
-                  WG_FIX11_ARGV_VAR,
-                  WG_FIX11_ARGV_ARRAY
-              );
-
-              wg_fix11_put32(
-                  page,
-                  WG_FIX11_ARGV_ARRAY,
-                  WG_FIX11_APGMPTR
-              );
-
-              wg_fix11_put32(
-                  page,
-                  WG_FIX11_ARGV_ARRAY + 4,
-                  0
-              );
-
-              wg_fix11_put32(
-                  page,
-                  WG_FIX11_WARGV_VAR,
-                  WG_FIX11_WARGV_ARRAY
-              );
-
-              wg_fix11_put32(
-                  page,
-                  WG_FIX11_WARGV_ARRAY,
-                  WG_FIX11_WPGMPTR
-              );
-
-              wg_fix11_put32(
-                  page,
-                  WG_FIX11_WARGV_ARRAY + 4,
-                  0
-              );
-
-              wg_fix11_put32(
-                  page,
-                  WG_FIX11_PGMPTR_VAR,
-                  WG_FIX11_APGMPTR
-              );
-
-              wg_fix11_put32(
-                  page,
-                  WG_FIX11_WPGMPTR_VAR,
-                  WG_FIX11_WPGMPTR
-              );
-
-              wg_fix11_put32(
-                  page,
-                  WG_FIX11_ENVIRON_VAR,
-                  WG_FIX11_ENV_ARRAY
-              );
-
-              wg_fix11_put32(
-                  page,
-                  WG_FIX11_ENV_ARRAY,
-                  0
-              );
-
-              wg_fix11_put32(
-                  page,
-                  WG_FIX11_WENVIRON_VAR,
-                  WG_FIX11_WENV_ARRAY
-              );
-
-              wg_fix11_put32(
-                  page,
-                  WG_FIX11_WENV_ARRAY,
-                  0
-              );
-
-              if (
-                  !wg_blink_load_code(
-                      engine->blink,
-                      WG_FIX11_PAGE,
-                      page,
-                      sizeof(page),
-                      0
-                  )
-              ) {
-                  WG_LOGE(
-                      TAG,
-                      "FIX11 CRT page map FAILED"
-                  );
-
+              if (!wg_blink_load_code(engine->blink,
+                                      WG_FIX11_PAGE,
+                                      page,
+                                      sizeof(page),
+                                      0)) {
+                  WG_LOGE(TAG, "FIX11 CRT page map FAILED");
                   return false;
               }
 
               s_cmdpage_mapped = true;
-
-              WG_LOGI(
-                  TAG,
-                  "FIX11 CRT DATA PAGE READY @0x%X",
-                  WG_FIX11_PAGE
-              );
-
+              WG_LOGI(TAG, "FIX11 CRT DATA PAGE READY @0x%X", WG_FIX11_PAGE);
               return true;
           }
 
           #define WG_FIX11_DLL_RETURN 0x00C30000u
 
-          static bool wg_fix11_call_dll_entry(
-              WGEngine *engine,
-              WGLoadedModule *m
-          ) {
-              if (
-                  !engine ||
-                  !engine->blink ||
-                  !m ||
-                  !m->in_use ||
-                  !m->img ||
-                  !m->img->entry_point
-              ) {
+          static bool wg_fix11_call_dll_entry(WGEngine *engine,
+                                              WGLoadedModule *m) {
+              if (!engine || !engine->blink || !m || !m->in_use ||
+                  !m->img || !m->img->entry_point) {
                   return true;
               }
 
-              uint32_t entry =
-                  m->base +
-                  m->img->entry_point;
-
+              uint32_t entry = m->base + m->img->entry_point;
               uint64_t saved_regs[16];
-
-              for (
-                  int i = 0;
-                  i < 16;
-                  i++
-              ) {
-                  saved_regs[i] =
-                      wg_blink_get_reg(
-                          engine->blink,
-                          i
-                      );
+              for (int i = 0; i < 16; i++) {
+                  saved_regs[i] = wg_blink_get_reg(engine->blink, i);
               }
-
-              uint64_t saved_rip =
-                  wg_blink_get_rip(
-                      engine->blink
-                  );
+              uint64_t saved_rip = wg_blink_get_rip(engine->blink);
 
               uint8_t hlt = 0xF4;
-
-              if (
-                  !wg_blink_load_code(
-                      engine->blink,
-                      WG_FIX11_DLL_RETURN,
-                      &hlt,
-                      1,
-                      0
-                  )
-              ) {
-                  WG_LOGE(
-                      TAG,
-                      "FIX11 failed to map DLL return sentinel"
-                  );
-
+              if (!wg_blink_load_code(engine->blink,
+                                      WG_FIX11_DLL_RETURN,
+                                      &hlt,
+                                      1,
+                                      0)) {
+                  WG_LOGE(TAG, "FIX11 failed to map DLL return sentinel");
                   return false;
               }
 
-              uint32_t esp =
-                  (uint32_t)
-                  wg_blink_get_reg(
-                      engine->blink,
-                      4
-                  );
-
-              uint32_t call_esp =
-                  esp - 16;
-
+              uint32_t esp = (uint32_t)wg_blink_get_reg(engine->blink, 4);
+              uint32_t call_esp = esp - 16;
               uint32_t frame[4] = {
                   WG_FIX11_DLL_RETURN,
                   m->base,
@@ -1601,161 +936,81 @@ jobs:
                   0u
               };
 
-              if (
-                  !wg_blink_write_mem(
-                      engine->blink,
-                      call_esp,
-                      frame,
-                      sizeof(frame)
-                  )
-              ) {
-                  WG_LOGE(
-                      TAG,
-                      "FIX11 failed to build DllMain stack for %s",
-                      m->name
-                  );
-
+              if (!wg_blink_write_mem(engine->blink,
+                                      call_esp,
+                                      frame,
+                                      sizeof(frame))) {
+                  WG_LOGE(TAG, "FIX11 failed to build DllMain stack for %s", m->name);
                   return false;
               }
 
-              wg_blink_set_reg(
-                  engine->blink,
-                  4,
-                  call_esp
-              );
+              wg_blink_set_reg(engine->blink, 4, call_esp);
+              wg_blink_set_rip(engine->blink, entry);
 
-              wg_blink_set_rip(
-                  engine->blink,
-                  entry
-              );
-
-              WG_LOGI(
-                  TAG,
-                  "FIX11 DllMain START %s entry=0x%X base=0x%X",
-                  m->name,
-                  entry,
-                  m->base
-              );
+              WG_LOGI(TAG,
+                      "FIX11 DllMain START %s entry=0x%X base=0x%X",
+                      m->name,
+                      entry,
+                      m->base);
 
               bool ok = false;
 
-              for (
-                  int loops = 0;
-                  loops < 2000;
-                  loops++
-              ) {
-                  WGBlinkResult r =
-                      wg_blink_run(
-                          engine->blink,
-                          100000
-                      );
+              for (int loops = 0; loops < 2000; loops++) {
+                  WGBlinkResult r = wg_blink_run(engine->blink, 100000);
 
-                  if (r == WG_BLINK_OK)
-                      continue;
+                  if (r == WG_BLINK_OK) continue;
 
                   if (r == WG_BLINK_HALT) {
-                      uint32_t rip =
-                          (uint32_t)
-                          wg_blink_get_rip(
-                              engine->blink
-                          );
+                      uint32_t rip = (uint32_t)wg_blink_get_rip(engine->blink);
 
-                      if (
-                          rip ==
-                          WG_FIX11_DLL_RETURN
-                      ) {
+                      if (rip == WG_FIX11_DLL_RETURN) {
                           ok = true;
                           break;
                       }
 
-                      if (
-                          handle_blink_thunk(
-                              engine
-                          )
-                      ) {
-                          continue;
-                      }
+                      if (handle_blink_thunk(engine)) continue;
 
-                      int stop =
-                          wg_blink_get_stop_reason(
-                              engine->blink
-                          );
-
+                      int stop = wg_blink_get_stop_reason(engine->blink);
                       uint32_t fault =
-                          (uint32_t)
-                          wg_blink_get_fault_addr(
-                              engine->blink
-                          );
+                          (uint32_t)wg_blink_get_fault_addr(engine->blink);
 
-                      WG_LOGE(
-                          TAG,
-                          "FIX11 DllMain HALT %s rip=0x%X stop=%d fault=0x%X",
-                          m->name,
-                          rip,
-                          stop,
-                          fault
-                      );
-
+                      WG_LOGE(TAG,
+                              "FIX11 DllMain HALT %s rip=0x%X stop=%d fault=0x%X",
+                              m->name,
+                              rip,
+                              stop,
+                              fault);
                       break;
                   }
 
-                  WG_LOGE(
-                      TAG,
-                      "FIX11 DllMain backend result=%d for %s",
-                      (int)r,
-                      m->name
-                  );
-
+                  WG_LOGE(TAG,
+                          "FIX11 DllMain backend result=%d for %s",
+                          (int)r,
+                          m->name);
                   break;
               }
 
               uint32_t dll_result =
-                  (uint32_t)
-                  wg_blink_get_reg(
-                      engine->blink,
-                      0
-                  );
+                  (uint32_t)wg_blink_get_reg(engine->blink, 0);
 
-              for (
-                  int i = 0;
-                  i < 16;
-                  i++
-              ) {
-                  wg_blink_set_reg(
-                      engine->blink,
-                      i,
-                      saved_regs[i]
-                  );
+              for (int i = 0; i < 16; i++) {
+                  wg_blink_set_reg(engine->blink, i, saved_regs[i]);
               }
-
-              wg_blink_set_rip(
-                  engine->blink,
-                  saved_rip
-              );
+              wg_blink_set_rip(engine->blink, saved_rip);
 
               if (!ok) {
-                  WG_LOGE(
-                      TAG,
-                      "FIX11 DllMain FAILED for %s",
-                      m->name
-                  );
-
+                  WG_LOGE(TAG, "FIX11 DllMain FAILED for %s", m->name);
                   return false;
               }
 
-              WG_LOGI(
-                  TAG,
-                  "FIX11 DllMain DONE %s result=0x%X",
-                  m->name,
-                  dll_result
-              );
-
+              WG_LOGI(TAG,
+                      "FIX11 DllMain DONE %s result=0x%X",
+                      m->name,
+                      dll_result);
               return true;
           }
 
-          static bool wg_fix11_init_loaded_dlls(
-              WGEngine *engine
-          ) {
+          static bool wg_fix11_init_loaded_dlls(WGEngine *engine) {
               const char *order[] = {
                   "msvcr120.dll",
                   "msvcp120.dll",
@@ -1764,107 +1019,44 @@ jobs:
                   NULL
               };
 
-              for (
-                  int oi = 0;
-                  order[oi];
-                  oi++
-              ) {
-                  for (
-                      int i = 0;
-                      i < 16;
-                      i++
-                  ) {
-                      if (!s_modules[i].in_use)
-                          continue;
+              for (int oi = 0; order[oi]; oi++) {
+                  for (int i = 0; i < 16; i++) {
+                      if (!s_modules[i].in_use) continue;
+                      if (strcmp(s_modules[i].name, order[oi]) != 0) continue;
 
-                      if (
-                          strcmp(
-                              s_modules[i].name,
-                              order[oi]
-                          ) != 0
-                      ) {
-                          continue;
-                      }
-
-                      if (
-                          !wg_fix11_call_dll_entry(
-                              engine,
-                              &s_modules[i]
-                          )
-                      ) {
+                      if (!wg_fix11_call_dll_entry(engine, &s_modules[i])) {
                           return false;
                       }
                   }
               }
-
               return true;
           }
 
           '''
 
-          s = s.replace(
-              helper_marker,
-              helpers + "\n" + helper_marker,
-              1
-          )
+          s = s.replace(helper_marker, helpers + "\n" + helper_marker, 1)
 
-          function_start =
-              s.find(helper_marker);
+          function_start = s.find(helper_marker)
+          start_marker = "// Resolve imports — write thunk addresses into the IAT"
+          end_marker = "    uint64_t entry = pe->image_base + pe->entry_point;"
 
-          start_marker =
-              "// Resolve imports — write thunk addresses into the IAT";
+          start = s.find(start_marker, function_start)
+          if start == -1:
+              raise SystemExit("ERROR: EXE import resolver START missing")
 
-          end_marker =
-              "    uint64_t entry = pe->image_base + pe->entry_point;";
+          line_start = s.rfind("\n", function_start, start)
+          line_start = start if line_start == -1 else line_start + 1
 
-          start =
-              s.find(
-                  start_marker,
-                  function_start
-              );
-
-          if (start == -1) {
-              raise SystemExit(
-                  "ERROR: EXE import resolver START missing"
-              );
-          }
-
-          line_start =
-              s.rfind(
-                  "\n",
-                  function_start,
-                  start
-              );
-
-          line_start =
-              start if line_start == -1 else line_start + 1;
-
-          end =
-              s.find(
-                  end_marker,
-                  start
-              );
-
-          if (end == -1) {
-              raise SystemExit(
-                  "ERROR: EXE import resolver END missing"
-              );
-          }
+          end = s.find(end_marker, start)
+          if end == -1:
+              raise SystemExit("ERROR: EXE import resolver END missing")
 
           replacement = r'''    // POSTAL 2 FIX 11 IMPORT RESOLUTION
-              // Real VC++ 2013 + Core.dll / Engine.dll exports first.
+              // Real VC++ 2013 + Core.dll / Engine.dll exports first; Win32 APIs remain thunks.
 
               if (!pe->is_64bit) {
-                  if (
-                      !wg_fix11_prepare_crt_data(
-                          engine
-                      )
-                  ) {
-                      WG_LOGE(
-                          TAG,
-                          "FIX11 CRT DATA setup failed"
-                      );
-
+                  if (!wg_fix11_prepare_crt_data(engine)) {
+                      WG_LOGE(TAG, "FIX11 CRT DATA setup failed");
                       return false;
                   }
 
@@ -1876,235 +1068,140 @@ jobs:
                       NULL
                   };
 
-                  for (
-                      int bi = 0;
-                      boot_dlls[bi];
-                      bi++
-                  ) {
-                      char real_path[1200] =
-                          {0};
+                  for (int bi = 0; boot_dlls[bi]; bi++) {
+                      char real_path[1200] = {0};
 
-                      if (
-                          !wg_fix11_find_local_dll(
-                              boot_dlls[bi],
-                              real_path,
-                              sizeof(real_path)
-                          )
-                      ) {
-                          WG_LOGW(
-                              TAG,
-                              "FIX11 %s not found in current System directory",
-                              boot_dlls[bi]
-                          );
-
+                      if (!wg_fix11_find_local_dll(boot_dlls[bi],
+                                                   real_path,
+                                                   sizeof(real_path))) {
+                          WG_LOGW(TAG,
+                                  "FIX11 %s not found in current System directory",
+                                  boot_dlls[bi]);
                           continue;
                       }
 
                       uint32_t base =
-                          wg_load_dll(
-                              engine->blink,
-                              engine->dll_mapper,
-                              real_path,
-                              boot_dlls[bi]
-                          );
+                          wg_load_dll(engine->blink,
+                                      engine->dll_mapper,
+                                      real_path,
+                                      boot_dlls[bi]);
 
                       if (!base) {
-                          WG_LOGE(
-                              TAG,
-                              "FIX11 failed to load REAL %s from %s",
-                              boot_dlls[bi],
-                              real_path
-                          );
-
+                          WG_LOGE(TAG,
+                                  "FIX11 failed to load REAL %s from %s",
+                                  boot_dlls[bi],
+                                  real_path);
                           return false;
                       }
 
-                      WG_LOGI(
-                          TAG,
-                          "FIX11 PRELOAD %s -> 0x%X",
-                          boot_dlls[bi],
-                          base
-                      );
+                      WG_LOGI(TAG,
+                              "FIX11 PRELOAD %s -> 0x%X",
+                              boot_dlls[bi],
+                              base);
                   }
               }
 
-              if (
-                  pe->num_imports >
-                  0
-              ) {
-                  WG_LOGI(
-                      TAG,
-                      "FIX11 resolving %d EXE DLL imports...",
-                      pe->num_imports
-                  );
+              if (pe->num_imports > 0) {
+                  WG_LOGI(TAG,
+                          "FIX11 resolving %d EXE DLL imports...",
+                          pe->num_imports);
 
-                  for (
-                      int i = 0;
-                      i < pe->num_imports;
-                      i++
-                  ) {
-                      WGPEImportDll *imp =
-                          &pe->imports[i];
+                  for (int i = 0; i < pe->num_imports; i++) {
+                      WGPEImportDll *imp = &pe->imports[i];
 
-                      WG_LOGI(
-                          TAG,
-                          "  %s: %d functions",
-                          imp->dll_name,
-                          imp->num_functions
-                      );
+                      WG_LOGI(TAG,
+                              "  %s: %d functions",
+                              imp->dll_name,
+                              imp->num_functions);
 
-                      for (
-                          int j = 0;
-                          j < imp->num_functions;
-                          j++
-                      ) {
-                          const char *fn =
-                              imp->functions[j].name;
+                      for (int j = 0; j < imp->num_functions; j++) {
+                          const char *fn = imp->functions[j].name;
+                          uint64_t resolved = 0;
+                          bool real_game_export = false;
 
-                          uint64_t resolved =
-                              0;
-
-                          bool real_game_export =
-                              false;
-
-                          if (
-                              !pe->is_64bit &&
-                              wg_fix11_is_real_preload_dll(
-                                  imp->dll_name
-                              ) &&
-                              fn
-                          ) {
-                              uint32_t mod =
-                                  wg_module_find(
-                                      imp->dll_name
-                                  );
+                          if (!pe->is_64bit &&
+                              wg_fix11_is_real_preload_dll(imp->dll_name) &&
+                              fn) {
+                              uint32_t mod = wg_module_find(imp->dll_name);
 
                               if (mod) {
-                                  uint32_t exp =
-                                      wg_module_export(
-                                          mod,
-                                          fn
-                                      );
+                                  uint32_t exp = wg_module_export(mod, fn);
 
                                   if (exp) {
-                                      resolved =
-                                          exp;
-
-                                      real_game_export =
-                                          true;
-
-                                      WG_LOGI(
-                                          TAG,
-                                          "FIX11 REAL EXE IMPORT %s!%s -> 0x%X",
-                                          imp->dll_name,
-                                          fn,
-                                          exp
-                                      );
+                                      resolved = exp;
+                                      real_game_export = true;
+                                      WG_LOGI(TAG,
+                                              "FIX11 REAL EXE IMPORT %s!%s -> 0x%X",
+                                              imp->dll_name,
+                                              fn,
+                                              exp);
                                   }
                               }
                           }
 
-                          if (
-                              !resolved &&
-                              !pe->is_64bit
-                          ) {
+                          if (!resolved && !pe->is_64bit) {
                               uint32_t data_addr =
-                                  wg_fix11_data_import(
-                                      imp->dll_name,
-                                      fn
-                                  );
+                                  wg_fix11_data_import(imp->dll_name, fn);
 
                               if (data_addr) {
-                                  resolved =
-                                      data_addr;
-
-                                  WG_LOGI(
-                                      TAG,
-                                      "FIX11 DATA FALLBACK %s!%s -> 0x%X",
-                                      imp->dll_name,
-                                      fn,
-                                      data_addr
-                                  );
+                                  resolved = data_addr;
+                                  WG_LOGI(TAG,
+                                          "FIX11 DATA FALLBACK %s!%s -> 0x%X",
+                                          imp->dll_name,
+                                          fn,
+                                          data_addr);
                               }
                           }
 
                           if (!resolved) {
                               resolved =
-                                  wg_dll_mapper_resolve(
-                                      engine->dll_mapper,
-                                      imp->dll_name,
-                                      fn
-                                  );
+                                  wg_dll_mapper_resolve(engine->dll_mapper,
+                                                        imp->dll_name,
+                                                        fn);
                           }
 
                           if (!resolved) {
-                              WG_LOGW(
-                                  TAG,
-                                  "FIX11 unresolved EXE import %s!%s",
-                                  imp->dll_name,
-                                  fn
-                                      ? fn
-                                      : "(ordinal)"
-                              );
-
+                              WG_LOGW(TAG,
+                                      "FIX11 unresolved EXE import %s!%s",
+                                      imp->dll_name,
+                                      fn ? fn : "(ordinal)");
                               continue;
                           }
 
                           uint64_t iat_entry =
-                              pe->image_base +
-                              imp->functions[j].iat_rva;
-
-                          bool write_ok =
-                              false;
+                              pe->image_base + imp->functions[j].iat_rva;
+                          bool write_ok = false;
 
                           if (pe->is_64bit) {
-                              uint64_t v64 =
-                                  resolved;
-
+                              uint64_t v64 = resolved;
                               write_ok =
-                                  wg_blink_write_mem(
-                                      engine->blink,
-                                      iat_entry,
-                                      &v64,
-                                      8
-                                  );
+                                  wg_blink_write_mem(engine->blink,
+                                                     iat_entry,
+                                                     &v64,
+                                                     8);
                           } else {
-                              uint32_t v32 =
-                                  (uint32_t)resolved;
-
+                              uint32_t v32 = (uint32_t)resolved;
                               write_ok =
-                                  wg_blink_write_mem(
-                                      engine->blink,
-                                      iat_entry,
-                                      &v32,
-                                      4
-                                  );
+                                  wg_blink_write_mem(engine->blink,
+                                                     iat_entry,
+                                                     &v32,
+                                                     4);
                           }
 
                           if (!write_ok) {
-                              WG_LOGE(
-                                  TAG,
-                                  "FIX11 IAT write failed %s!%s @0x%llX",
-                                  imp->dll_name,
-                                  fn
-                                      ? fn
-                                      : "(ordinal)",
-                                  (unsigned long long)
-                                      iat_entry
-                              );
-
+                              WG_LOGE(TAG,
+                                      "FIX11 IAT write failed %s!%s @0x%llX",
+                                      imp->dll_name,
+                                      fn ? fn : "(ordinal)",
+                                      (unsigned long long)iat_entry);
                               return false;
                           }
 
-                          if (
-                              real_game_export
-                          ) {
-                              WG_LOGI(
-                                  TAG,
-                                  "FIX11 IAT REAL OK %s!%s",
-                                  imp->dll_name,
-                                  fn
-                              );
+                          if (real_game_export) {
+                              WG_LOGI(TAG,
+                                      "FIX11 IAT REAL OK %s!%s",
+                                      imp->dll_name,
+                                      fn);
                           }
                       }
                   }
@@ -2112,61 +1209,31 @@ jobs:
 
           '''
 
-          s =
-              s[:line_start] +
-              replacement +
-              s[end:];
+          s = s[:line_start] + replacement + s[end:]
 
-          init_marker =
-              '''    WG_LOGI(TAG, "PE mapped via blink. Entry: 0x%llx", (unsigned long long)entry);''';
+          init_marker = '''    WG_LOGI(TAG, "PE mapped via blink. Entry: 0x%llx", (unsigned long long)entry);'''
 
           init_code = r'''    if (!pe->is_64bit) {
-                  if (
-                      !wg_fix11_init_loaded_dlls(
-                          engine
-                      )
-                  ) {
-                      WG_LOGE(
-                          TAG,
-                          "FIX11 REAL DLL initialization failed"
-                      );
-
+                  if (!wg_fix11_init_loaded_dlls(engine)) {
+                      WG_LOGE(TAG, "FIX11 REAL DLL initialization failed");
                       return false;
                   }
 
-                  wg_blink_set_rip(
-                      engine->blink,
-                      entry
-                  );
+                  wg_blink_set_rip(engine->blink, entry);
               }
 
-              WG_LOGI(
-                  TAG,
-                  "FIX11 REAL VC120/CORE/ENGINE READY — EXE entry 0x%llx",
-                  (unsigned long long)entry
-              );
-          ''';
+              WG_LOGI(TAG,
+                      "FIX11 REAL VC120/CORE/ENGINE READY — EXE entry 0x%llx",
+                      (unsigned long long)entry);
+          '''
 
-          if (init_marker not in s) {
-              raise SystemExit(
-                  "ERROR: PE mapped log marker missing"
-              );
-          }
+          if init_marker not in s:
+              raise SystemExit("ERROR: PE mapped log marker missing")
 
-          s =
-              s.replace(
-                  init_marker,
-                  init_code +
-                  "\n" +
-                  init_marker,
-                  1
-              );
+          s = s.replace(init_marker, init_code + "\n" + init_marker, 1)
 
-          p.write_text(s);
-
-          print(
-              "FIX 11 REAL VC120 + CORE/ENGINE DLL PATCH INSTALLED"
-          );
+          p.write_text(s)
+          print("FIX 11 REAL CORE/ENGINE DLL PATCH INSTALLED")
           PY
 
           echo "===== FIX11 SOURCE CHECK ====="
@@ -2185,107 +1252,50 @@ jobs:
 
           p = Path("project.yml")
           s = p.read_text()
-
-          s = s.replace(
-              "bundleIdPrefix: com.wineglass",
-              "bundleIdPrefix: com.postal2ios"
-          )
-
-          s = s.replace(
-              'xcodeVersion: "15.0"',
-              'xcodeVersion: "15.4"\n  projectFormat: xcode15_3'
-          )
-
-          s = s.replace(
-              "PRODUCT_BUNDLE_IDENTIFIER: com.wineglass.app",
-              "PRODUCT_BUNDLE_IDENTIFIER: com.postal2ios.native"
-          )
-
-          s = s.replace(
-              'TARGETED_DEVICE_FAMILY: "1,2"',
-              'TARGETED_DEVICE_FAMILY: "1"'
-          )
+          s = s.replace("bundleIdPrefix: com.wineglass", "bundleIdPrefix: com.postal2ios")
+          s = s.replace('xcodeVersion: "15.0"', 'xcodeVersion: "15.4"\n  projectFormat: xcode15_3')
+          s = s.replace("PRODUCT_BUNDLE_IDENTIFIER: com.wineglass.app", "PRODUCT_BUNDLE_IDENTIFIER: com.postal2ios.native")
+          s = s.replace('TARGETED_DEVICE_FAMILY: "1,2"', 'TARGETED_DEVICE_FAMILY: "1"')
 
           lines = []
-
           for line in s.splitlines():
               if "CODE_SIGN_ENTITLEMENTS:" in line:
                   continue
-
               if "DEVELOPMENT_TEAM:" in line:
                   continue
-
               if "CODE_SIGN_STYLE: Automatic" in line:
-                  line = line.replace(
-                      "CODE_SIGN_STYLE: Automatic",
-                      "CODE_SIGN_STYLE: Manual"
-                  )
-
+                  line = line.replace("CODE_SIGN_STYLE: Automatic", "CODE_SIGN_STYLE: Manual")
               lines.append(line)
 
-          p.write_text(
-              "\n".join(lines) +
-              "\n"
-          )
+          p.write_text("\n".join(lines) + "\n")
           PY
 
       - name: Patch Info plist
         shell: bash
         run: |
           set -euxo pipefail
-
           PLIST="WineGlass/Sources/App/Info.plist"
-
-          /usr/libexec/PlistBuddy \
-            -c "Set :CFBundleName POSTAL 2" \
-            "$PLIST"
-
-          /usr/libexec/PlistBuddy \
-            -c "Delete :CFBundleDisplayName" \
-            "$PLIST" || true
-
-          /usr/libexec/PlistBuddy \
-            -c "Add :CFBundleDisplayName string POSTAL 2" \
-            "$PLIST"
-
-          /usr/libexec/PlistBuddy \
-            -c "Set :CFBundleShortVersionString 0.11.0" \
-            "$PLIST"
-
-          /usr/libexec/PlistBuddy \
-            -c "Set :CFBundleVersion 110" \
-            "$PLIST"
-
-          /usr/libexec/PlistBuddy \
-            -c "Set :UIFileSharingEnabled true" \
-            "$PLIST"
-
-          /usr/libexec/PlistBuddy \
-            -c "Set :LSSupportsOpeningDocumentsInPlace true" \
-            "$PLIST"
-
+          /usr/libexec/PlistBuddy -c "Set :CFBundleName POSTAL 2" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Delete :CFBundleDisplayName" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string POSTAL 2" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.11.1" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 111" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :UIFileSharingEnabled true" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :LSSupportsOpeningDocumentsInPlace true" "$PLIST"
           plutil -lint "$PLIST"
 
       - name: Patch POSTAL 2 launcher and log
         shell: bash
         run: |
           set -euxo pipefail
-
           python3 <<'PY'
           from pathlib import Path
 
-          p = Path(
-              "WineGlass/Sources/App/WGSceneDelegate.m"
-          )
-
+          p = Path("WineGlass/Sources/App/WGSceneDelegate.m")
           s = p.read_text()
 
           if "#include <stdio.h>" not in s:
-              s = s.replace(
-                  "#include <unistd.h>",
-                  "#include <unistd.h>\n#include <stdio.h>",
-                  1
-              )
+              s = s.replace("#include <unistd.h>", "#include <unistd.h>\n#include <stdio.h>", 1)
 
           old = '''    UIWindowScene *windowScene = (UIWindowScene *)scene;
 
@@ -2299,338 +1309,152 @@ jobs:
                   YES
               ).firstObject;
 
-              NSString *logPath =
-                  [docs stringByAppendingPathComponent:@"POSTAL2-WineGlass.log"];
+              NSString *logPath = [docs stringByAppendingPathComponent:@"POSTAL2-WineGlass.log"];
+              [[NSFileManager defaultManager] removeItemAtPath:logPath error:nil];
+              freopen(logPath.fileSystemRepresentation, "a", stderr);
+              setvbuf(stderr, NULL, _IONBF, 0);
 
-              [[NSFileManager defaultManager]
-                  removeItemAtPath:logPath
-                  error:nil];
-
-              freopen(
-                  logPath.fileSystemRepresentation,
-                  "a",
-                  stderr
-              );
-
-              setvbuf(
-                  stderr,
-                  NULL,
-                  _IONBF,
-                  0
-              );
-
-              fprintf(
-                  stderr,
-                  "========================================\\n"
-                  "POSTAL 2 WineGlass FIX 11\\n"
-                  "REAL VC120 + CORE/ENGINE DLLS + PE32 IAT\\n"
-                  "========================================\\n"
-              );
-
+              fprintf(stderr,
+                      "========================================\\n"
+                      "POSTAL 2 WineGlass FIX 11.1\\n"
+                      "REAL VC120 + CORE/ENGINE DLLS + PE32 IAT\\n"
+                      "========================================\\n");
               fflush(stderr);
 
               wg_log_init();
-
-              WG_LOGI(
-                  "POSTAL2",
-                  "FIX 11 logging started"
-              );'''
+              WG_LOGI("POSTAL2", "FIX 11.1 logging started");'''
 
           if old not in s:
-              raise SystemExit(
-                  "ERROR: scene startup marker missing"
-              )
+              raise SystemExit("ERROR: scene startup marker missing")
+          s = s.replace(old, new, 1)
 
-          s = s.replace(
-              old,
-              new,
-              1
-          )
-
-          old =
-              '[_loadButton setTitle:@"  Load .exe  " forState:UIControlStateNormal];'
-
-          new =
-              '[_loadButton setTitle:@"  RUN POSTAL 2  " forState:UIControlStateNormal];'
-
+          old = '[_loadButton setTitle:@"  Load .exe  " forState:UIControlStateNormal];'
+          new = '[_loadButton setTitle:@"  RUN POSTAL 2  " forState:UIControlStateNormal];'
           if old not in s:
-              raise SystemExit(
-                  "ERROR: button title missing"
-              )
+              raise SystemExit("ERROR: button title missing")
+          s = s.replace(old, new, 1)
 
-          s = s.replace(
-              old,
-              new,
-              1
-          )
-
-          old =
-              '[_loadButton addTarget:self action:@selector(openFilePicker) forControlEvents:UIControlEventTouchUpInside];'
-
-          new =
-              '[_loadButton addTarget:self action:@selector(runPostal2) forControlEvents:UIControlEventTouchUpInside];'
-
+          old = '[_loadButton addTarget:self action:@selector(openFilePicker) forControlEvents:UIControlEventTouchUpInside];'
+          new = '[_loadButton addTarget:self action:@selector(runPostal2) forControlEvents:UIControlEventTouchUpInside];'
           if old not in s:
-              raise SystemExit(
-                  "ERROR: button action missing"
-              )
+              raise SystemExit("ERROR: button action missing")
+          s = s.replace(old, new, 1)
 
-          s = s.replace(
-              old,
-              new,
-              1
-          )
-
-          marker =
-              "#pragma mark - UIDocumentPickerDelegate"
-
+          marker = "#pragma mark - UIDocumentPickerDelegate"
           if marker not in s:
-              raise SystemExit(
-                  "ERROR: document picker marker missing"
-              )
+              raise SystemExit("ERROR: document picker marker missing")
 
           methods = r'''
           - (NSString *)findPostal2Exe {
+              NSString *docs = NSSearchPathForDirectoriesInDomains(
+                  NSDocumentDirectory,
+                  NSUserDomainMask,
+                  YES
+              ).firstObject;
 
-              NSString *docs =
-                  NSSearchPathForDirectoriesInDomains(
-                      NSDocumentDirectory,
-                      NSUserDomainMask,
-                      YES
-                  ).firstObject;
+              NSString *root = [docs stringByAppendingPathComponent:@"Postal2FullData"];
+              NSFileManager *fm = [NSFileManager defaultManager];
 
-              NSString *root =
-                  [docs stringByAppendingPathComponent:@"Postal2FullData"];
+              NSString *normal = [root stringByAppendingPathComponent:@"System/Postal2.exe"];
+              if ([fm fileExistsAtPath:normal]) return normal;
 
-              NSFileManager *fm =
-                  [NSFileManager defaultManager];
-
-              NSString *normal =
-                  [root stringByAppendingPathComponent:@"System/Postal2.exe"];
-
-              if (
-                  [fm fileExistsAtPath:normal]
-              ) {
-                  return normal;
-              }
-
-              NSDirectoryEnumerator *enumerator =
-                  [fm enumeratorAtPath:root];
-
-              for (
-                  NSString *relative in enumerator
-              ) {
-                  if (
-                      [[relative lastPathComponent]
-                          caseInsensitiveCompare:@"Postal2.exe"]
-                      == NSOrderedSame
-                  ) {
-                      NSString *found =
-                          [root stringByAppendingPathComponent:relative];
-
-                      WG_LOGI(
-                          "POSTAL2",
-                          "Found recursively: %s",
-                          found.UTF8String
-                      );
-
+              NSDirectoryEnumerator *enumerator = [fm enumeratorAtPath:root];
+              for (NSString *relative in enumerator) {
+                  if ([[relative lastPathComponent] caseInsensitiveCompare:@"Postal2.exe"] == NSOrderedSame) {
+                      NSString *found = [root stringByAppendingPathComponent:relative];
+                      WG_LOGI("POSTAL2", "Found recursively: %s", found.UTF8String);
                       return found;
                   }
               }
 
-              WG_LOGE(
-                  "POSTAL2",
-                  "Postal2.exe NOT FOUND"
-              );
-
+              WG_LOGE("POSTAL2", "Postal2.exe NOT FOUND");
               return nil;
           }
 
           - (void)runPostal2 {
-
-              static BOOL postalStarted =
-                  NO;
+              static BOOL postalStarted = NO;
 
               if (!_engine) {
-                  WG_LOGE(
-                      "POSTAL2",
-                      "Engine not ready"
-                  );
-
+                  WG_LOGE("POSTAL2", "Engine not ready");
                   return;
               }
 
-              NSString *exe =
-                  [self findPostal2Exe];
-
+              NSString *exe = [self findPostal2Exe];
               if (!exe) {
-                  [_loadButton
-                      setTitle:@"  POSTAL2.EXE NOT FOUND  "
-                      forState:UIControlStateNormal];
-
+                  [_loadButton setTitle:@"  POSTAL2.EXE NOT FOUND  " forState:UIControlStateNormal];
                   return;
               }
 
               if (postalStarted) {
-                  WG_LOGW(
-                      "POSTAL2",
-                      "Duplicate launch ignored"
-                  );
-
+                  WG_LOGW("POSTAL2", "Duplicate launch ignored");
                   return;
               }
 
-              postalStarted =
-                  YES;
+              postalStarted = YES;
+              _loadButton.enabled = NO;
 
-              _loadButton.enabled =
-                  NO;
+              NSString *systemDir = [exe stringByDeletingLastPathComponent];
 
-              NSString *systemDir =
-                  [exe stringByDeletingLastPathComponent];
+              NSFileManager *fm = [NSFileManager defaultManager];
+              NSArray<NSString *> *vc120 = @[@"msvcr120.dll", @"msvcp120.dll"];
 
-              NSFileManager *fm =
-                  [NSFileManager defaultManager];
-
-              NSArray<NSString *> *vc120 =
-                  @[
-                      @"msvcr120.dll",
-                      @"msvcp120.dll"
-                  ];
-
-              for (
-                  NSString *dllName
-                  in vc120
-              ) {
-                  NSString *stem =
-                      [dllName stringByDeletingPathExtension];
-
-                  NSString *bundleDll =
-                      [[NSBundle mainBundle]
-                          pathForResource:stem
-                          ofType:@"dll"
-                          inDirectory:@"VC120"];
-
-                  NSString *targetDll =
-                      [systemDir
-                          stringByAppendingPathComponent:dllName];
+              for (NSString *dllName in vc120) {
+                  NSString *stem = [dllName stringByDeletingPathExtension];
+                  NSString *bundleDll = [[NSBundle mainBundle]
+                      pathForResource:stem
+                      ofType:@"dll"
+                      inDirectory:@"VC120"];
+                  NSString *targetDll = [systemDir stringByAppendingPathComponent:dllName];
 
                   if (!bundleDll) {
-                      WG_LOGE(
-                          "POSTAL2",
-                          "FIX11 bundled %s missing",
-                          dllName.UTF8String
-                      );
-
-                      [_loadButton
-                          setTitle:@"  VC120 RUNTIME MISSING  "
-                          forState:UIControlStateNormal];
-
+                      WG_LOGE("POSTAL2", "FIX11 bundled %s missing", dllName.UTF8String);
+                      [_loadButton setTitle:@"  VC120 RUNTIME MISSING  " forState:UIControlStateNormal];
                       postalStarted = NO;
                       _loadButton.enabled = YES;
                       return;
                   }
 
-                  NSError *copyError =
-                      nil;
+                  NSError *copyError = nil;
 
-                  if (
-                      [fm fileExistsAtPath:targetDll]
-                  ) {
-                      [fm
-                          removeItemAtPath:targetDll
-                          error:nil];
+                  if ([fm fileExistsAtPath:targetDll]) {
+                      [fm removeItemAtPath:targetDll error:nil];
                   }
 
-                  if (
-                      ![fm
-                          copyItemAtPath:bundleDll
-                          toPath:targetDll
-                          error:&copyError]
-                  ) {
-                      WG_LOGE(
-                          "POSTAL2",
-                          "FIX11 failed to copy %s: %s",
-                          dllName.UTF8String,
-                          copyError
-                              .localizedDescription
-                              .UTF8String
-                      );
-
-                      [_loadButton
-                          setTitle:@"  VC120 COPY FAILED  "
-                          forState:UIControlStateNormal];
-
+                  if (![fm copyItemAtPath:bundleDll toPath:targetDll error:&copyError]) {
+                      WG_LOGE("POSTAL2",
+                              "FIX11 failed to copy %s: %s",
+                              dllName.UTF8String,
+                              copyError.localizedDescription.UTF8String);
+                      [_loadButton setTitle:@"  VC120 COPY FAILED  " forState:UIControlStateNormal];
                       postalStarted = NO;
                       _loadButton.enabled = YES;
                       return;
                   }
 
-                  WG_LOGI(
-                      "POSTAL2",
-                      "FIX11 VC120 installed: %s",
-                      targetDll.UTF8String
-                  );
+                  WG_LOGI("POSTAL2", "FIX11 VC120 installed: %s", targetDll.UTF8String);
               }
 
-              int cdResult =
-                  chdir(
-                      systemDir.fileSystemRepresentation
-                  );
+              int cdResult = chdir(systemDir.fileSystemRepresentation);
+              WG_LOGI("POSTAL2", "System directory: %s", systemDir.UTF8String);
+              WG_LOGI("POSTAL2", "chdir result = %d", cdResult);
 
-              WG_LOGI(
-                  "POSTAL2",
-                  "System directory: %s",
-                  systemDir.UTF8String
-              );
-
-              WG_LOGI(
-                  "POSTAL2",
-                  "chdir result = %d",
-                  cdResult
-              );
-
-              [_loadButton
-                  setTitle:@"  STARTING POSTAL 2...  "
-                  forState:UIControlStateNormal];
-
-              WG_LOGI(
-                  "POSTAL2",
-                  "Launching original Postal2.exe"
-              );
-
+              [_loadButton setTitle:@"  STARTING POSTAL 2...  " forState:UIControlStateNormal];
+              WG_LOGI("POSTAL2", "Launching original Postal2.exe");
               [self loadAndRunPE:exe];
           }
 
           '''
 
-          s = s.replace(
-              marker,
-              methods +
-              "\n" +
-              marker,
-              1
-          )
+          s = s.replace(marker, methods + "\n" + marker, 1)
 
-          old =
-              "            [self tryLoadBundledPE];"
-
-          new = '''            WG_LOGI(
-                          "POSTAL2",
-                          "Engine ready — FIX11 auto-start"
-                      );
+          old = "            [self tryLoadBundledPE];"
+          new = '''            WG_LOGI("POSTAL2", "Engine ready — FIX11.1 auto-start");
                       [self runPostal2];'''
 
           if old not in s:
-              raise SystemExit(
-                  "ERROR: auto-start marker missing"
-              )
+              raise SystemExit("ERROR: auto-start marker missing")
 
-          s = s.replace(
-              old,
-              new,
-              1
-          )
+          s = s.replace(old, new, 1)
 
           p.write_text(s)
           PY
@@ -2639,35 +1463,22 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-
           cd WineGlass
-
           rm -rf WineGlass.xcodeproj
-
           xcodegen generate
+          test -f WineGlass.xcodeproj/project.pbxproj
+          grep -m1 "objectVersion" WineGlass.xcodeproj/project.pbxproj || true
 
-          test -f \
-            WineGlass.xcodeproj/project.pbxproj
-
-          grep -m1 \
-            "objectVersion" \
-            WineGlass.xcodeproj/project.pbxproj || true
-
-          if grep -q \
-            "objectVersion = 77" \
-            WineGlass.xcodeproj/project.pbxproj
-          then
+          if grep -q "objectVersion = 77" WineGlass.xcodeproj/project.pbxproj; then
             echo "ERROR: unsupported objectVersion 77"
             exit 1
           fi
 
-      - name: Build POSTAL 2 FIX 11
+      - name: Build POSTAL 2 FIX 11.1
         shell: bash
         run: |
           set -o pipefail
-
           cd WineGlass
-
           rm -rf build
 
           xcodebuild \
@@ -2691,73 +1502,48 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-
           APP="WineGlass/build/Build/Products/Release-iphoneos/WineGlass.app"
-
           test -d "$APP"
           test -f "$APP/WineGlass"
+          lipo -info "$APP/WineGlass"
 
-          lipo -info \
-            "$APP/WineGlass"
-
-          ID=$(
-            /usr/libexec/PlistBuddy \
-              -c "Print :CFBundleIdentifier" \
-              "$APP/Info.plist"
-          )
-
+          ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
           echo "$ID"
-
-          test \
-            "$ID" = \
-            "com.postal2ios.native"
+          test "$ID" = "com.postal2ios.native"
 
       - name: Package IPA
         shell: bash
         run: |
           set -euxo pipefail
-
           ROOT="$GITHUB_WORKSPACE"
           APP="$ROOT/WineGlass/build/Build/Products/Release-iphoneos/WineGlass.app"
           OUT="$ROOT/out"
 
           rm -rf "$OUT"
-
           mkdir -p "$OUT/Payload"
           mkdir -p "$APP/VC120"
 
-          cp \
-            "$ROOT/vc120-runtime/msvcr120.dll" \
-            "$APP/VC120/msvcr120.dll"
+          cp "$ROOT/vc120-runtime/msvcr120.dll" "$APP/VC120/msvcr120.dll"
+          cp "$ROOT/vc120-runtime/msvcp120.dll" "$APP/VC120/msvcp120.dll"
 
-          cp \
-            "$ROOT/vc120-runtime/msvcp120.dll" \
-            "$APP/VC120/msvcp120.dll"
+          test -s "$APP/VC120/msvcr120.dll"
+          test -s "$APP/VC120/msvcp120.dll"
 
-          test -s \
-            "$APP/VC120/msvcr120.dll"
-
-          test -s \
-            "$APP/VC120/msvcp120.dll"
-
-          cp -R \
-            "$APP" \
-            "$OUT/Payload/POSTAL 2.app"
+          cp -R "$APP" "$OUT/Payload/POSTAL 2.app"
 
           cd "$OUT"
 
           zip -qry \
-            "POSTAL-2-iOS-v11-REAL-VC120.ipa" \
+            "POSTAL-2-iOS-v11.1-REAL-VC120.ipa" \
             Payload
 
-          ls -lh \
-            "POSTAL-2-iOS-v11-REAL-VC120.ipa"
+          ls -lh "POSTAL-2-iOS-v11.1-REAL-VC120.ipa"
 
-      - name: Upload POSTAL 2 FIX 11 IPA
+      - name: Upload POSTAL 2 FIX 11.1 IPA
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-iOS-v11-REAL-VC120
-          path: out/POSTAL-2-iOS-v11-REAL-VC120.ipa
+          name: POSTAL-2-iOS-v11.1-REAL-VC120
+          path: out/POSTAL-2-iOS-v11.1-REAL-VC120.ipa
           if-no-files-found: error
           retention-days: 14
 
@@ -2766,52 +1552,20 @@ jobs:
         shell: bash
         run: |
           mkdir -p debug-fix11
+          cp WineGlass/xcodebuild.log debug-fix11/ 2>/dev/null || true
+          cp blink-src/config.h debug-fix11/blink-config.h 2>/dev/null || true
+          cp WineGlass/Vendor/blink/wg_blink_impl.c debug-fix11/ 2>/dev/null || true
+          cp WineGlass/Sources/Core/wg_engine.c debug-fix11/ 2>/dev/null || true
+          cp WineGlass/Sources/App/WGSceneDelegate.m debug-fix11/ 2>/dev/null || true
+          cp WineGlass/project.yml debug-fix11/ 2>/dev/null || true
+          cp vc120-runtime/msvcr120.dll debug-fix11/ 2>/dev/null || true
+          cp vc120-runtime/msvcp120.dll debug-fix11/ 2>/dev/null || true
 
-          cp \
-            WineGlass/xcodebuild.log \
-            debug-fix11/ \
-            2>/dev/null || true
-
-          cp \
-            blink-src/config.h \
-            debug-fix11/blink-config.h \
-            2>/dev/null || true
-
-          cp \
-            WineGlass/Vendor/blink/wg_blink_impl.c \
-            debug-fix11/ \
-            2>/dev/null || true
-
-          cp \
-            WineGlass/Sources/Core/wg_engine.c \
-            debug-fix11/ \
-            2>/dev/null || true
-
-          cp \
-            WineGlass/Sources/App/WGSceneDelegate.m \
-            debug-fix11/ \
-            2>/dev/null || true
-
-          cp \
-            WineGlass/project.yml \
-            debug-fix11/ \
-            2>/dev/null || true
-
-          cp \
-            vc120-runtime/msvcr120.dll \
-            debug-fix11/ \
-            2>/dev/null || true
-
-          cp \
-            vc120-runtime/msvcp120.dll \
-            debug-fix11/ \
-            2>/dev/null || true
-
-      - name: Upload FIX 11 debug
+      - name: Upload FIX 11.1 debug
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-FIX11-DEBUG
+          name: POSTAL-2-FIX11.1-DEBUG
           path: debug-fix11
           if-no-files-found: ignore
           retention-days: 7
