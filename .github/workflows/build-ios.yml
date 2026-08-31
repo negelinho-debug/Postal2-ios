@@ -31,11 +31,19 @@ jobs:
           )
 
           $downloaded = $false
+
           foreach ($url in $urls) {
             try {
               Write-Host "Downloading $url"
-              Invoke-WebRequest -Uri $url -OutFile $exe
-              if ((Test-Path $exe) -and ((Get-Item $exe).Length -gt 100000)) {
+
+              Invoke-WebRequest `
+                -Uri $url `
+                -OutFile $exe
+
+              if (
+                (Test-Path $exe) -and
+                ((Get-Item $exe).Length -gt 100000)
+              ) {
                 $downloaded = $true
                 break
               }
@@ -59,25 +67,44 @@ jobs:
 
           Write-Host "vcredist exit code: $($proc.ExitCode)"
 
-          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 1638) {
+          if (
+            $proc.ExitCode -ne 0 -and
+            $proc.ExitCode -ne 1638
+          ) {
             throw "vcredist_x86 failed with exit code $($proc.ExitCode)"
           }
 
           $msvcr = @(
             "$env:WINDIR\SysWOW64\msvcr120.dll",
             "$env:WINDIR\System32\msvcr120.dll"
-          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          ) |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
 
           $msvcp = @(
             "$env:WINDIR\SysWOW64\msvcp120.dll",
             "$env:WINDIR\System32\msvcp120.dll"
-          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          ) |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
 
-          if (-not $msvcr) { throw "msvcr120.dll was not found after install" }
-          if (-not $msvcp) { throw "msvcp120.dll was not found after install" }
+          if (-not $msvcr) {
+            throw "msvcr120.dll was not found after install"
+          }
 
-          Copy-Item $msvcr (Join-Path $out "msvcr120.dll") -Force
-          Copy-Item $msvcp (Join-Path $out "msvcp120.dll") -Force
+          if (-not $msvcp) {
+            throw "msvcp120.dll was not found after install"
+          }
+
+          Copy-Item `
+            $msvcr `
+            (Join-Path $out "msvcr120.dll") `
+            -Force
+
+          Copy-Item `
+            $msvcp `
+            (Join-Path $out "msvcp120.dll") `
+            -Force
 
           Get-Item `
             (Join-Path $out "msvcr120.dll"), `
@@ -116,29 +143,53 @@ jobs:
           test -s vc120-runtime/msvcr120.dll
           test -s vc120-runtime/msvcp120.dll
 
+          echo "===== MSVCR120 ====="
           file vc120-runtime/msvcr120.dll
+
+          echo "===== MSVCP120 ====="
           file vc120-runtime/msvcp120.dll
 
-          file vc120-runtime/msvcr120.dll | grep -q "PE32 executable"
-          file vc120-runtime/msvcp120.dll | grep -q "PE32 executable"
-          file vc120-runtime/msvcr120.dll | grep -q "Intel 80386"
-          file vc120-runtime/msvcp120.dll | grep -q "Intel 80386"
+          file vc120-runtime/msvcr120.dll |
+            grep -q "PE32 executable"
 
+          file vc120-runtime/msvcp120.dll |
+            grep -q "PE32 executable"
+
+          file vc120-runtime/msvcr120.dll |
+            grep -q "Intel 80386"
+
+          file vc120-runtime/msvcp120.dll |
+            grep -q "Intel 80386"
+
+          echo "========================================"
           echo "FIX11.2 VC120 X86 DLLS VERIFIED"
+          echo "========================================"
 
       - name: Select Xcode 15.4
         shell: bash
         run: |
           set -euxo pipefail
+
           if [ -d "/Applications/Xcode_15.4.app" ]; then
-            sudo xcode-select -s "/Applications/Xcode_15.4.app/Contents/Developer"
+
+            sudo xcode-select \
+              -s "/Applications/Xcode_15.4.app/Contents/Developer"
+
           elif [ -d "/Applications/Xcode_15.4.0.app" ]; then
-            sudo xcode-select -s "/Applications/Xcode_15.4.0.app/Contents/Developer"
+
+            sudo xcode-select \
+              -s "/Applications/Xcode_15.4.0.app/Contents/Developer"
+
           else
+
             echo "ERROR: Xcode 15.4 not found"
-            ls -1 /Applications | grep Xcode || true
+
+            ls -1 /Applications |
+              grep Xcode || true
+
             exit 1
           fi
+
           xcodebuild -version
           xcode-select -p
 
@@ -146,8 +197,14 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          brew install xcodegen make flock
+
+          brew install \
+            xcodegen \
+            make \
+            flock
+
           export PATH="$(brew --prefix)/bin:$PATH"
+
           command -v flock
           xcodegen --version
           xcrun --sdk iphoneos --show-sdk-version
@@ -156,10 +213,24 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          rm -rf WineGlass blink-src
-          git clone --depth 1 https://github.com/Contonion/WineGlass.git WineGlass
-          git clone --depth 1 https://github.com/jart/blink.git blink-src
-          mkdir -p WineGlass/Vendor/blink/lib
+
+          rm -rf \
+            WineGlass \
+            blink-src
+
+          git clone \
+            --depth 1 \
+            https://github.com/Contonion/WineGlass.git \
+            WineGlass
+
+          git clone \
+            --depth 1 \
+            https://github.com/jart/blink.git \
+            blink-src
+
+          mkdir -p \
+            WineGlass/Vendor/blink/lib
+
           git -C WineGlass rev-parse HEAD
           git -C blink-src rev-parse HEAD
 
@@ -167,12 +238,17 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+
           export PATH="$(brew --prefix)/bin:$PATH"
+
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           CC="$(xcrun --sdk iphoneos --find clang)"
           AR="$(xcrun --sdk iphoneos --find ar)"
+
           cd blink-src
+
           chmod +x configure
+
           ./configure \
             CC="$CC" \
             AR="$AR" \
@@ -180,6 +256,7 @@ jobs:
             --disable-threads \
             --disable-sockets \
             --disable-jit
+
           test -f config.h
           test -f config.mk
 
@@ -187,95 +264,386 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+
           python3 <<'PY'
-          import base64, zlib
-          payload = (
-              'eNqNUm9rgkAYf3+f4uE2SK0Z7eUghptuxUpFLRZzE62zjtUpd8YG0XffqcXWsDHhwPv9u+e5e1KebSCPi9WaJkA3ecYLcOUWHf45QSiHfoUpOF'
-              'lT9n4l+Lw7z1hKl/oKq0hIOtc5iRdRQT4LhXCecdHHdMkyTqQALaiIkzWRuhcE8sMDY2pFj1Zg2YHnuDPc+QH7M/8cJWHPsE1n3GRoYJ4sz44M'
-              'zzZP9fcDy4xmQ2vUhA8k9ooIayjYtKbR5EwBY2diB5X5Gx8bbmTYjj2TpF/FojTjwOINAcrgeCttqE+7qazlbXKii22i8LSl3G7Ut1BoFwuSUk'
-              'ZC0d5Jkoh5nBOlDFL3YaJrl60OtOQS6l8ZWyZT/hEhX7TdBxyyrgau4wfGCK6BOj48DJ+h1wOtGzLc1MqxA+lOcX0c7ErN/rfhtONaX7d4MECv'
-              'tKBc/+C0IPVgydJyTlmh4LtyDquS6jksJ3i+Igs5bF9MGc5d'
-          )
-          code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-          exec(compile(code, "<POSTAL2-FIX11.2-1>", "exec"))
+          from pathlib import Path
+          import re
+
+          p = Path("blink-src/config.h")
+          s = p.read_text(errors="ignore")
+
+          disable = [
+              "HAVE_GETENTROPY",
+              "HAVE_SYS_GETENTROPY",
+              "HAVE_GETRANDOM",
+              "HAVE_SYS_GETRANDOM",
+              "HAVE_KERN_ARND",
+              "HAVE_SCHED_YIELD",
+              "HAVE_SCHED_H",
+          ]
+
+          enable = [
+              "HAVE_DEV_URANDOM",
+              "HAVE_SYS_MOUNT_H",
+              "HAVE_MAP_ANONYMOUS",
+          ]
+
+          for name in disable + enable:
+              s = re.sub(
+                  rf'(?m)^\s*#define\s+{re.escape(name)}\b.*$',
+                  '',
+                  s
+              )
+
+              s = re.sub(
+                  rf'(?m)^\s*#undef\s+{re.escape(name)}\b.*$',
+                  '',
+                  s
+              )
+
+          s += "\n/* POSTAL 2 iOS FIX 11.2 */\n"
+
+          for name in disable:
+              s += f"#undef {name}\n"
+
+          for name in enable:
+              s += f"#define {name} 1\n"
+
+          p.write_text(s)
+
+          print("Blink iOS config patched")
           PY
 
-          grep -q '^#define HAVE_MAP_ANONYMOUS 1$' blink-src/config.h
+          grep -q \
+            '^#define HAVE_MAP_ANONYMOUS 1$' \
+            blink-src/config.h
 
       - name: Patch Blink sched_yield
         shell: bash
         run: |
           set -euxo pipefail
+
           python3 <<'PY'
-          import base64, zlib
-          payload = (
-              'eNqFkcFugzAMhu95Co9LgTFYr63QTj1OncppElKVBjOihYDisLWq9u4zlFXdLuNgmdj5/t9O7boWeukbow+g275zHl74V8y5QyF6yKezMDgYbd'
-              '8fyKlsyjI6kZLGpCqIBHFXnzqU1d7j0YcRX5Teo7NccIvFgrz0WpV0r63nWJyoUA1WrxpNVVJchhzIu0GN1WepGm1xPI/bMUZjOKfxU2nLL6YJ'
-              'h72RClu0ngWufGA6/GKHFyjMSIjbCM4CIPzodBW1a04d+oF9Pq7FhBaUgOqGCewwpeFgw3mWBG50E/hpzJcJ1Ea+Uc79RSR0PQPucliuWIE1pC'
-              'YcnXlsN0ftw2Cz2213q99mx7dQDdRSG6x4q9NaKZ1FwwDmj8Yb+9M0X7QOErhWsvi2CJUmeWAWdBb0toA4CyZ7wTzzHxCvD+gfw7d4h63Ulkan'
-              'ffrptMfL61MkvgGRKsKx'
+          from pathlib import Path
+          import re
+
+          p = Path(
+              "blink-src/blink/syscall.c"
           )
-          code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-          exec(compile(code, "<POSTAL2-FIX11.2-2>", "exec"))
+
+          s = p.read_text()
+
+          pattern = \
+              r'''static\s+int\s+SysSchedYield\s*\(\s*struct\s+Machine\s*\*m\s*\)\s*\{.*?\n\}'''
+
+          replacement = '''static int SysSchedYield(struct Machine *m) {
+            (void)m;
+            return 0;
+          }'''
+
+          s, count = re.subn(
+              pattern,
+              replacement,
+              s,
+              count=1,
+              flags=re.S
+          )
+
+          if count != 1:
+              raise SystemExit(
+                  "ERROR: SysSchedYield patch failed"
+              )
+
+          s = s.replace(
+              "        sched_yield();",
+              "        /* sched_yield disabled on iOS */"
+          )
+
+          if "return sched_yield();" in s:
+              raise SystemExit(
+                  "ERROR: sched_yield remains"
+              )
+
+          p.write_text(s)
           PY
 
       - name: Build blink ARM64 no-JIT
         shell: bash
         run: |
           set -euxo pipefail
+
           export PATH="$(brew --prefix)/bin:$PATH"
+
           ROOT="$GITHUB_WORKSPACE"
           BLINK="$ROOT/blink-src"
           WG="$ROOT/WineGlass"
+
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           CC="$(xcrun --sdk iphoneos --find clang)"
           AR="$(xcrun --sdk iphoneos --find ar)"
+
           cd "$BLINK"
-          rm -f o//blink/blink.a
+
+          rm -f \
+            o//blink/blink.a
+
           gmake \
             -j2 \
             CC="$CC" \
             AR="$AR" \
             CFLAGS="-O2 -arch arm64 -isysroot $SDK -miphoneos-version-min=17.0" \
             o//blink/blink.a
-          test -f o//blink/blink.a
-          cp o//blink/blink.a "$WG/Vendor/blink/lib/blink.a"
-          test -f "$WG/Vendor/blink/lib/blink.a"
+
+          test -f \
+            o//blink/blink.a
+
+          cp \
+            o//blink/blink.a \
+            "$WG/Vendor/blink/lib/blink.a"
+
+          test -f \
+            "$WG/Vendor/blink/lib/blink.a"
 
       - name: Patch Blink VM mmap FIX 11.2
         shell: bash
         run: |
           set -euxo pipefail
+
           python3 <<'PY'
-          import base64, zlib
-          payload = (
-              'eNqtVvtv2kgQ/t1/xZxPudgtj1hXVToIqShxECovAXlUaWQ59gKr2Gtr10B7l+vf3tm1wTaQVJVqIdjHzPibb77ZZc6jEGI3WQb0EWgYRzyBMU'
-              '41LYaWGhn6LWWkG7hC1G8I8yNefwwoe6pvFo4aOOgW1Dzd1AS6xDVOXN9JyNfEMDWNzkH/kzIvWPkEzgnnLKotL3RgUQKUgWhogE/ZSiQ+PWYl'
-              'H+5SQWD6TSQktL/SxNDtyWQ0aYBygm2MkApB2QIxSSeJSyCuOHA9YuxiHXtl5bXdL+wwleKa+CbqYeiyciArHSIZInF54oQufyIcIek4T6iH0P'
-              'nKS+C2+1HSeTOANx5ymBBnHTobmiydMPKJkVndEX/gekssySCSieKXCf/pGlamFHk/5G7odFRwYx1RX3kqVIqhOWW+UQRpyrD5Vv6OCigzU9Y3'
-              '829B1YKIg/KQk7RoLxbsSI6QBheF8mmMbJz5inkJjRgi4aenp7+PNoVwHnPKkjla+ljUCuj3V707y6p/7PeGnx6gM7HbMxswvnRqnfhfmF5R41'
-              'qkwjTTKPNgJZZZEFxTi4SJFScOZTShbkD/Jb6x3TpEvw4xP88NgsgzLCQYzaO5sW9nZu9D4o0/1qEJnCQrzmB43e9noddh9UJKfkg2Ke9GAWfm'
-              'hxbb/BV6TlARYWaj6lYMKxf+1/b8qxdId1CMEkRsgYfJgkjsCOCq3+4623mzbCZ9nczOeJrgbConb3P/Klgm/AXfjdJKHkZ1IHqf5UsFXLgxCN'
-              '0473b5yGwqpZUdjPLyeDKaOVj4S3hOx7eT3swu2wzaY2c86d1IdTyrWXs4Gn4ejK6nTtmyapXnZ+WpLkHou6VCiqhLkASpVPPlnyhW5q0Sa53E'
-              'qSuqFowTYUrpll4tH3USwBuzQF4FCH7gg1QpBoi4gd3SAH30SS+gOyr5rUZKpWgpeq7avb6NjD7DSwI6rGGuv+1zhVLNZJ3KuLx9qOSjak4VXd'
-              'C1jBWmTZMdFGn4inLab56wiPoVRL/WV/mhIim7sy+dwejSdvqjYbf4vowhj58h3s7kzBlLAcrBYJwN7Fk2GHebh35/o19bnjN4Wo6xuWbuY0AO'
-              'sBeqqFywT1fv35lVa79iMv8iZ/vk//aKAQnwTnmNMbvb7nz+Zc6aB4KoXswDdyHgGZO34Pwc/tke96+3IJ7n2b0xve507Ol0149IZeskCFYHrX'
-              'i0DY0VE3TBiJ8emvLLzGvywtVToG8dNjXMBy9NTf07E/cNdV0/4EFbulnfgo6I8Efc4wXeeNDi2oZTvEzVHzlhaj8AzbDZTw=='
+          from pathlib import Path
+
+          p = Path(
+              "WineGlass/Vendor/blink/wg_blink_impl.c"
           )
-          code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-          exec(compile(code, "<POSTAL2-FIX11.2-3>", "exec"))
+
+          s = p.read_text()
+
+          if "#include <errno.h>" not in s:
+
+              if "#include <stdio.h>" not in s:
+                  raise SystemExit(
+                      "ERROR: stdio include missing"
+                  )
+
+              s = s.replace(
+                  "#include <stdio.h>",
+                  "#include <stdio.h>\n#include <errno.h>\n#include <sys/mman.h>",
+                  1
+              )
+
+          start_marker = \
+              "static struct WGBlinkVM *create_vm_with_mode(struct XedMachineMode mode) {"
+
+          end_marker = \
+              "struct WGBlinkVM *WGBlinkVM_Create(void) {"
+
+          start = s.find(start_marker)
+          end = s.find(end_marker, start)
+
+          if start == -1 or end == -1:
+              raise SystemExit(
+                  "ERROR: create_vm_with_mode markers missing"
+              )
+
+          new_function = r'''static struct WGBlinkVM *create_vm_with_mode(struct XedMachineMode mode) {
+
+              fprintf(
+                  stderr,
+                  "[FIX11.2/BLINK] CREATE VM mode=%d\n",
+                  mode.omode
+              );
+
+              fflush(stderr);
+
+              ensure_initialized();
+
+              struct WGBlinkVM *vm =
+                  calloc(
+                      1,
+                      sizeof(struct WGBlinkVM)
+                  );
+
+              if (!vm)
+                  return NULL;
+
+              vm->s =
+                  NewSystem(mode);
+
+              if (!vm->s) {
+                  free(vm);
+                  return NULL;
+              }
+
+              if (!vm->s->real) {
+
+                  long pagesize =
+                      FLAG_pagesize;
+
+                  long real_size =
+                      (
+                          kRealSize +
+                          pagesize -
+                          1
+                      ) &
+                      ~(
+                          pagesize -
+                          1
+                      );
+
+                  errno = 0;
+
+                  vm->s->real =
+                      Mmap(
+                          NULL,
+                          real_size,
+                          PROT_READ |
+                          PROT_WRITE,
+                          MAP_PRIVATE |
+                          MAP_ANONYMOUS_,
+                          -1,
+                          0,
+                          "real"
+                      );
+
+                  int e =
+                      errno;
+
+                  fprintf(
+                      stderr,
+                      "[FIX11.2/BLINK] Mmap real=%p errno=%d (%s)\n",
+                      (void *)vm->s->real,
+                      e,
+                      e
+                          ? strerror(e)
+                          : "OK"
+                  );
+
+                  fflush(stderr);
+
+                  if (
+                      vm->s->real ==
+                          MAP_FAILED ||
+                      !vm->s->real
+                  ) {
+                      vm->s->real =
+                          NULL;
+
+                      FreeSystem(
+                          vm->s
+                      );
+
+                      free(vm);
+
+                      return NULL;
+                  }
+              }
+
+              vm->m =
+                  NewMachine(
+                      vm->s,
+                      NULL
+                  );
+
+              if (!vm->m) {
+
+                  FreeSystem(
+                      vm->s
+                  );
+
+                  free(vm);
+
+                  return NULL;
+              }
+
+              if (
+                  mode.omode ==
+                  XED_MODE_LONG
+              ) {
+                  vm->s->cr0 =
+                      CR0_PE |
+                      CR0_MP |
+                      CR0_ET |
+                      CR0_PG;
+
+                  vm->s->cr3 =
+                      AllocatePageTable(
+                          vm->s
+                      );
+
+                  if (
+                      vm->s->cr3 ==
+                      (u64)-1
+                  ) {
+
+                      FreeMachine(
+                          vm->m
+                      );
+
+                      FreeSystem(
+                          vm->s
+                      );
+
+                      free(vm);
+
+                      return NULL;
+                  }
+
+              } else if (
+                  mode.omode ==
+                  XED_MODE_LEGACY
+              ) {
+                  vm->s->cr0 =
+                      CR0_PE |
+                      CR0_MP |
+                      CR0_ET;
+              }
+
+              vm->m->flags |=
+                  (1 << 9);
+
+              fprintf(
+                  stderr,
+                  "[FIX11.2/BLINK] VM CREATE SUCCESS real=%p cr3=%llu\n",
+                  (void *)vm->s->real,
+                  (unsigned long long)
+                      vm->s->cr3
+              );
+
+              fflush(stderr);
+
+              return vm;
+          }
+
+          '''
+
+          s = (
+              s[:start] +
+              new_function +
+              "\n" +
+              s[end:]
+          )
+
+          p.write_text(s)
+
+          print(
+              "FIX11.2 Blink VM mmap patch installed"
+          )
           PY
 
       - name: Build WineGlass Blink bridge
         shell: bash
         run: |
           set -euxo pipefail
+
           ROOT="$GITHUB_WORKSPACE"
           BLINK="$ROOT/blink-src"
           WG="$ROOT/WineGlass"
+
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           CC="$(xcrun --sdk iphoneos --find clang)"
+
           cd "$BLINK"
+
           "$CC" \
             -c \
             -std=c11 \
@@ -290,96 +658,1915 @@ jobs:
             -include "$BLINK/config.h" \
             "$WG/Vendor/blink/wg_blink_impl.c" \
             -o "$WG/Vendor/blink/lib/wg_blink_impl.o"
-          test -f "$WG/Vendor/blink/lib/wg_blink_impl.o"
+
+          test -f \
+            "$WG/Vendor/blink/lib/wg_blink_impl.o"
 
       - name: Patch FIX 11 real VC++ 2013 + Unreal DLL loader
         shell: bash
         run: |
           set -euxo pipefail
+
           python3 <<'PY'
-          import base64, zlib
-          payload = (
-              'eNrdPWFT20iy3/0rJr4KWMEQm7CpFAT2ecFhqSVAOWycK0K5hD0mWmTJJclA9i6v3o94v/D9kuvukUYzo5Esh9zV1qOyYEs9PT3dPT09Pd2z0y'
-              'icsbmbfPG9G+bN5mGUsAv42mjM2T59ajWHXsCPfTeOX34IF9GYxy8Pw4i/fLgd8eAW3m2Nm04jBvD5VsTdySjhj0nLaTT+xvaf8APNuw4b8Lnv'
-              'jjlLvnB2ywMeeWMGnfibR6enzA/dCY/Yg5d8YS57d/KJdbvsnkexFwZb0B5+ThJ2x/k8pkZsFk4WPofP4zCaxOyX/rvzQR++xqF/7wW3bMLnPJ'
-              'jwYOzxuC0QiJc8ZjTmPg14Mwk38WvKsJglocDPH+l7m7nBRDQXncdf44TPWO/iJGZhwCRD8dOrbRjcIriLt57KsEacuFEymrnRHXBlnzVfvmSn'
-              'wCLgDXJr6sHQvQBoRWZ+fL8FzE0WURAL5i54nBBH2Y0b8zYLI9ZBYqeu5y8ivtVsAGtM5OEdW8xhtOnI2c1XFrgz7AY6JfFMUqbvAYdEbx4wTP'
-              'TmTibA3pi6AvyCfsAdb029YNJSh+Ng7/mrnJQ2IzBQN2/KUgT7bLOLSKkJftltkChdL+bsA8mi/+glrWZ/MDgf7ArZKQolMMds5sUxqAVodwNB'
-              'RunrfRatr6//UOY2AJvQ311o4MUZJWNg7YMHmnaLXMWOFJVLtY2FUxZCLxEicX2cgl83U95nzYDrAQwb+gdgpAu1HdrMBM29BWh0nCxuQAlRCg'
-              'nMsgW8ebU9ShjMcyHCkeiwJd+IsYxDQM3GX9yIvZgugrGzV4GCpKe2QNsDLRp/m3B4x9nweASM6HZHF73jPpM/ncdOp9fBn0URdHj4/uj05Kxf'
-              'A7RnA+3aQS+O319cDnQCXtkJsIH+VE7A2ehjb6CAvikfVhF0xwL67v35UT+DzEHfWEAPz98rwBL00Ebr4PhQIpWg3Y4d9KMF1EbrUIOVoDZaBV'
-              'tNDnQPy0VgDGvbRmv/7OPJ4PzMBLXSqsFK0DdlHOgNBr2/q7TudEo5kMFK0Dd2WnOkEvSnTgmtRQJ+AqzZfLwJQx/n4tR7BHgvHs3i+3HU3e5o'
-              'M3Li+w77B1lMMKmtZ/RdGG+wV37M9+gdAfvhA4+uuttvrsXD2PuTw3wP0FInkc+DFrbek8gCdrBPQOG0RW0dRwCrj9gm64omU7CTrRSnB2CdPf'
-              'jzlgXwZ2MjIxJ/BB3eNcC0kDAnCelRq7UIYu82AFNIj4EagEoJ+tbImwbYdP1zZ128SocLY4B/gqw2a2bsajrs2T47+/30dK/xzWowBYcnbuKO'
-              'hME2OaybTVwzNZ5bhUSC+Oc/2TMBntLYybn7DIgdz+YtfA/kjtzxbOIHTeCxHJHFDpW3f6hoP6zRfgpGn4vmhfbSYpU3H4czicBsrlixcgQjN7'
-              'odl/Sf2bbq1vflrT8uaf2QNy/wbnnz+e1snkT25rmlqxCdgqDQfR0EPLj3ojCwIlCMYgUFCoYCBQUMuTJ/KzFX6DmABzYGPwwmgjafyL0aUccN'
-              'VudHNAsXSU341ARBg/hPbZ7mPdPEzL9eda7pCTTBv9QSLNeOaUlzU/rgBgmfXL3eSU0pDHKEDhZiaykjTAHbmc0UXx1HxTV+mFx1O9sZKkEqT+'
-              'BxC/6TTeGz41gpOjoZgJkCkxjihsiLCFRBNrG2IoFNwwV56spSAZqxGCcM8PAgYS/Spw9f0GdutTg61OCaYjdAT2ZaVfOu6hffPJiknGhuNYVB'
-              'tL3aQsUDLUm8YJERKBl0GyY5pwvcVvAAoGQXfHacPY2otGOCSgWB9HesPcfBPII1YtpCxRMqAYQ+j18+j5ttRoKRPSv9ZAwFJvL86Q2w7C5bx4'
-              'Tk/TDmgonanKL25fMKVhja3MwjjpuGwuRa3R2wqzAteulKqnsAGrWZLM01dwvak7TVGWsDntcFHsMOvhZgGuUg0LIFX7JuePyL7wV3J8BANxhz'
-              '9uIGv1bbmeHxke+/d+dz2PG9mNHf6gaqfITwYBdVv0luTTLJ0nMUlTBey42QhJXClE+kKSLvDXikum7d1wXfjeZRuj+MwTvb8oLRAjbqa2vagF'
-              'KhaJAGLQ7u9jsqbtWXUxtik3wufVOn0fD4on8yc29BdN7sFigH6c65EDDu8luS4apBBFC1X1jpTs+P+63L3jEoEC16tNcHPxS223M3irmMOuwy'
-              'mv8mWn1VVAjE/qC7zQOYua93brxkWccRny4wjsFe72wCuAgjBOzVNn2bR+GYx3FKhaIaORmCAx4yZTSNOMful1IJco/9MBnBss0fGUZh9lbVim'
-              'cWtTClq/Xh7WnvFBtZEDNpXd72ra43NjamwcPEvYHf04XvpysYagZy98fyTxoXsMtTHkUclwAZenGEAhDGXJdlG3g7wmnJkCcISQ5MOBU0sJ9t'
-              'D3dhy9ilsImBjDQ/7yR7POF+4u4ZKolryHgU3bswe5nyBLvS92spTtz7od0cBfwxGenT0njB9jXhtszXG/mwN2As7+Bn4bA19t/pZ2WxR9KRnR'
-              'k3Wzk9mznDs20i47DKlRAvgYvYdXkOj08pJPdeaNEL1D0AWstVPNfG1PjO+CzmCWlpm3WkoaWm2aqJn0ERhMVUfQQwl8F4/rUlAMqMdv6Wdt0a'
-              '0nSEhvjFO+LyvmS4RgsZTfi9lw0cp9IJTSVNgNm0gvUOp8+g3zsl0/Q8ZlM8lYC/krv7ncfnn4gU8Qk7pU9NHWc+QmMJsK6REr3+WI5Yf5wN1j'
-              'GVPptHXzjGbGN14RJTwH0QanlgzMa0QcHsgb0gr0EsOmPYA7dqeBEVpNt+JGkYpagJbhC+vFXHMe21zbIKdKgJ2SKJiwTZ03xt3yuYfUXvFUfU'
-              'gCBtFKEa9e0Sk1w0y4UFxLaOEZOCxWwU83HigcdVWNbQu/ggXoIN4GM0AYK1aQtY6fIOpQ2+x+M1ANk8gD11sgBtJoX62fJsVzzLlE7frzy7j6'
-              '1bE+zo9Q525GbLDH51clO3oXeVHt3opL4BBC/+5FGI1MJGHSx/q9sG4o1d0zOCqaMZ5+fvpYF4Hu/qKtEWJP11tCPfnOEOixz5iXAg7dMZuN1m'
-              'xAtkEth4ddeH3Qo+KXIi7gnEVeyzzsuUpamiqbONOMv+C+yp75fb1iU2VnI2k4n9dR6Q9UMQKv5y7kvsj6Y4fwW5ktOI40ObiS6ONtVMicjZG2'
-              'STV64Eb3FG/2w83IWHOjH6avAQeQkfgVegqo8kp82CgrEtm1aZDhBGTQua5Ta9xryrJ6PlcqopK7u8ckttdfqFe6a7p8sdVinLcDoVvl3u3Ys4'
-              'Fr7YYG/Y2/0qPPlWXBrMG//OcG3JN+FI1WieRDjwtkntBhLSZm8ci8IAQifb+9gVco5Mje4VL7UAAkhGqZdngIAComO5liFpI2yb7Th2sAwRgQ'
-              'HdOwK0QLbs8C0wEUOmxE/59KDI1cohBhhq3FfQbgKz2Eu2vVclC2gULxdGY6lbpcsJ9aKyERH7gm3bpIkk2cdKHogcsJAUQ/4hOvikex4qh7qv'
-              'cakvilaV232bETc2ACWQ1ibqCtBIYuueHRyw7jaFPl9Z/YuCeBI3uuWJhdX6BmsjV9UNBv2s4bkmbez2ynHfu74xRe32lJKVFHMqaGqzNUCASm'
-              'rjXq2V1lhxSRtcMrjYZW5vacn91KxGsmS5zX4E8Ra2lBtJY3GTqy6wb0ONNag7/RVWp/8AO4316y/BzwrukinYlzbtezYWafqPdV9xQu+OfB8j'
-              'l3O5s0ib0MbCCHCd2JmeMhoYmmUbPcf4IGjuIhC7FAuPK/gKWMBHwWBN+WscnESvWhrJjj8EO/4gdpgt4HnR3GmZSQFFJaCdbHP1h4ggl6yAae'
-              'bfxGJLRLYWJmvJLDc1v/DBC2IW3sOWNv4aJF84HhYcDi4ZumkmHjeYCNAsuzFPDkwTsswpNw3KzHoal5tnwSkj7UoTg0WzhXckWpdNVoUphbyw'
-              'rG2bAYn2iYNdZCjKuliqniXqSgGk05Oz30Bbn4Hubh7UNQkrmAXSyKBOuKRS5cvYWsK2b6vZGTLMVWzWpVhMVtGpL4pz1f5keAFVumTRB0KwR3'
-              'H8NUqxteqchj2J86pYrdsLyal8QcRRPI0hQr+H1fqd6vUikETkCaAsU/BnNfdsjSfyC+znz/hrlzVbYTTxAtd3mhaG5c5fBX/ygwrX5gOq/l/R'
-              'ZEMbdAgtW4hyZ6SWGgDieoBrmUDqge8s3ZcvU4GT3qXp6zyrYdtqSN8q1gplcZOn7sGXnQfIcwD4cPR31HMchgj7w4Yk+io+ii0WuaYrHASUh/'
-              'Y3Dwj5aB6CbupvDU84c07SUSvnIzDC9fX1BtVCxFe7lI1+DTqsJo9vwBseTHavG43QR7MCLeyqcZSGbI55Ig6NfgVfwee91vrzeB2EhN5GxUqO'
-              '5+VAFeYvpoCA645HAfdfbVPOA9Ea8Id/ExHaAaLhMZA/Uk2/aFXuhyQjsc8TcBZPXBzbrcAKAEWRBGGCx+PxkqIBkyNp1YBSNEBqsBWJCpYWoG'
-              '7DzvyhzbpOo/GF+7jM5eUUam4OqdScC1vWGh6LqhOMTuBfYEkTadVR1KRaQ10kOaUrTmscsKLgSSUp0P7i/MMlzOjtrD7n//7nf8Uc/3jY3e7A'
-              'fDg8H/Rf9s+OMSsf5v2HJ3ea5efch94k92/mC9DGloz0YFyh0nxL9aUj/XqgoJEL6TobIUNRA7KpFzjkGSQiTLSD4UNxDq9qfhqTQZqzyN8a9Z'
-              'WH3b6VJnjNQQPdiI/GUUJOnk2hGkq4iV5hVp34uHlAumJN+Mu4iYRdCbL1s2visnJ2jd/zVEVlewZbJjyfzRxSn8ewq+AjeEznti011yaDRRrT'
-              'z1eda5VfObbm4e7nzxchMMbf/vxZTAj5YAu6aBayLig49gJznxXXpJW/cVI56GtEsRjFEHV2Yo9b2Qcvj71hR5gtCka4ua6kyOxlo7h68K4xOv'
-              '1AmTLbHXyh73UJBbzeYN3rzFEFsTgKAjXj3QCX3ebPt6+VTa8QkGvwQzxdwoveEl7IjEjE3mY/dUBTmp+bz+PPTVhaUvIdnY757Wx1OtL6nKVk'
-              'APKMDDprNEhQ1MMgo756VJOC2jFXtMNQhblQhTmqwvYOqMLcVAWgi6AsajA31CAHzURtGEsxey0lA+1iQVVKfzWGoQ3DcBUMsmwgPy2tbqAUCt'
-              'RtkpUGtCkhpl6DjyZbZIVP3S5T8HahAG1FBOKIpVOP8qGF9OGKtA+txA9XIH74ndTndQzfybWhFUNOeg0USiVD21K2VYsMCV1XQ4f2XoerdTs0'
-              '+m1UJSBpzsCydGbFsFWDLvXCNMehGlLPNbIde2MMlowz5j68652c9o+axTxM5cQ69QriESxPdBAlczryRDt1P6t2dNS77DEqYhUb2XSzbph9Lf'
-              'ddIP1mKYYFv3g06F/+Pjijwr7DV6K81e7wYeYNxdJoR1tw9+oFLcx8xVktL5GezMRvmQSgZNfT09mtBDD23aoANZ7YEmOpHYhilqYqbjALxjyX'
-              'VcQf3Xs+GUX8Nr7qvr5eKSFZaUprppwjt7AVhcfGDGGeVmVoUuDNCyi8uY7CMZzsLz4eaHce3+3s/fCZmutXdYM1IKIaovvUSZqnyeMsxUBQls'
-              'DPMbLI/VpTNteSeK7FbpeJLdtPSQQ0mwQW/L2JuqFDTCOsmdhBpdCGVs7aVGXzB91F/hnmNQ3EapDzwOYKYs6GUA1Fw6hljAnSWUGSNwvPnzAq'
-              'csEYReKO7/IUz1khlahUqpINcYnw2nKs+QqotDCnWFsYEadmqnI2gA+XPTDwz2M1HimDlEYgcmZLhqN2BTg6d1NL6cK7PIFKN1V+GM5jYa7ER9'
-              'gOYOa++GYeDVNF0oDHC7AgkWp3okVgMkSUAJg5hxFW1gB7fsHztdH5b9YkjyLgr73Ty9KsOGEDy2ZmmTXUOkMM+7apZgsbEjf1IrqSQpGSE50v'
-              'FOhLiaQ7W1ISndKcF6qCScKCscdnmH8Sh0FhmFZmTV0UXvGopIR9BE5JutVcrJs0mmk+ChQVHzifJuLDQPYxMwA7rMoanVUlhQK6kmRSQG9/Qx'
-              '06S+p9GrXGaYzxBqwT3hwT0YShwaWmqsh99Fksp5NFk1Ys18wP7MFgib7MgEKtBauzYrndMhvqtXVXR3NjlplT6d1o24nwbtlSkfFeOOXftTbU'
-              'Nd5H52d9UmEh3romO5dSic9uL64NvESc/FB1aFwae1VjoWE04dGV7k7odbBt/fnc8lxWtyrPlELW/Clm32oOh9SjMFUkQU/oXcNHQ5lq6lx1QZ'
-              '/9yFgpr7bUfEqaKuqti7dpGDujdD+kFmEBQnvChKl15aecNuXIjwXleZB2fNNm2cHLBmt+Dprwx3iPh0bZMfjIuChLA3Vs14ANxIG1zOfCQxhx'
-              'oEzrWHYTF4/zO6xOepfmlV/aRibbfs25WoiIGZtc34FVX+zVZvqoHOMeryXnWf1P/SwjIj2Uj1L3TDnUAtvEFZ5FRASy2excXiamt6C/QJb6lO'
-              '4YoxNG5ekG6zaWXlQGiOpeTGYbXf/sSL+YjNRpJtKdo/Qg13LudvL+4hzYMuh/OD/9/fLk/KyRAg4wc+3j4cYGuJDdV3ggl5oO9pL1pcWQt41N'
-              'vShO9tKb6+hGu4jP0LBmt9jldp9Uw1KkrE/KwvmUdKqW1wfJQAusR4usnqVpL+kwJq/iHajGF+x3QqbaMMBVRrjKENO7w6Ixpud9m0HWjLJqmD'
-              'WDe5Na3JzeGzTQNxbLSwOTJZBXQCMdN/2j863SWBoXrmgdrZBXVfN+Ats+My+Jd56aRAULPp6Qi7s0QFnHi4guIxGTjq4mGSdh9LUqm0ZlwJMz'
-              'nywVzamDJa+SWGGHn4HmGXTV8DWFYg7ZUmtSkiu6SnZTHiegGxIpOSAvAq4rkXIw280KdRb2xkoZqelgLgb90/PeUZqfV1VGt5z4NCBQWsqE9l'
-              'VJCmcHtksMqnO887tPYZ+Dy41yx+TW1paFdqNTa6q24g0a4FbX0J68LhwLS+56PXGwOknrNRMgqzPUn5il/t2Z6po7pmerW5TNF/MAbwRNE7aN'
-              '4FJhbqvLt3kbi2Kvyq8R0hPOy1DY89k1Ywne+fJ09tKEc2hUlWueh4of57a0dviWpkCXp0VCLwBd1YuRTAzQe8sttC4se+zqu9PmzZxLnP2pky'
-              'gT6Gsmz39n3nWdRHpa3R7nTvnAv9VOmberuZTK2hordVntpRaYMo9bp5KUdm2CLMuvL1Vf2UuVeimqJeH3fmh5BbnZ73qnp7/0Dn9bWUNW1I46'
-              'mpHzZe8HacDyopcqMVuqF1Z1y35gNUNpRcP3MqGWt20vW1C2scsKFlYcc92qhHL/vIQlcl3FaoM01GHFWgh/VBQsWFdlcaJXOOox5VPXMIlbPF'
-              '7v0KWKgv92duT9Vin1E04di6UDI8u517JSCxjKSg3eOKWp4Eus+f2rbe086v8H+15tr9RgZwWLkbHgRxX2VlS5+P6nf7PRqG5iu7VESqS6SLjk'
-              'AowSpppuXzVvT1biLXl557/9eBvsLK+DLuxh1UKZPIIqqmXyiKZSLUNHKTIWncY59eSri3526c695zKaY1usjyLCy+1AiR6bbasoUzGKKhDsBx'
-              'NplHDqCtHMwonPCtFMWfqESDzX9/4UZe7fGdasm/uwanEWFW68VMs2RIYbHirgUi+Wy4zhjWXzKCMjq8FRBV2zqiUXvB/eWqpa9JMXpYM2y8Ut'
-              'T16093juMt8Spo7+xzax06Bs8VYzDawTT4wiFnbRuzz8lZ2cYQye0gwb/wIWcsJO'
+          from pathlib import Path
+
+          p = Path(
+              "WineGlass/Sources/Core/wg_engine.c"
           )
-          code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-          exec(compile(code, "<POSTAL2-FIX11.2-4>", "exec"))
+
+          s = p.read_text()
+
+          start_marker = \
+              "// Load a DLL file into the VM. Returns the guest load base, or 0 on failure."
+
+          end_marker = \
+              "// Look up an export by name in a loaded module; returns its guest address or 0."
+
+          start = s.find(
+              start_marker
+          )
+
+          end = s.find(
+              end_marker,
+              start
+          )
+
+          if start == -1 or end == -1:
+              raise SystemExit(
+                  "ERROR: real DLL loader markers missing"
+              )
+
+          real_loader = r'''// Load a DLL file into the VM. Returns the guest load base, or 0 on failure.
+          // POSTAL 2 FIX 11.2 real VC++ 2013 + Unreal game DLL loader.
+
+          static uint32_t wg_module_export(
+              uint32_t base,
+              const char *func
+          );
+
+          static uint32_t wg_module_find(
+              const char *path
+          );
+
+          #define WG_FIX11_PAGE          0x00A00000u
+          #define WG_FIX11_WCMDLINE      0x00A00000u
+          #define WG_FIX11_ACMDLINE      0x00A00100u
+          #define WG_FIX11_APGMPTR       0x00A00300u
+          #define WG_FIX11_WPGMPTR       0x00A00500u
+          #define WG_FIX11_ACMDLN_VAR    0x00A00800u
+          #define WG_FIX11_WCMDLN_VAR    0x00A00804u
+          #define WG_FIX11_FMODE_VAR     0x00A00808u
+          #define WG_FIX11_COMMODE_VAR   0x00A0080Cu
+          #define WG_FIX11_ARGC_VAR      0x00A00810u
+          #define WG_FIX11_ARGV_VAR      0x00A00814u
+          #define WG_FIX11_WARGV_VAR     0x00A00818u
+          #define WG_FIX11_PGMPTR_VAR    0x00A0081Cu
+          #define WG_FIX11_WPGMPTR_VAR   0x00A00820u
+          #define WG_FIX11_ENVIRON_VAR   0x00A00824u
+          #define WG_FIX11_WENVIRON_VAR  0x00A00828u
+          #define WG_FIX11_ARGV_ARRAY    0x00A00840u
+          #define WG_FIX11_WARGV_ARRAY   0x00A00848u
+          #define WG_FIX11_ENV_ARRAY     0x00A00850u
+          #define WG_FIX11_WENV_ARRAY    0x00A00858u
+
+          static bool wg_fix11_is_msvcr120(
+              const char *dll
+          ) {
+              if (!dll)
+                  return false;
+
+              char lower[128];
+
+              size_t n =
+                  strlen(dll);
+
+              if (
+                  n >=
+                  sizeof(lower)
+              ) {
+                  n =
+                      sizeof(lower) -
+                      1;
+              }
+
+              for (
+                  size_t i = 0;
+                  i < n;
+                  i++
+              ) {
+                  lower[i] =
+                      (char)
+                      tolower(
+                          (unsigned char)
+                          dll[i]
+                      );
+              }
+
+              lower[n] =
+                  '\0';
+
+              return
+                  strstr(
+                      lower,
+                      "msvcr120"
+                  ) != NULL;
+          }
+
+          static uint32_t wg_fix11_data_import(
+              const char *dll,
+              const char *name
+          ) {
+              if (
+                  !wg_fix11_is_msvcr120(
+                      dll
+                  ) ||
+                  !name
+              ) {
+                  return 0;
+              }
+
+              if (!strcmp(name, "_acmdln"))
+                  return WG_FIX11_ACMDLN_VAR;
+
+              if (!strcmp(name, "_wcmdln"))
+                  return WG_FIX11_WCMDLN_VAR;
+
+              if (!strcmp(name, "_fmode"))
+                  return WG_FIX11_FMODE_VAR;
+
+              if (!strcmp(name, "_commode"))
+                  return WG_FIX11_COMMODE_VAR;
+
+              if (!strcmp(name, "__argc"))
+                  return WG_FIX11_ARGC_VAR;
+
+              if (!strcmp(name, "__argv"))
+                  return WG_FIX11_ARGV_VAR;
+
+              if (!strcmp(name, "__wargv"))
+                  return WG_FIX11_WARGV_VAR;
+
+              if (!strcmp(name, "_pgmptr"))
+                  return WG_FIX11_PGMPTR_VAR;
+
+              if (!strcmp(name, "_wpgmptr"))
+                  return WG_FIX11_WPGMPTR_VAR;
+
+              if (!strcmp(name, "_environ"))
+                  return WG_FIX11_ENVIRON_VAR;
+
+              if (!strcmp(name, "_wenviron"))
+                  return WG_FIX11_WENVIRON_VAR;
+
+              return 0;
+          }
+
+          static bool wg_fix11_find_local_dll(
+              const char *guest_name,
+              char *out,
+              size_t outsz
+          ) {
+              if (
+                  !guest_name ||
+                  !guest_name[0] ||
+                  !out ||
+                  outsz < 4
+              ) {
+                  return false;
+              }
+
+              char wanted[64];
+
+              dll_basename(
+                  guest_name,
+                  wanted,
+                  sizeof(wanted)
+              );
+
+              char cwd[1024];
+
+              if (
+                  !getcwd(
+                      cwd,
+                      sizeof(cwd)
+                  )
+              ) {
+                  return false;
+              }
+
+              DIR *d =
+                  opendir(cwd);
+
+              if (!d)
+                  return false;
+
+              bool found =
+                  false;
+
+              struct dirent *e;
+
+              while (
+                  (e = readdir(d)) !=
+                  NULL
+              ) {
+                  if (
+                      !strcmp(
+                          e->d_name,
+                          "."
+                      ) ||
+                      !strcmp(
+                          e->d_name,
+                          ".."
+                      )
+                  ) {
+                      continue;
+                  }
+
+                  char got[64];
+
+                  dll_basename(
+                      e->d_name,
+                      got,
+                      sizeof(got)
+                  );
+
+                  if (
+                      strcmp(
+                          got,
+                          wanted
+                      ) != 0
+                  ) {
+                      continue;
+                  }
+
+                  snprintf(
+                      out,
+                      outsz,
+                      "%s/%s",
+                      cwd,
+                      e->d_name
+                  );
+
+                  found =
+                      true;
+
+                  break;
+              }
+
+              closedir(d);
+
+              return found;
+          }
+
+          static bool wg_fix11_is_real_preload_dll(
+              const char *dll
+          ) {
+              if (!dll)
+                  return false;
+
+              char lower[64];
+
+              dll_basename(
+                  dll,
+                  lower,
+                  sizeof(lower)
+              );
+
+              return
+                  !strcmp(
+                      lower,
+                      "msvcr120.dll"
+                  ) ||
+                  !strcmp(
+                      lower,
+                      "msvcp120.dll"
+                  ) ||
+                  !strcmp(
+                      lower,
+                      "core.dll"
+                  ) ||
+                  !strcmp(
+                      lower,
+                      "engine.dll"
+                  );
+          }
+
+          static uint32_t wg_load_dll(
+              WGBlinkInstance *blink,
+              WGDllMapper *mapper,
+              const char *real_path,
+              const char *guest_name
+          ) {
+              char base_name[64];
+
+              dll_basename(
+                  guest_name,
+                  base_name,
+                  sizeof(base_name)
+              );
+
+              for (
+                  int i = 0;
+                  i < 16;
+                  i++
+              ) {
+                  if (
+                      s_modules[i].in_use &&
+                      strcmp(
+                          s_modules[i].name,
+                          base_name
+                      ) == 0
+                  ) {
+                      return
+                          s_modules[i].base;
+                  }
+              }
+
+              WGPEImage *img =
+                  wg_pe_load_file(
+                      real_path
+                  );
+
+              if (!img) {
+                  WG_LOGE(
+                      TAG,
+                      "FIX11 failed to parse real DLL: %s",
+                      real_path
+                  );
+
+                  return 0;
+              }
+
+              if (
+                  img->is_64bit
+              ) {
+                  WG_LOGE(
+                      TAG,
+                      "FIX11 refusing 64-bit DLL in 32-bit process: %s",
+                      guest_name
+                  );
+
+                  wg_pe_image_free(
+                      img
+                  );
+
+                  return 0;
+              }
+
+              int slot_index =
+                  -1;
+
+              for (
+                  int i = 0;
+                  i < 16;
+                  i++
+              ) {
+                  if (
+                      !s_modules[i].in_use
+                  ) {
+                      slot_index =
+                          i;
+
+                      break;
+                  }
+              }
+
+              if (
+                  slot_index < 0
+              ) {
+                  WG_LOGE(
+                      TAG,
+                      "FIX11 module table full while loading %s",
+                      guest_name
+                  );
+
+                  wg_pe_image_free(
+                      img
+                  );
+
+                  return 0;
+              }
+
+              uint32_t preferred =
+                  (uint32_t)
+                  img->image_base;
+
+              uint32_t img_size =
+                  img->size_of_image
+                      ? img->size_of_image
+                      : 0x100000;
+
+              uint32_t load_base;
+
+              int32_t delta;
+
+              if (
+                  img->reloc_rva &&
+                  img->reloc_size
+              ) {
+                  load_base =
+                      s_dll_next_base;
+
+                  s_dll_next_base =
+                      (
+                          s_dll_next_base +
+                          img_size +
+                          0xFFFFu
+                      ) &
+                      ~0xFFFFu;
+
+                  delta =
+                      (int32_t)(
+                          load_base -
+                          preferred
+                      );
+
+              } else {
+
+                  load_base =
+                      preferred;
+
+                  delta =
+                      0;
+              }
+
+              WGLoadedModule *slot =
+                  &s_modules[
+                      slot_index
+                  ];
+
+              memset(
+                  slot,
+                  0,
+                  sizeof(*slot)
+              );
+
+              slot->in_use =
+                  true;
+
+              strncpy(
+                  slot->name,
+                  base_name,
+                  sizeof(slot->name) - 1
+              );
+
+              slot->base =
+                  load_base;
+
+              slot->size =
+                  img_size;
+
+              slot->img =
+                  img;
+
+              WG_LOGI(
+                  TAG,
+                  "FIX11 mapping REAL DLL %s from %s preferred=0x%X load=0x%X size=0x%X",
+                  base_name,
+                  real_path,
+                  preferred,
+                  load_base,
+                  img_size
+              );
+
+              if (
+                  img->size_of_headers &&
+                  img->raw_size >=
+                      img->size_of_headers
+              ) {
+                  if (
+                      !wg_blink_load_code(
+                          blink,
+                          load_base,
+                          img->raw_data,
+                          img->size_of_headers,
+                          0
+                      )
+                  ) {
+                      WG_LOGE(
+                          TAG,
+                          "FIX11 header map failed for %s",
+                          base_name
+                      );
+
+                      slot->in_use =
+                          false;
+
+                      slot->img =
+                          NULL;
+
+                      wg_pe_image_free(
+                          img
+                      );
+
+                      return 0;
+                  }
+              }
+
+              for (
+                  int i = 0;
+                  i < img->num_sections;
+                  i++
+              ) {
+                  WGPESection *sec =
+                      &img->sections[i];
+
+                  uint32_t vs =
+                      sec->virtual_size
+                          ? sec->virtual_size
+                          : sec->raw_size;
+
+                  if (!vs)
+                      continue;
+
+                  uint64_t va =
+                      (uint64_t)
+                      load_base +
+                      sec->virtual_address;
+
+                  uint8_t *zeros =
+                      calloc(
+                          1,
+                          vs
+                      );
+
+                  if (!zeros) {
+                      WG_LOGE(
+                          TAG,
+                          "FIX11 OOM mapping %s:%s",
+                          base_name,
+                          sec->name
+                      );
+
+                      slot->in_use =
+                          false;
+
+                      slot->img =
+                          NULL;
+
+                      wg_pe_image_free(
+                          img
+                      );
+
+                      return 0;
+                  }
+
+                  bool mapped =
+                      wg_blink_load_code(
+                          blink,
+                          va,
+                          zeros,
+                          vs,
+                          0
+                      );
+
+                  free(zeros);
+
+                  if (!mapped) {
+                      WG_LOGE(
+                          TAG,
+                          "FIX11 section map failed %s:%s @0x%llX size=0x%X",
+                          base_name,
+                          sec->name,
+                          (unsigned long long)
+                              va,
+                          vs
+                      );
+
+                      slot->in_use =
+                          false;
+
+                      slot->img =
+                          NULL;
+
+                      wg_pe_image_free(
+                          img
+                      );
+
+                      return 0;
+                  }
+
+                  if (
+                      sec->data &&
+                      sec->raw_size
+                  ) {
+                      uint32_t n =
+                          sec->raw_size < vs
+                              ? sec->raw_size
+                              : vs;
+
+                      if (
+                          !wg_blink_write_mem(
+                              blink,
+                              va,
+                              sec->data,
+                              n
+                          )
+                      ) {
+                          WG_LOGE(
+                              TAG,
+                              "FIX11 section write failed %s:%s",
+                              base_name,
+                              sec->name
+                          );
+
+                          slot->in_use =
+                              false;
+
+                          slot->img =
+                              NULL;
+
+                          wg_pe_image_free(
+                              img
+                          );
+
+                          return 0;
+                      }
+                  }
+              }
+
+              if (
+                  delta &&
+                  img->reloc_rva &&
+                  img->reloc_size
+              ) {
+                  uint32_t off =
+                      0;
+
+                  while (
+                      off + 8 <=
+                      img->reloc_size
+                  ) {
+                      const uint8_t *blk =
+                          pe_rva_ptr(
+                              img,
+                              img->reloc_rva +
+                                  off,
+                              8
+                          );
+
+                      if (!blk)
+                          break;
+
+                      uint32_t page_rva =
+                          0;
+
+                      uint32_t blk_size =
+                          0;
+
+                      memcpy(
+                          &page_rva,
+                          blk,
+                          4
+                      );
+
+                      memcpy(
+                          &blk_size,
+                          blk + 4,
+                          4
+                      );
+
+                      if (
+                          blk_size < 8 ||
+                          off +
+                              blk_size >
+                              img->reloc_size
+                      ) {
+                          break;
+                      }
+
+                      uint32_t nent =
+                          (
+                              blk_size -
+                              8
+                          ) /
+                          2;
+
+                      const uint8_t *ents =
+                          pe_rva_ptr(
+                              img,
+                              img->reloc_rva +
+                                  off +
+                                  8,
+                              nent *
+                                  2
+                          );
+
+                      if (!ents)
+                          break;
+
+                      for (
+                          uint32_t e = 0;
+                          e < nent;
+                          e++
+                      ) {
+                          uint16_t v =
+                              0;
+
+                          memcpy(
+                              &v,
+                              ents +
+                                  e *
+                                  2,
+                              2
+                          );
+
+                          if (
+                              (v >> 12) !=
+                              3
+                          ) {
+                              continue;
+                          }
+
+                          uint32_t target =
+                              load_base +
+                              page_rva +
+                              (
+                                  v &
+                                  0x0FFFu
+                              );
+
+                          uint32_t val =
+                              0;
+
+                          if (
+                              !wg_blink_read_mem(
+                                  blink,
+                                  target,
+                                  &val,
+                                  4
+                              )
+                          ) {
+                              WG_LOGE(
+                                  TAG,
+                                  "FIX11 relocation read failed %s @0x%X",
+                                  base_name,
+                                  target
+                              );
+
+                              return 0;
+                          }
+
+                          val +=
+                              (uint32_t)
+                              delta;
+
+                          if (
+                              !wg_blink_write_mem(
+                                  blink,
+                                  target,
+                                  &val,
+                                  4
+                              )
+                          ) {
+                              WG_LOGE(
+                                  TAG,
+                                  "FIX11 relocation write failed %s @0x%X",
+                                  base_name,
+                                  target
+                              );
+
+                              return 0;
+                          }
+                      }
+
+                      off +=
+                          blk_size;
+                  }
+              }
+
+              for (
+                  int i = 0;
+                  i < img->num_imports;
+                  i++
+              ) {
+                  WGPEImportDll *imp =
+                      &img->imports[i];
+
+                  WG_LOGI(
+                      TAG,
+                      "FIX11 %s imports %s: %d functions",
+                      base_name,
+                      imp->dll_name,
+                      imp->num_functions
+                  );
+
+                  for (
+                      int j = 0;
+                      j < imp->num_functions;
+                      j++
+                  ) {
+                      const char *fn =
+                          imp->functions[j].name;
+
+                      uint32_t resolved =
+                          0;
+
+                      if (fn) {
+
+                          uint32_t dep_base =
+                              wg_module_find(
+                                  imp->dll_name
+                              );
+
+                          if (dep_base) {
+
+                              resolved =
+                                  wg_module_export(
+                                      dep_base,
+                                      fn
+                                  );
+
+                              if (resolved) {
+
+                                  WG_LOGI(
+                                      TAG,
+                                      "FIX11 REAL LINK %s!%s -> %s @0x%X",
+                                      base_name,
+                                      fn,
+                                      imp->dll_name,
+                                      resolved
+                                  );
+                              }
+                          }
+                      }
+
+                      if (!resolved) {
+
+                          resolved =
+                              wg_fix11_data_import(
+                                  imp->dll_name,
+                                  fn
+                              );
+                      }
+
+                      if (!resolved) {
+
+                          uint64_t stub =
+                              wg_dll_mapper_resolve(
+                                  mapper,
+                                  imp->dll_name,
+                                  fn
+                              );
+
+                          resolved =
+                              (uint32_t)
+                              stub;
+                      }
+
+                      if (!resolved) {
+
+                          WG_LOGW(
+                              TAG,
+                              "FIX11 unresolved DLL import %s -> %s!%s",
+                              base_name,
+                              imp->dll_name,
+                              fn
+                                  ? fn
+                                  : "(ordinal)"
+                          );
+
+                          continue;
+                      }
+
+                      uint32_t iat =
+                          load_base +
+                          imp->functions[j].iat_rva;
+
+                      if (
+                          !wg_blink_write_mem(
+                              blink,
+                              iat,
+                              &resolved,
+                              4
+                          )
+                      ) {
+                          WG_LOGE(
+                              TAG,
+                              "FIX11 IAT write failed %s!%s @0x%X",
+                              base_name,
+                              fn
+                                  ? fn
+                                  : "(ordinal)",
+                              iat
+                          );
+
+                          return 0;
+                      }
+                  }
+              }
+
+              WG_LOGI(
+                  TAG,
+                  "FIX11 REAL DLL READY %s base=0x%X entry=0x%X reloc_delta=0x%X",
+                  base_name,
+                  load_base,
+                  img->entry_point,
+                  (uint32_t)
+                      delta
+              );
+
+              return
+                  load_base;
+          }
+
+          '''
+
+          s = (
+              s[:start] +
+              real_loader +
+              s[end:]
+          )
+
+          old = '''                WG_LOGD(TAG, "GetModuleHandleA('%s')", modname);
+                          if (strcasestr(modname, "kernel32") ||'''
+
+          new = '''                WG_LOGD(TAG, "GetModuleHandleA('%s')", modname);
+                          uint32_t loaded = wg_module_find(modname);
+                          if (loaded) {
+                              ret_val = loaded;
+                          } else if (strcasestr(modname, "kernel32") ||'''
+
+          if old not in s:
+              raise SystemExit(
+                  "ERROR: GetModuleHandleA marker missing"
+              )
+
+          s = s.replace(
+              old,
+              new,
+              1
+          )
+
+          helper_marker = \
+              "static bool load_pe_blink(WGEngine *engine) {"
+
+          if helper_marker not in s:
+              raise SystemExit(
+                  "ERROR: load_pe_blink marker missing"
+              )
+
+          helpers = r'''
+          // ============================================================
+          // POSTAL 2 FIX 11.2
+          // REAL VC120 + CORE/ENGINE DLLS
+          // ============================================================
+
+          static void wg_fix11_put32(
+              uint8_t *page,
+              uint32_t guest,
+              uint32_t value
+          ) {
+              uint32_t off =
+                  guest -
+                  WG_FIX11_PAGE;
+
+              if (
+                  off + 4 <=
+                  0x1000
+              ) {
+                  memcpy(
+                      page +
+                          off,
+                      &value,
+                      4
+                  );
+              }
+          }
+
+          static bool wg_fix11_prepare_crt_data(
+              WGEngine *engine
+          ) {
+              if (
+                  !engine ||
+                  !engine->blink
+              ) {
+                  return false;
+              }
+
+              uint8_t page[0x1000];
+
+              memset(
+                  page,
+                  0,
+                  sizeof(page)
+              );
+
+              const char *winpath =
+                  wg_files_exe_win_path();
+
+              if (
+                  !winpath ||
+                  !winpath[0]
+              ) {
+                  winpath =
+                      "C:\\Postal2\\System\\Postal2.exe";
+              }
+
+              uint16_t *wcmd =
+                  (uint16_t *)(
+                      page +
+                      (
+                          WG_FIX11_WCMDLINE -
+                          WG_FIX11_PAGE
+                      )
+                  );
+
+              int wi =
+                  0;
+
+              wcmd[0] =
+                  '"';
+
+              for (
+                  ;
+                  winpath[wi] &&
+                  wi < 120;
+                  wi++
+              ) {
+                  wcmd[wi + 1] =
+                      (uint8_t)
+                      winpath[wi];
+              }
+
+              wcmd[wi + 1] =
+                  '"';
+
+              wcmd[wi + 2] =
+                  0;
+
+              char *acmd =
+                  (char *)(
+                      page +
+                      (
+                          WG_FIX11_ACMDLINE -
+                          WG_FIX11_PAGE
+                      )
+                  );
+
+              snprintf(
+                  acmd,
+                  500,
+                  "\"%s\"",
+                  winpath
+              );
+
+              char *apgm =
+                  (char *)(
+                      page +
+                      (
+                          WG_FIX11_APGMPTR -
+                          WG_FIX11_PAGE
+                      )
+                  );
+
+              snprintf(
+                  apgm,
+                  500,
+                  "%s",
+                  winpath
+              );
+
+              uint16_t *wpgm =
+                  (uint16_t *)(
+                      page +
+                      (
+                          WG_FIX11_WPGMPTR -
+                          WG_FIX11_PAGE
+                      )
+                  );
+
+              int pi =
+                  0;
+
+              for (
+                  ;
+                  winpath[pi] &&
+                  pi < 240;
+                  pi++
+              ) {
+                  wpgm[pi] =
+                      (uint8_t)
+                      winpath[pi];
+              }
+
+              wpgm[pi] =
+                  0;
+
+              wg_fix11_put32(
+                  page,
+                  WG_FIX11_ACMDLN_VAR,
+                  WG_FIX11_ACMDLINE
+              );
+
+              wg_fix11_put32(
+                  page,
+                  WG_FIX11_WCMDLN_VAR,
+                  WG_FIX11_WCMDLINE
+              );
+
+              wg_fix11_put32(
+                  page,
+                  WG_FIX11_FMODE_VAR,
+                  0
+              );
+
+              wg_fix11_put32(
+                  page,
+                  WG_FIX11_COMMODE_VAR,
+                  0
+              );
+
+              wg_fix11_put32(
+                  page,
+                  WG_FIX11_ARGC_VAR,
+                  1
+              );
+
+              wg_fix11_put32(
+                  page,
+                  WG_FIX11_ARGV_VAR,
+                  WG_FIX11_ARGV_ARRAY
+              );
+
+              wg_fix11_put32(
+                  page,
+                  WG_FIX11_ARGV_ARRAY,
+                  WG_FIX11_APGMPTR
+              );
+
+              wg_fix11_put32(
+                  page,
+                  WG_FIX11_ARGV_ARRAY +
+                      4,
+                  0
+              );
+
+              wg_fix11_put32(
+                  page,
+                  WG_FIX11_WARGV_VAR,
+                  WG_FIX11_WARGV_ARRAY
+              );
+
+              wg_fix11_put32(
+                  page,
+                  WG_FIX11_WARGV_ARRAY,
+                  WG_FIX11_WPGMPTR
+              );
+
+              wg_fix11_put32(
+                  page,
+                  WG_FIX11_WARGV_ARRAY +
+                      4,
+                  0
+              );
+
+              wg_fix11_put32(
+                  page,
+                  WG_FIX11_PGMPTR_VAR,
+                  WG_FIX11_APGMPTR
+              );
+
+              wg_fix11_put32(
+                  page,
+                  WG_FIX11_WPGMPTR_VAR,
+                  WG_FIX11_WPGMPTR
+              );
+
+              wg_fix11_put32(
+                  page,
+                  WG_FIX11_ENVIRON_VAR,
+                  WG_FIX11_ENV_ARRAY
+              );
+
+              wg_fix11_put32(
+                  page,
+                  WG_FIX11_ENV_ARRAY,
+                  0
+              );
+
+              wg_fix11_put32(
+                  page,
+                  WG_FIX11_WENVIRON_VAR,
+                  WG_FIX11_WENV_ARRAY
+              );
+
+              wg_fix11_put32(
+                  page,
+                  WG_FIX11_WENV_ARRAY,
+                  0
+              );
+
+              if (
+                  !wg_blink_load_code(
+                      engine->blink,
+                      WG_FIX11_PAGE,
+                      page,
+                      sizeof(page),
+                      0
+                  )
+              ) {
+                  WG_LOGE(
+                      TAG,
+                      "FIX11 CRT page map FAILED"
+                  );
+
+                  return false;
+              }
+
+              s_cmdpage_mapped =
+                  true;
+
+              WG_LOGI(
+                  TAG,
+                  "FIX11 CRT DATA PAGE READY @0x%X",
+                  WG_FIX11_PAGE
+              );
+
+              return true;
+          }
+
+          #define WG_FIX11_DLL_RETURN 0x00C30000u
+
+          static bool wg_fix11_call_dll_entry(
+              WGEngine *engine,
+              WGLoadedModule *m
+          ) {
+              if (
+                  !engine ||
+                  !engine->blink ||
+                  !m ||
+                  !m->in_use ||
+                  !m->img ||
+                  !m->img->entry_point
+              ) {
+                  return true;
+              }
+
+              uint32_t entry =
+                  m->base +
+                  m->img->entry_point;
+
+              uint64_t saved_regs[16];
+
+              for (
+                  int i = 0;
+                  i < 16;
+                  i++
+              ) {
+                  saved_regs[i] =
+                      wg_blink_get_reg(
+                          engine->blink,
+                          i
+                      );
+              }
+
+              uint64_t saved_rip =
+                  wg_blink_get_rip(
+                      engine->blink
+                  );
+
+              uint8_t hlt =
+                  0xF4;
+
+              if (
+                  !wg_blink_load_code(
+                      engine->blink,
+                      WG_FIX11_DLL_RETURN,
+                      &hlt,
+                      1,
+                      0
+                  )
+              ) {
+                  WG_LOGE(
+                      TAG,
+                      "FIX11 failed to map DLL return sentinel"
+                  );
+
+                  return false;
+              }
+
+              uint32_t esp =
+                  (uint32_t)
+                  wg_blink_get_reg(
+                      engine->blink,
+                      4
+                  );
+
+              uint32_t call_esp =
+                  esp -
+                  16;
+
+              uint32_t frame[4] = {
+                  WG_FIX11_DLL_RETURN,
+                  m->base,
+                  1u,
+                  0u
+              };
+
+              if (
+                  !wg_blink_write_mem(
+                      engine->blink,
+                      call_esp,
+                      frame,
+                      sizeof(frame)
+                  )
+              ) {
+                  WG_LOGE(
+                      TAG,
+                      "FIX11 failed to build DllMain stack for %s",
+                      m->name
+                  );
+
+                  return false;
+              }
+
+              wg_blink_set_reg(
+                  engine->blink,
+                  4,
+                  call_esp
+              );
+
+              wg_blink_set_rip(
+                  engine->blink,
+                  entry
+              );
+
+              WG_LOGI(
+                  TAG,
+                  "FIX11 DllMain START %s entry=0x%X base=0x%X",
+                  m->name,
+                  entry,
+                  m->base
+              );
+
+              bool ok =
+                  false;
+
+              for (
+                  int loops = 0;
+                  loops < 2000;
+                  loops++
+              ) {
+                  WGBlinkResult r =
+                      wg_blink_run(
+                          engine->blink,
+                          100000
+                      );
+
+                  if (
+                      r ==
+                      WG_BLINK_OK
+                  ) {
+                      continue;
+                  }
+
+                  if (
+                      r ==
+                      WG_BLINK_HALT
+                  ) {
+                      uint32_t rip =
+                          (uint32_t)
+                          wg_blink_get_rip(
+                              engine->blink
+                          );
+
+                      if (
+                          rip ==
+                          WG_FIX11_DLL_RETURN
+                      ) {
+                          ok =
+                              true;
+
+                          break;
+                      }
+
+                      if (
+                          handle_blink_thunk(
+                              engine
+                          )
+                      ) {
+                          continue;
+                      }
+
+                      int stop =
+                          wg_blink_get_stop_reason(
+                              engine->blink
+                          );
+
+                      uint32_t fault =
+                          (uint32_t)
+                          wg_blink_get_fault_addr(
+                              engine->blink
+                          );
+
+                      WG_LOGE(
+                          TAG,
+                          "FIX11 DllMain HALT %s rip=0x%X stop=%d fault=0x%X",
+                          m->name,
+                          rip,
+                          stop,
+                          fault
+                      );
+
+                      break;
+                  }
+
+                  WG_LOGE(
+                      TAG,
+                      "FIX11 DllMain backend result=%d for %s",
+                      (int)r,
+                      m->name
+                  );
+
+                  break;
+              }
+
+              uint32_t dll_result =
+                  (uint32_t)
+                  wg_blink_get_reg(
+                      engine->blink,
+                      0
+                  );
+
+              for (
+                  int i = 0;
+                  i < 16;
+                  i++
+              ) {
+                  wg_blink_set_reg(
+                      engine->blink,
+                      i,
+                      saved_regs[i]
+                  );
+              }
+
+              wg_blink_set_rip(
+                  engine->blink,
+                  saved_rip
+              );
+
+              if (!ok) {
+
+                  WG_LOGE(
+                      TAG,
+                      "FIX11 DllMain FAILED for %s",
+                      m->name
+                  );
+
+                  return false;
+              }
+
+              WG_LOGI(
+                  TAG,
+                  "FIX11 DllMain DONE %s result=0x%X",
+                  m->name,
+                  dll_result
+              );
+
+              return true;
+          }
+
+          static bool wg_fix11_init_loaded_dlls(
+              WGEngine *engine
+          ) {
+              const char *order[] = {
+                  "msvcr120.dll",
+                  "msvcp120.dll",
+                  "core.dll",
+                  "engine.dll",
+                  NULL
+              };
+
+              for (
+                  int oi = 0;
+                  order[oi];
+                  oi++
+              ) {
+                  for (
+                      int i = 0;
+                      i < 16;
+                      i++
+                  ) {
+                      if (
+                          !s_modules[i].in_use
+                      ) {
+                          continue;
+                      }
+
+                      if (
+                          strcmp(
+                              s_modules[i].name,
+                              order[oi]
+                          ) != 0
+                      ) {
+                          continue;
+                      }
+
+                      if (
+                          !wg_fix11_call_dll_entry(
+                              engine,
+                              &s_modules[i]
+                          )
+                      ) {
+                          return false;
+                      }
+                  }
+              }
+
+              return true;
+          }
+
+          '''
+
+          s = s.replace(
+              helper_marker,
+              helpers +
+                  "\n" +
+                  helper_marker,
+              1
+          )
+
+          function_start =
+              s.find(
+                  helper_marker
+              )
+
+          start_marker = \
+              "// Resolve imports — write thunk addresses into the IAT"
+
+          end_marker = \
+              "    uint64_t entry = pe->image_base + pe->entry_point;"
+
+          start =
+              s.find(
+                  start_marker,
+                  function_start
+              )
+
+          if start == -1:
+              raise SystemExit(
+                  "ERROR: EXE import resolver START missing"
+              )
+
+          line_start =
+              s.rfind(
+                  "\n",
+                  function_start,
+                  start
+              )
+
+          line_start = (
+              start
+              if line_start == -1
+              else line_start + 1
+          )
+
+          end =
+              s.find(
+                  end_marker,
+                  start
+              )
+
+          if end == -1:
+              raise SystemExit(
+                  "ERROR: EXE import resolver END missing"
+              )
+
+          replacement = r'''    // POSTAL 2 FIX 11.2 IMPORT RESOLUTION
+              // Real VC++ 2013 + Core.dll / Engine.dll exports first.
+
+              if (!pe->is_64bit) {
+
+                  if (
+                      !wg_fix11_prepare_crt_data(
+                          engine
+                      )
+                  ) {
+                      WG_LOGE(
+                          TAG,
+                          "FIX11 CRT DATA setup failed"
+                      );
+
+                      return false;
+                  }
+
+                  const char *boot_dlls[] = {
+                      "msvcr120.dll",
+                      "msvcp120.dll",
+                      "Core.dll",
+                      "Engine.dll",
+                      NULL
+                  };
+
+                  for (
+                      int bi = 0;
+                      boot_dlls[bi];
+                      bi++
+                  ) {
+                      char real_path[1200] =
+                          {0};
+
+                      if (
+                          !wg_fix11_find_local_dll(
+                              boot_dlls[bi],
+                              real_path,
+                              sizeof(real_path)
+                          )
+                      ) {
+                          WG_LOGW(
+                              TAG,
+                              "FIX11 %s not found in current System directory",
+                              boot_dlls[bi]
+                          );
+
+                          continue;
+                      }
+
+                      uint32_t base =
+                          wg_load_dll(
+                              engine->blink,
+                              engine->dll_mapper,
+                              real_path,
+                              boot_dlls[bi]
+                          );
+
+                      if (!base) {
+                          WG_LOGE(
+                              TAG,
+                              "FIX11 failed to load REAL %s from %s",
+                              boot_dlls[bi],
+                              real_path
+                          );
+
+                          return false;
+                      }
+
+                      WG_LOGI(
+                          TAG,
+                          "FIX11 PRELOAD %s -> 0x%X",
+                          boot_dlls[bi],
+                          base
+                      );
+                  }
+              }
+
+              if (
+                  pe->num_imports >
+                  0
+              ) {
+                  WG_LOGI(
+                      TAG,
+                      "FIX11 resolving %d EXE DLL imports...",
+                      pe->num_imports
+                  );
+
+                  for (
+                      int i = 0;
+                      i < pe->num_imports;
+                      i++
+                  ) {
+                      WGPEImportDll *imp =
+                          &pe->imports[i];
+
+                      WG_LOGI(
+                          TAG,
+                          "  %s: %d functions",
+                          imp->dll_name,
+                          imp->num_functions
+                      );
+
+                      for (
+                          int j = 0;
+                          j < imp->num_functions;
+                          j++
+                      ) {
+                          const char *fn =
+                              imp->functions[j].name;
+
+                          uint64_t resolved =
+                              0;
+
+                          bool real_game_export =
+                              false;
+
+                          if (
+                              !pe->is_64bit &&
+                              wg_fix11_is_real_preload_dll(
+                                  imp->dll_name
+                              ) &&
+                              fn
+                          ) {
+                              uint32_t mod =
+                                  wg_module_find(
+                                      imp->dll_name
+                                  );
+
+                              if (mod) {
+                                  uint32_t exp =
+                                      wg_module_export(
+                                          mod,
+                                          fn
+                                      );
+
+                                  if (exp) {
+                                      resolved =
+                                          exp;
+
+                                      real_game_export =
+                                          true;
+
+                                      WG_LOGI(
+                                          TAG,
+                                          "FIX11 REAL EXE IMPORT %s!%s -> 0x%X",
+                                          imp->dll_name,
+                                          fn,
+                                          exp
+                                      );
+                                  }
+                              }
+                          }
+
+                          if (
+                              !resolved &&
+                              !pe->is_64bit
+                          ) {
+                              uint32_t data_addr =
+                                  wg_fix11_data_import(
+                                      imp->dll_name,
+                                      fn
+                                  );
+
+                              if (data_addr) {
+
+                                  resolved =
+                                      data_addr;
+
+                                  WG_LOGI(
+                                      TAG,
+                                      "FIX11 DATA FALLBACK %s!%s -> 0x%X",
+                                      imp->dll_name,
+                                      fn,
+                                      data_addr
+                                  );
+                              }
+                          }
+
+                          if (!resolved) {
+
+                              resolved =
+                                  wg_dll_mapper_resolve(
+                                      engine->dll_mapper,
+                                      imp->dll_name,
+                                      fn
+                                  );
+                          }
+
+                          if (!resolved) {
+
+                              WG_LOGW(
+                                  TAG,
+                                  "FIX11 unresolved EXE import %s!%s",
+                                  imp->dll_name,
+                                  fn
+                                      ? fn
+                                      : "(ordinal)"
+                              );
+
+                              continue;
+                          }
+
+                          uint64_t iat_entry =
+                              pe->image_base +
+                              imp->functions[j].iat_rva;
+
+                          bool write_ok =
+                              false;
+
+                          if (
+                              pe->is_64bit
+                          ) {
+                              uint64_t v64 =
+                                  resolved;
+
+                              write_ok =
+                                  wg_blink_write_mem(
+                                      engine->blink,
+                                      iat_entry,
+                                      &v64,
+                                      8
+                                  );
+
+                          } else {
+
+                              uint32_t v32 =
+                                  (uint32_t)
+                                  resolved;
+
+                              write_ok =
+                                  wg_blink_write_mem(
+                                      engine->blink,
+                                      iat_entry,
+                                      &v32,
+                                      4
+                                  );
+                          }
+
+                          if (!write_ok) {
+
+                              WG_LOGE(
+                                  TAG,
+                                  "FIX11 IAT write failed %s!%s @0x%llX",
+                                  imp->dll_name,
+                                  fn
+                                      ? fn
+                                      : "(ordinal)",
+                                  (unsigned long long)
+                                      iat_entry
+                              );
+
+                              return false;
+                          }
+
+                          if (
+                              real_game_export
+                          ) {
+                              WG_LOGI(
+                                  TAG,
+                                  "FIX11 IAT REAL OK %s!%s",
+                                  imp->dll_name,
+                                  fn
+                              );
+                          }
+                      }
+                  }
+              }
+
+          '''
+
+          s = (
+              s[:line_start] +
+              replacement +
+              s[end:]
+          )
+
+          init_marker = \
+              '''    WG_LOGI(TAG, "PE mapped via blink. Entry: 0x%llx", (unsigned long long)entry);'''
+
+          init_code = r'''    if (!pe->is_64bit) {
+
+                  if (
+                      !wg_fix11_init_loaded_dlls(
+                          engine
+                      )
+                  ) {
+                      WG_LOGE(
+                          TAG,
+                          "FIX11 REAL DLL initialization failed"
+                      );
+
+                      return false;
+                  }
+
+                  wg_blink_set_rip(
+                      engine->blink,
+                      entry
+                  );
+              }
+
+              WG_LOGI(
+                  TAG,
+                  "FIX11 REAL VC120/CORE/ENGINE READY — EXE entry 0x%llx",
+                  (unsigned long long)entry
+              );
+          '''
+
+          if init_marker not in s:
+              raise SystemExit(
+                  "ERROR: PE mapped log marker missing"
+              )
+
+          s = s.replace(
+              init_marker,
+              init_code +
+                  "\n" +
+                  init_marker,
+              1
+          )
+
+          p.write_text(s)
+
+          print(
+              "FIX 11 REAL VC120 + CORE/ENGINE DLL PATCH INSTALLED"
+          )
           PY
 
           echo "===== FIX11 SOURCE CHECK ====="
 
           grep -n \
             "FIX11 REAL DLL READY\|FIX11 REAL EXE IMPORT\|FIX11 REAL LINK\|FIX11 DllMain\|FIX11 REAL VC120/CORE/ENGINE READY" \
-            WineGlass/Sources/Core/wg_engine.c | head -80
+            WineGlass/Sources/Core/wg_engine.c |
+            head -80
 
       - name: Patch FIX 11.2 VC120 Win32 environment
         shell: bash
@@ -388,79 +2575,179 @@ jobs:
 
           python3 <<'PY'
           from pathlib import Path
+          import re
 
-          p = Path("WineGlass/Sources/Core/wg_engine.c")
+          p = Path(
+              "WineGlass/Sources/Core/wg_engine.c"
+          )
+
           s = p.read_text()
 
           # ============================================================
           # POSTAL 2 FIX 11.2
-          # Real VC120 needs several Win32 startup APIs to return sane data.
-          # LoadLibraryExW is intentionally left alone: current WineGlass
-          # already gives missing system DLLs a virtual/fake module handle.
+          #
+          # Real VC++ 2013 runtime needs sane Win32 bootstrap APIs.
+          #
+          # IMPORTANT:
+          # This patch deliberately uses REGEX for generated FIX11 code.
+          # It does not depend on exact indentation.
           # ============================================================
 
           anchor = '''        } else if (strcmp(fn, "GetStringTypeW") == 0 ||
                              strcmp(fn, "GetStringTypeExW") == 0) {'''
 
           block = r'''        } else if (strcmp(fn, "GetEnvironmentStringsW") == 0) {
-              // Environment block is STRING\0STRING\0\0.
+
               static const uint16_t envw[] = {
-                  'T','E','M','P','=','C',':','\\','T','e','m','p',0,
-                  'P','A','T','H','=','C',':','\\','W','i','n','d','o','w','s','\\',
+                  'T','E','M','P','=','C',':','\\',
+                  'T','e','m','p',0,
+
+                  'P','A','T','H','=','C',':','\\',
+                  'W','i','n','d','o','w','s','\\',
                   'S','y','s','t','e','m','3','2',0,
+
                   0
               };
-              uint32_t mem = wg_guest_alloc(engine, (uint32_t)sizeof(envw));
+
+              uint32_t mem =
+                  wg_guest_alloc(
+                      engine,
+                      (uint32_t)sizeof(envw)
+                  );
+
               if (mem) {
-                  wg_blink_write_mem(engine->blink, mem, envw, (uint32_t)sizeof(envw));
+
+                  wg_blink_write_mem(
+                      engine->blink,
+                      mem,
+                      envw,
+                      (uint32_t)sizeof(envw)
+                  );
               }
-              ret_val = mem;
-              WG_LOGI(TAG, "FIX11.2 GetEnvironmentStringsW -> 0x%X", mem);
+
+              ret_val =
+                  mem;
+
+              WG_LOGI(
+                  TAG,
+                  "FIX11.2 GetEnvironmentStringsW -> 0x%X",
+                  mem
+              );
 
           } else if (strcmp(fn, "GetEnvironmentStringsA") == 0) {
+
               static const char enva[] =
                   "TEMP=C:\\Temp\0"
                   "PATH=C:\\Windows\\System32\0";
-              uint32_t mem = wg_guest_alloc(engine, (uint32_t)sizeof(enva));
+
+              uint32_t mem =
+                  wg_guest_alloc(
+                      engine,
+                      (uint32_t)sizeof(enva)
+                  );
+
               if (mem) {
-                  wg_blink_write_mem(engine->blink, mem, enva, (uint32_t)sizeof(enva));
+
+                  wg_blink_write_mem(
+                      engine->blink,
+                      mem,
+                      enva,
+                      (uint32_t)sizeof(enva)
+                  );
               }
-              ret_val = mem;
-              WG_LOGI(TAG, "FIX11.2 GetEnvironmentStringsA -> 0x%X", mem);
 
-          } else if (strcmp(fn, "FreeEnvironmentStringsW") == 0 ||
-                     strcmp(fn, "FreeEnvironmentStringsA") == 0) {
-              // Guest heap is a bump allocator; leaving this tiny block mapped is safe.
-              ret_val = 1;
+              ret_val =
+                  mem;
 
-          } else if (strcmp(fn, "GetCurrentProcessId") == 0) {
-              ret_val = 0x1000;
-              WG_LOGI(TAG, "FIX11.2 GetCurrentProcessId -> 0x%X", (uint32_t)ret_val);
+              WG_LOGI(
+                  TAG,
+                  "FIX11.2 GetEnvironmentStringsA -> 0x%X",
+                  mem
+              );
 
-          } else if (strcmp(fn, "GetStdHandle") == 0) {
-              int32_t which = (int32_t)args[0];
-              if (which == -10)      ret_val = 0xF0;
-              else if (which == -11) ret_val = 0xF1;
-              else if (which == -12) ret_val = 0xF2;
-              else                   ret_val = 0xF1;
+          } else if (
+              strcmp(fn, "FreeEnvironmentStringsW") == 0 ||
+              strcmp(fn, "FreeEnvironmentStringsA") == 0
+          ) {
 
-              WG_LOGI(TAG,
-                      "FIX11.2 GetStdHandle(%d) -> 0x%X",
-                      which,
-                      (uint32_t)ret_val);
+              ret_val =
+                  1;
 
-          } else if (strcmp(fn, "GetProcessWindowStation") == 0) {
-              ret_val = 0x4400;
+          } else if (
+              strcmp(fn, "GetCurrentProcessId") == 0
+          ) {
 
-              WG_LOGI(TAG,
-                      "FIX11.2 GetProcessWindowStation -> 0x%X",
-                      (uint32_t)ret_val);
+              ret_val =
+                  0x1000;
 
-          } else if (strcmp(fn, "GetUserObjectInformationW") == 0 ||
-                     strcmp(fn, "GetUserObjectInformationA") == 0) {
-              uint32_t need = 12;
+              WG_LOGI(
+                  TAG,
+                  "FIX11.2 GetCurrentProcessId -> 0x%X",
+                  (uint32_t)ret_val
+              );
 
-              if (args[4]) {
+          } else if (
+              strcmp(fn, "GetStdHandle") == 0
+          ) {
+
+              int32_t which =
+                  (int32_t)args[0];
+
+              if (
+                  which == -10
+              ) {
+                  ret_val =
+                      0xF0;
+
+              } else if (
+                  which == -11
+              ) {
+                  ret_val =
+                      0xF1;
+
+              } else if (
+                  which == -12
+              ) {
+                  ret_val =
+                      0xF2;
+
+              } else {
+
+                  ret_val =
+                      0xF1;
+              }
+
+              WG_LOGI(
+                  TAG,
+                  "FIX11.2 GetStdHandle(%d) -> 0x%X",
+                  which,
+                  (uint32_t)ret_val
+              );
+
+          } else if (
+              strcmp(fn, "GetProcessWindowStation") == 0
+          ) {
+
+              ret_val =
+                  0x4400;
+
+              WG_LOGI(
+                  TAG,
+                  "FIX11.2 GetProcessWindowStation -> 0x%X",
+                  (uint32_t)ret_val
+              );
+
+          } else if (
+              strcmp(fn, "GetUserObjectInformationW") == 0 ||
+              strcmp(fn, "GetUserObjectInformationA") == 0
+          ) {
+
+              uint32_t need =
+                  12;
+
+              if (
+                  args[4]
+              ) {
                   wg_blink_write_mem(
                       engine->blink,
                       args[4],
@@ -474,6 +2761,7 @@ jobs:
                   args[2] &&
                   args[3] >= need
               ) {
+
                   uint32_t flags[3] = {
                       0,
                       0,
@@ -487,19 +2775,30 @@ jobs:
                       sizeof(flags)
                   );
 
-                  ret_val = 1;
-                  s_last_error = 0;
+                  ret_val =
+                      1;
+
+                  s_last_error =
+                      0;
 
               } else if (
                   !args[2] ||
                   args[3] < need
               ) {
-                  ret_val = 0;
-                  s_last_error = 122;
+
+                  ret_val =
+                      0;
+
+                  s_last_error =
+                      122;
 
               } else {
-                  ret_val = 1;
-                  s_last_error = 0;
+
+                  ret_val =
+                      1;
+
+                  s_last_error =
+                      0;
               }
 
               WG_LOGI(
@@ -511,7 +2810,10 @@ jobs:
                   (uint32_t)ret_val
               );
 
-          } else if (strcmp(fn, "GetLastActivePopup") == 0) {
+          } else if (
+              strcmp(fn, "GetLastActivePopup") == 0
+          ) {
+
               ret_val =
                   args[0]
                       ? args[0]
@@ -520,8 +2822,17 @@ jobs:
           } else if (strcmp(fn, "GetStringTypeW") == 0 ||
                      strcmp(fn, "GetStringTypeExW") == 0) {'''
 
-          if "FIX11.2 GetEnvironmentStringsW" not in s:
+          # ============================================================
+          # Add Win32 bootstrap handlers.
+          # ============================================================
+
+          if (
+              "FIX11.2 GetEnvironmentStringsW"
+              not in s
+          ) {
+
               if anchor not in s:
+
                   raise SystemExit(
                       "ERROR: FIX11.2 insertion anchor missing"
                   )
@@ -532,118 +2843,340 @@ jobs:
                   1
               )
 
-          old_lc = '''            bool is_ex = (fn[11] == 'E');
+          # ============================================================
+          # LCMapStringEx argument correction.
+          # ============================================================
+
+          if (
+              "LCMapStringEx must not shift these arguments"
+              not in s
+          ) {
+
+              lc_pattern =
+                  re.compile(
+                      r'''
+                      bool\s+is_ex\s*=\s*
+                      \(fn\[11\]\s*==\s*'E'\)
+                      \s*;\s*
+                      int\s+ofs\s*=\s*
+                      is_ex\s*\?\s*1\s*:\s*0
+                      \s*;
+                      ''',
+                      re.X |
+                      re.S
+                  )
+
+              lc_replacement = '''// POSTAL 2 FIX11.2
+            // LCMapStringEx must not shift these arguments.
+            int ofs = 0;'''
+
+              s, count =
+                  lc_pattern.subn(
+                      lc_replacement,
+                      s,
+                      count=1
+                  )
+
+              if count != 1:
+
+                  # Fallback for exact known WineGlass comment.
+
+                  old_lc = '''            bool is_ex = (fn[11] == 'E');
                       int ofs = is_ex ? 1 : 0; // LCMapStringEx has locale name as first arg'''
 
-          new_lc = '''            // FIX11.2: do not shift LCMapStringEx arguments.
-                      int ofs = 0;'''
+                  if old_lc in s:
 
-          if old_lc in s:
-              s = s.replace(
-                  old_lc,
-                  new_lc,
-                  1
-              )
+                      s = s.replace(
+                          old_lc,
+                          '''            // POSTAL 2 FIX11.2
+                      // LCMapStringEx must not shift these arguments.
+                      int ofs = 0;''',
+                          1
+                      )
 
-          elif new_lc not in s:
-              old1 = \
-                  "            bool is_ex = (fn[11] == 'E');"
+                  else:
 
-              old2 = \
-                  "            int ofs = is_ex ? 1 : 0; // LCMapStringEx has locale name as first arg"
+                      raise SystemExit(
+                          "ERROR: LCMapStringEx argument block missing"
+                      )
 
-              if old1 in s and old2 in s:
-                  s = s.replace(
-                      old1,
-                      "            // FIX11.2 LCMapStringEx argument layout",
-                      1
+          # ============================================================
+          # DllMain BOOL result.
+          #
+          # DllMain returning EAX=0 means initialization failed.
+          #
+          # Previous patch failed because it searched exact indentation.
+          # This version searches structurally.
+          # ============================================================
+
+          if (
+              "dll_result == 0"
+              not in s
+          ) {
+
+              dll_pattern =
+                  re.compile(
+                      r'''
+                      if\s*
+                      \(\s*!ok\s*\)
+                      \s*
+                      \{
+                      \s*
+                      WG_LOGE
+                      \s*
+                      \(
+                      \s*
+                      TAG
+                      \s*,
+                      \s*
+                      "FIX11\s+DllMain\s+FAILED\s+for\s+%s"
+                      \s*,
+                      \s*
+                      m->name
+                      \s*
+                      \)
+                      \s*
+                      ;
+                      \s*
+                      return\s+false\s*;
+                      \s*
+                      \}
+                      ''',
+                      re.X |
+                      re.S
                   )
 
-                  s = s.replace(
-                      old2,
-                      "            int ofs = 0;",
-                      1
+              dll_replacement = '''if (!ok || dll_result == 0) {
+
+                  WG_LOGE(
+                      TAG,
+                      "FIX11.2 DllMain FAILED for %s (runner_ok=%d result=0x%X)",
+                      m->name,
+                      ok ? 1 : 0,
+                      dll_result
+                  );
+
+                  return false;
+              }'''
+
+              s, count =
+                  dll_pattern.subn(
+                      dll_replacement,
+                      s,
+                      count=1
                   )
 
-              else:
+              if count != 1:
+
+                  print(
+                      "===== DLLMAIN DIAGNOSTIC ====="
+                  )
+
+                  pos =
+                      s.find(
+                          "FIX11 DllMain FAILED"
+                      )
+
+                  if pos >= 0:
+
+                      print(
+                          s[
+                              max(
+                                  0,
+                                  pos - 500
+                              ):
+                              min(
+                                  len(s),
+                                  pos + 700
+                              )
+                          ]
+                      )
+
                   raise SystemExit(
-                      "ERROR: LCMapStringEx argument block missing"
+                      "ERROR: FIX11 DllMain result block missing"
                   )
 
-          old_dll = '''              if (!ok) {
-                  WG_LOGE(TAG, "FIX11 DllMain FAILED for %s", m->name);
-                  return false;
-              }'''
+          # ============================================================
+          # Dynamic stdcall stack cleanup.
+          #
+          # Some dynamically generated Auto-stubs have num_args == 0.
+          # That corrupts ESP when VC120 calls Win32 functions.
+          # ============================================================
 
-          new_dll = '''              if (!ok || dll_result == 0) {
-                  WG_LOGE(TAG,
-                          "FIX11.2 DllMain FAILED for %s (runner_ok=%d result=0x%X)",
-                          m->name,
-                          ok ? 1 : 0,
-                          dll_result);
-                  return false;
-              }'''
+          if (
+              "POSTAL 2 FIX11.2: correct stdcall cleanup"
+              not in s
+          ) {
 
-          if old_dll in s:
-              s = s.replace(
-                  old_dll,
-                  new_dll,
-                  1
-              )
+              cleanup_pattern =
+                  re.compile(
+                      r'''
+                      int\s+num_args\s*=\s*
+                      entry\s*\?\s*
+                      entry->num_args\s*:\s*0
+                      \s*;
+                      \s*
+                      uint64_t\s+new_rsp\s*=\s*
+                      rsp
+                      \s*\+\s*
+                      ptr_size
+                      \s*\+\s*
+                      \(
+                      \s*
+                      num_args
+                      \s*\*\s*
+                      ptr_size
+                      \s*
+                      \)
+                      \s*;
+                      ''',
+                      re.X |
+                      re.S
+                  )
 
-          elif "dll_result == 0" not in s:
-              raise SystemExit(
-                  "ERROR: FIX11 DllMain result block missing"
-              )
+              cleanup_replacement = '''int num_args =
+                  entry
+                      ? entry->num_args
+                      : 0;
 
-          old_cleanup = '''    int num_args = entry ? entry->num_args : 0;
-              uint64_t new_rsp = rsp + ptr_size + (num_args * ptr_size);'''
-
-          new_cleanup = '''    int num_args = entry ? entry->num_args : 0;
-              // POSTAL 2 FIX11.2: correct stdcall cleanup for dynamically auto-stubbed APIs.
+              // POSTAL 2 FIX11.2: correct stdcall cleanup
+              // for dynamically auto-stubbed APIs.
               if (fn) {
-                  if (strcmp(fn, "GetStdHandle") == 0) num_args = 1;
-                  else if (strcmp(fn, "FreeEnvironmentStringsW") == 0 ||
-                           strcmp(fn, "FreeEnvironmentStringsA") == 0) num_args = 1;
-                  else if (strcmp(fn, "GetLastActivePopup") == 0) num_args = 1;
-                  else if (strcmp(fn, "GetUserObjectInformationW") == 0 ||
-                           strcmp(fn, "GetUserObjectInformationA") == 0) num_args = 5;
-                  else if (strcmp(fn, "LCMapStringW") == 0 ||
-                           strcmp(fn, "LCMapStringA") == 0) num_args = 6;
-                  else if (strcmp(fn, "LCMapStringEx") == 0) num_args = 9;
+
+                  if (
+                      strcmp(
+                          fn,
+                          "GetStdHandle"
+                      ) == 0
+                  ) {
+                      num_args =
+                          1;
+
+                  } else if (
+                      strcmp(
+                          fn,
+                          "FreeEnvironmentStringsW"
+                      ) == 0 ||
+                      strcmp(
+                          fn,
+                          "FreeEnvironmentStringsA"
+                      ) == 0
+                  ) {
+                      num_args =
+                          1;
+
+                  } else if (
+                      strcmp(
+                          fn,
+                          "GetLastActivePopup"
+                      ) == 0
+                  ) {
+                      num_args =
+                          1;
+
+                  } else if (
+                      strcmp(
+                          fn,
+                          "GetUserObjectInformationW"
+                      ) == 0 ||
+                      strcmp(
+                          fn,
+                          "GetUserObjectInformationA"
+                      ) == 0
+                  ) {
+                      num_args =
+                          5;
+
+                  } else if (
+                      strcmp(
+                          fn,
+                          "LCMapStringW"
+                      ) == 0 ||
+                      strcmp(
+                          fn,
+                          "LCMapStringA"
+                      ) == 0
+                  ) {
+                      num_args =
+                          6;
+
+                  } else if (
+                      strcmp(
+                          fn,
+                          "LCMapStringEx"
+                      ) == 0
+                  ) {
+                      num_args =
+                          9;
+                  }
               }
-              uint64_t new_rsp = rsp + ptr_size + (num_args * ptr_size);'''
 
-          if old_cleanup in s:
-              s = s.replace(
-                  old_cleanup,
-                  new_cleanup,
-                  1
-              )
+              uint64_t new_rsp =
+                  rsp +
+                  ptr_size +
+                  (
+                      num_args *
+                      ptr_size
+                  );'''
 
-          elif "POSTAL 2 FIX11.2: correct stdcall cleanup" not in s:
-              raise SystemExit(
-                  "ERROR: stdcall cleanup marker missing"
-              )
+              s, count =
+                  cleanup_pattern.subn(
+                      cleanup_replacement,
+                      s,
+                      count=1
+                  )
+
+              if count != 1:
+
+                  print(
+                      "===== STDCALL CLEANUP DIAGNOSTIC ====="
+                  )
+
+                  pos =
+                      s.find(
+                          "int num_args"
+                      )
+
+                  if pos >= 0:
+
+                      print(
+                          s[
+                              max(
+                                  0,
+                                  pos - 400
+                              ):
+                              min(
+                                  len(s),
+                                  pos + 700
+                              )
+                          ]
+                      )
+
+                  raise SystemExit(
+                      "ERROR: stdcall cleanup block missing"
+                  )
 
           p.write_text(s)
 
+          print("")
           print("==============================================")
-          print("POSTAL 2 FIX 11.2 PATCH INSTALLED")
-          print("GetEnvironmentStringsW/A       FIXED")
-          print("GetCurrentProcessId             FIXED")
-          print("GetStdHandle                    FIXED")
-          print("GetProcessWindowStation         FIXED")
-          print("GetUserObjectInformationW/A     FIXED")
-          print("GetLastActivePopup              FIXED")
-          print("LCMapStringEx argument layout   FIXED")
-          print("DllMain BOOL result check       FIXED")
-          print("Dynamic stdcall cleanup         FIXED")
-          print("LoadLibraryExW                  LEFT INTACT")
+          print("POSTAL 2 FIX 11.2 WIN32 PATCH INSTALLED")
+          print("==============================================")
+          print("GetEnvironmentStringsW/A      OK")
+          print("FreeEnvironmentStringsW/A     OK")
+          print("GetCurrentProcessId            OK")
+          print("GetStdHandle                   OK")
+          print("GetProcessWindowStation        OK")
+          print("GetUserObjectInformationW/A    OK")
+          print("GetLastActivePopup             OK")
+          print("LCMapStringEx args             OK")
+          print("DllMain BOOL result            OK")
+          print("Dynamic stdcall cleanup        OK")
+          print("LoadLibraryExW                 LEFT INTACT")
           print("==============================================")
           PY
 
-          echo "===== FIX 11.2 VERIFY ====="
+          echo "===== FIX11.2 SOURCE VERIFY ====="
 
           grep -n \
             "FIX11.2 GetEnvironmentStringsW" \
@@ -665,25 +3198,84 @@ jobs:
             "POSTAL 2 FIX11.2: correct stdcall cleanup" \
             WineGlass/Sources/Core/wg_engine.c
 
-          echo "FIX 11.2 VERIFY OK"
+          echo "========================================"
+          echo "FIX11.2 WIN32 PATCH VERIFY OK"
+          echo "========================================"
 
       - name: Patch WineGlass project
         shell: bash
         run: |
           set -euxo pipefail
+
           cd WineGlass
 
           python3 <<'PY'
-          import base64, zlib
-          payload = (
-              'eNqNUstuwjAQvOcrVr4QVBT1xSUSB0pMFSk8BAEJtZXlJqZ1ldiWbQr9+9qhLVKhD1+cXc/MzmZ3rWUNitrnij8Cr5XUFqYuDAIFveYrRErLF1'
-              'bY6K2uUDswLq8izWhJLNvZcJ8xLqMqWrAQPW5EWbG0nGq25rsYCllHWy7YU0WNQR04CVDSWFpdcmnQd8HWrpAlWzJtuBQxoItudI5aHTiRv0b3'
-              'AuDD71DqmtoYGthFl1y1jqxOZ5NkMcjJzWKcZJikCR7n6TDFs2+uI6qUd/4H/tBEJKjlr+y4l7w/u8U5TkiCl+kAk2F/lGYr775z2TT1MwA5/0'
-              'HlLHnJu4dgLTX4ELhwFYyquG1ew3YcgDt8DWgwSTCZp7dj4p3mGR65ex4jz/HgPdKfQgrLxYZ9UV19nE2mnkBy3B/9i3SoN89XGY6hv7HSTYEX'
-              'J9iN+V5zHUbyi0LnhP6Iig31a/kp2MyKiTL0gfthKtpqbtl+V916oOhFctG8mjacgU+1g3e30uyJ'
+          from pathlib import Path
+
+          p = Path(
+              "project.yml"
           )
-          code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-          exec(compile(code, "<POSTAL2-FIX11.2-6>", "exec"))
+
+          s = p.read_text()
+
+          s = s.replace(
+              "bundleIdPrefix: com.wineglass",
+              "bundleIdPrefix: com.postal2ios"
+          )
+
+          s = s.replace(
+              'xcodeVersion: "15.0"',
+              'xcodeVersion: "15.4"\n  projectFormat: xcode15_3'
+          )
+
+          s = s.replace(
+              "PRODUCT_BUNDLE_IDENTIFIER: com.wineglass.app",
+              "PRODUCT_BUNDLE_IDENTIFIER: com.postal2ios.native"
+          )
+
+          s = s.replace(
+              'TARGETED_DEVICE_FAMILY: "1,2"',
+              'TARGETED_DEVICE_FAMILY: "1"'
+          )
+
+          lines =
+              []
+
+          for line in s.splitlines():
+
+              if (
+                  "CODE_SIGN_ENTITLEMENTS:"
+                  in line
+              ):
+                  continue
+
+              if (
+                  "DEVELOPMENT_TEAM:"
+                  in line
+              ):
+                  continue
+
+              if (
+                  "CODE_SIGN_STYLE: Automatic"
+                  in line
+              ):
+                  line = line.replace(
+                      "CODE_SIGN_STYLE: Automatic",
+                      "CODE_SIGN_STYLE: Manual"
+                  )
+
+              lines.append(
+                  line
+              )
+
+          p.write_text(
+              "\n".join(lines) +
+              "\n"
+          )
+
+          print(
+              "WineGlass project patched"
+          )
           PY
 
       - name: Patch Info plist
@@ -721,7 +3313,8 @@ jobs:
             -c "Set :LSSupportsOpeningDocumentsInPlace true" \
             "$PLIST"
 
-          plutil -lint "$PLIST"
+          plutil -lint \
+            "$PLIST"
 
       - name: Patch POSTAL 2 launcher and log
         shell: bash
@@ -729,48 +3322,479 @@ jobs:
           set -euxo pipefail
 
           python3 <<'PY'
-          import base64, zlib
-          payload = (
-              'eNrNWOtu2zYU/u+nONPQ1U5dpUmBoXCWoUmsBAZcO7CddUNqBIxE2VxlUiCpJN4wYA+xJ9yT7JDUNXbSpNuP+Uci8XL4ne9cqViKFaRELxN2DW'
-              'yVCqnhHF9brRQO7VPb+8g4PUuIUrtTkcmQqt2jNN39eDYNKad9mtAF0dRfeZ2Wwj2pLymJrjS90+1Oq8Vi8L5lPEyyiMIPSkdM+MsfPeBCA+Og'
-              'ei3An9mocGOakJC2axsyznCP2dGFbcOf+BbhXdjDk0USodSXL1+aAy4GqEUkbi1m2LmtvRxC+95sR5n/By0L7XZxlYjFFeMM9TlAca0Wp7f/he'
-              'TRdKol4wvYiURoGMABSmS4NLSfCtlnkoZaSEbVgPfFijCu2nan290XYbaiXBfr1t3a5IWi0u35QNTnauaXYGqfO37MpNLj619x7wYg1NiAQEyX'
-              'Fpuy48drNDzlET6a2ROB/sIRQO+9dz6ezo6G+69LX/FRhDc/sHIvL0fTU5bQD4STBZUQ0Zhkic5f5yDpStzQgaarI20E94rjqZRC9jhLckGxpA'
-              'IBtPN5VCGh07XCjROaSqoQC9FMcPQVgl6ADoESOm6vovrmOovbbrALo4vhsAtXg/Ho+LQLbzo5B3GKmupyWcmb+XmHT/x9+sS95k7HD+xDSRCc'
-              'Dn6Gvb3NpZMAF/50srf/Bl7ByXgS7Aajs8EogP5wOMWh8+DtPgyOZps7nwMvZyWOk0wt2yVTW1zeDn08uxqOzwbtwtAmHJ0C/j7g4oVxG6WJ1D'
-              'Ty8jDB0Dcx2Ix0SZii4IwW3OEBXjCZjCc9sJHhRGQprIj8jJ6yYkqh5Dy1VBkC5XYBw7AR6ZeImkTHmdaCG3PPmE4o+ibAEMfBp3cUSYJYyCm6'
-              'Ce1dDE4E11Ik9nUk5Iqgo70swvthcZOLEZQGfYrE5zFx7Y7U5rx/wQCJohmRC6p7iiYxkNBERu89vths0TaRZKLynIVIdcdokaMPbjCQVKWNfZ'
-              '+JLFxepAOuWEQfoulLZ8qMnwu0cbL//PO+ikSH4Iks5k53iJUmlWSxItYN4TXm+CLXOrKKoucZUPmuJ+KKckGQWkmbjt5aUb0UkcEpTRi9hnaV'
-              'lzsxVpOcwQDd+ff/eyGRAml5ehVxmp1mSdInmhT1o1k9duKVkfhoSdnAwW0smn0W0ReROMvt5oBM6ijAoMXblwjB1B60rNIqL1ruiHkHy5nOJA'
-              'f3XiIpyQ04ki0JPsIOrZ4RGkqtBnKpBm5R/XBVzRckTbDY3VDjddW2Tu4TJdTLch1WHd3Qcw4hURQjjGKQmSVmhkhaWcIpDofGpcYSawSNpmRF'
-              '64c0eY5FxqOn0lwgy/UrfltrjZWLDGZS4Y5k3YMXCifsef7F7PSdQ9BpispNYVdVM3+03N9aZQsap9W0h9F4Bqfji1G/KJmFeRnaFmVgfN4IFn'
-              'Wq1JaTo0wvEsLxeDyE1M5MXX00ATrO/cKY6JsryrF+Nljdhiqwq2yiMS322qsp60Ad1BWrjGLUQJPYlNxMIDWf/gZX1RE8XP5ySH7wc1Cx84Q6'
-              '+BhYg6BB0iYZHxtk9LM0YSFKR7fOeLgEtsCAs83HY+fcNwRmMTdf09annFwnTTtVZCqbGTCaDaWG2cLJTVHQ+DTcCLNcxu6u6fn29noYsQZFAn'
-              'pJQcQxCxnmpp9OXr2C/Td7b+Hu3feA7qTZimId45HBgkFuVg/OjwpZHG9YoAXUnVUJuwrdI8E+0XSMYPTCBBkSbm0PTPtfnVTdviMpyfqHipEf'
-              'YecmNO3qIby/fO+t1E0o8dWPkgQt5QbSYqAg414yw6kRJhajppVVN3+Ne2TeVpN89X3qDe3BnTbpTPCaw1USHJ39xJYCVPfYvoMpb+5x3sgfqS'
-              'ugE6rszbdnADQWiHi2Tk1YGN0aM4yXGR+nbT/vbYWkbcOUQ6q86wu5M6egoLOM4lLB+zl6W0ax7li62AtVtiFdyOU/nFofzg/u7oJN8mzwIYAP'
-              'g+l0MDp7Tn7YFqgmEuvz2+O1DOdtKaCWBpwFAnO9hJ1QpGv3eOiyeqN+biv1pcnm91k2yzeus5WF719oq2pUGtBIMIhq+yun1WKrwO9KFeZfNn'
-              'tjurw7OleICTNEYlYxEtEjXJndumXTQ7avK7H5iQhJwn6jUZ+qULLUtOZf72An4/Nf4PRoMAz6/xvnerSFsQw77HkBoFHexpQG3aSjKJB4ZQgj'
-              'TESYkBFLuIyYbJfZ4sEvIY9c391yiMos5aBUMjegbJNigSATOa4XEQ4WOIvvCQ9bEsVMZiY7FNdp3/efasxtaIa2FzBpFW872C2ZMljrZHM9XC'
-              'dkMB3xaIJ9W9CjthdCru2Xi+Yl0V3RulBczF6B94l7+K+YqG7gXsOB7TFarodWe5tkz4P5gdf8gPiYz+Qtn2334O8//3INhL8PJNPitf1Y4t0P'
-              'G3tq1Y3O7ceY512eK+nP+xCT+reSaeo+/qpO6x+Gxc8i'
+          from pathlib import Path
+
+          p = Path(
+              "WineGlass/Sources/App/WGSceneDelegate.m"
           )
-          code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-          exec(compile(code, "<POSTAL2-FIX11.2-7>", "exec"))
+
+          s = p.read_text()
+
+          if (
+              "#include <stdio.h>"
+              not in s
+          ) {
+              s = s.replace(
+                  "#include <unistd.h>",
+                  "#include <unistd.h>\n#include <stdio.h>",
+                  1
+              )
+          }
+
+          old = '''    UIWindowScene *windowScene = (UIWindowScene *)scene;
+
+              wg_log_init();'''
+
+          new = '''    UIWindowScene *windowScene = (UIWindowScene *)scene;
+
+              NSString *docs =
+                  NSSearchPathForDirectoriesInDomains(
+                      NSDocumentDirectory,
+                      NSUserDomainMask,
+                      YES
+                  ).firstObject;
+
+              NSString *logPath =
+                  [docs
+                      stringByAppendingPathComponent:
+                          @"POSTAL2-WineGlass.log"];
+
+              [[NSFileManager defaultManager]
+                  removeItemAtPath:
+                      logPath
+                  error:
+                      nil];
+
+              freopen(
+                  logPath.fileSystemRepresentation,
+                  "a",
+                  stderr
+              );
+
+              setvbuf(
+                  stderr,
+                  NULL,
+                  _IONBF,
+                  0
+              );
+
+              fprintf(
+                  stderr,
+                  "========================================\\n"
+                  "POSTAL 2 WineGlass FIX 11.2\\n"
+                  "VC120 + WIN32 CRT ENVIRONMENT FIX\\n"
+                  "========================================\\n"
+              );
+
+              fflush(
+                  stderr
+              );
+
+              wg_log_init();
+
+              WG_LOGI(
+                  "POSTAL2",
+                  "FIX 11.2 logging started"
+              );'''
+
+          if old not in s:
+
+              raise SystemExit(
+                  "ERROR: scene startup marker missing"
+              )
+
+          s = s.replace(
+              old,
+              new,
+              1
+          )
+
+          old = \
+              '[_loadButton setTitle:@"  Load .exe  " forState:UIControlStateNormal];'
+
+          new = \
+              '[_loadButton setTitle:@"  RUN POSTAL 2  " forState:UIControlStateNormal];'
+
+          if old not in s:
+
+              raise SystemExit(
+                  "ERROR: button title missing"
+              )
+
+          s = s.replace(
+              old,
+              new,
+              1
+          )
+
+          old = \
+              '[_loadButton addTarget:self action:@selector(openFilePicker) forControlEvents:UIControlEventTouchUpInside];'
+
+          new = \
+              '[_loadButton addTarget:self action:@selector(runPostal2) forControlEvents:UIControlEventTouchUpInside];'
+
+          if old not in s:
+
+              raise SystemExit(
+                  "ERROR: button action missing"
+              )
+
+          s = s.replace(
+              old,
+              new,
+              1
+          )
+
+          marker = \
+              "#pragma mark - UIDocumentPickerDelegate"
+
+          if marker not in s:
+
+              raise SystemExit(
+                  "ERROR: document picker marker missing"
+              )
+
+          methods = r'''
+          - (NSString *)findPostal2Exe {
+
+              NSString *docs =
+                  NSSearchPathForDirectoriesInDomains(
+                      NSDocumentDirectory,
+                      NSUserDomainMask,
+                      YES
+                  ).firstObject;
+
+              NSString *root =
+                  [docs
+                      stringByAppendingPathComponent:
+                          @"Postal2FullData"];
+
+              NSFileManager *fm =
+                  [NSFileManager
+                      defaultManager];
+
+              NSString *normal =
+                  [root
+                      stringByAppendingPathComponent:
+                          @"System/Postal2.exe"];
+
+              if (
+                  [fm
+                      fileExistsAtPath:
+                          normal]
+              ) {
+                  return
+                      normal;
+              }
+
+              NSDirectoryEnumerator *enumerator =
+                  [fm
+                      enumeratorAtPath:
+                          root];
+
+              for (
+                  NSString *relative
+                  in
+                  enumerator
+              ) {
+                  if (
+                      [[relative lastPathComponent]
+                          caseInsensitiveCompare:
+                              @"Postal2.exe"]
+                      ==
+                      NSOrderedSame
+                  ) {
+                      NSString *found =
+                          [root
+                              stringByAppendingPathComponent:
+                                  relative];
+
+                      WG_LOGI(
+                          "POSTAL2",
+                          "Found recursively: %s",
+                          found.UTF8String
+                      );
+
+                      return
+                          found;
+                  }
+              }
+
+              WG_LOGE(
+                  "POSTAL2",
+                  "Postal2.exe NOT FOUND"
+              );
+
+              return
+                  nil;
+          }
+
+          - (void)runPostal2 {
+
+              static BOOL postalStarted =
+                  NO;
+
+              if (!_engine) {
+
+                  WG_LOGE(
+                      "POSTAL2",
+                      "Engine not ready"
+                  );
+
+                  return;
+              }
+
+              NSString *exe =
+                  [self
+                      findPostal2Exe];
+
+              if (!exe) {
+
+                  [_loadButton
+                      setTitle:
+                          @"  POSTAL2.EXE NOT FOUND  "
+                      forState:
+                          UIControlStateNormal];
+
+                  return;
+              }
+
+              if (
+                  postalStarted
+              ) {
+
+                  WG_LOGW(
+                      "POSTAL2",
+                      "Duplicate launch ignored"
+                  );
+
+                  return;
+              }
+
+              postalStarted =
+                  YES;
+
+              _loadButton.enabled =
+                  NO;
+
+              NSString *systemDir =
+                  [exe
+                      stringByDeletingLastPathComponent];
+
+              NSFileManager *fm =
+                  [NSFileManager
+                      defaultManager];
+
+              NSArray<NSString *> *vc120 =
+                  @[
+                      @"msvcr120.dll",
+                      @"msvcp120.dll"
+                  ];
+
+              for (
+                  NSString *dllName
+                  in
+                  vc120
+              ) {
+                  NSString *stem =
+                      [dllName
+                          stringByDeletingPathExtension];
+
+                  NSString *bundleDll =
+                      [[NSBundle mainBundle]
+                          pathForResource:
+                              stem
+                          ofType:
+                              @"dll"
+                          inDirectory:
+                              @"VC120"];
+
+                  NSString *targetDll =
+                      [systemDir
+                          stringByAppendingPathComponent:
+                              dllName];
+
+                  if (!bundleDll) {
+
+                      WG_LOGE(
+                          "POSTAL2",
+                          "FIX11.2 bundled %s missing",
+                          dllName.UTF8String
+                      );
+
+                      [_loadButton
+                          setTitle:
+                              @"  VC120 RUNTIME MISSING  "
+                          forState:
+                              UIControlStateNormal];
+
+                      postalStarted =
+                          NO;
+
+                      _loadButton.enabled =
+                          YES;
+
+                      return;
+                  }
+
+                  NSError *copyError =
+                      nil;
+
+                  if (
+                      [fm
+                          fileExistsAtPath:
+                              targetDll]
+                  ) {
+
+                      [fm
+                          removeItemAtPath:
+                              targetDll
+                          error:
+                              nil];
+                  }
+
+                  if (
+                      ![fm
+                          copyItemAtPath:
+                              bundleDll
+                          toPath:
+                              targetDll
+                          error:
+                              &copyError]
+                  ) {
+
+                      WG_LOGE(
+                          "POSTAL2",
+                          "FIX11.2 failed to copy %s: %s",
+                          dllName.UTF8String,
+                          copyError
+                              .localizedDescription
+                              .UTF8String
+                      );
+
+                      [_loadButton
+                          setTitle:
+                              @"  VC120 COPY FAILED  "
+                          forState:
+                              UIControlStateNormal];
+
+                      postalStarted =
+                          NO;
+
+                      _loadButton.enabled =
+                          YES;
+
+                      return;
+                  }
+
+                  WG_LOGI(
+                      "POSTAL2",
+                      "FIX11.2 VC120 installed: %s",
+                      targetDll.UTF8String
+                  );
+              }
+
+              int cdResult =
+                  chdir(
+                      systemDir
+                          .fileSystemRepresentation
+                  );
+
+              WG_LOGI(
+                  "POSTAL2",
+                  "System directory: %s",
+                  systemDir.UTF8String
+              );
+
+              WG_LOGI(
+                  "POSTAL2",
+                  "chdir result = %d",
+                  cdResult
+              );
+
+              [_loadButton
+                  setTitle:
+                      @"  RUNNING POSTAL 2...  "
+                  forState:
+                      UIControlStateNormal];
+
+              WG_LOGI(
+                  "POSTAL2",
+                  "Launching original Postal2.exe FIX11.2"
+              );
+
+              [self
+                  loadAndRunPE:
+                      exe];
+          }
+
+          '''
+
+          s = s.replace(
+              marker,
+              methods +
+                  "\n" +
+                  marker,
+              1
+          )
+
+          old = \
+              "            [self tryLoadBundledPE];"
+
+          new = '''            WG_LOGI(
+                          "POSTAL2",
+                          "Engine ready — FIX11.2 auto-start"
+                      );
+
+                      [self runPostal2];'''
+
+          if old not in s:
+
+              raise SystemExit(
+                  "ERROR: auto-start marker missing"
+              )
+
+          s = s.replace(
+              old,
+              new,
+              1
+          )
+
+          p.write_text(s)
+
+          print(
+              "POSTAL 2 FIX11.2 launcher installed"
+          )
           PY
 
       - name: Generate Xcode project
         shell: bash
         run: |
           set -euxo pipefail
-          cd WineGlass
-          rm -rf WineGlass.xcodeproj
-          xcodegen generate
-          test -f WineGlass.xcodeproj/project.pbxproj
-          grep -m1 "objectVersion" WineGlass.xcodeproj/project.pbxproj || true
 
-          if grep -q "objectVersion = 77" WineGlass.xcodeproj/project.pbxproj; then
-            echo "ERROR: unsupported objectVersion 77"
+          cd WineGlass
+
+          rm -rf \
+            WineGlass.xcodeproj
+
+          xcodegen generate
+
+          test -f \
+            WineGlass.xcodeproj/project.pbxproj
+
+          grep -m1 \
+            "objectVersion" \
+            WineGlass.xcodeproj/project.pbxproj || true
+
+          if \
+            grep -q \
+              "objectVersion = 77" \
+              WineGlass.xcodeproj/project.pbxproj
+          then
+
+            echo \
+              "ERROR: unsupported objectVersion 77"
+
             exit 1
           fi
 
@@ -778,8 +3802,11 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+
           cd WineGlass
-          rm -rf build
+
+          rm -rf \
+            build
 
           xcodebuild \
             -project WineGlass.xcodeproj \
@@ -796,7 +3823,8 @@ jobs:
             DEVELOPMENT_TEAM="" \
             PRODUCT_BUNDLE_IDENTIFIER=com.postal2ios.native \
             build \
-            2>&1 | tee xcodebuild.log
+            2>&1 |
+            tee xcodebuild.log
 
       - name: Verify POSTAL 2 app
         shell: bash
@@ -805,10 +3833,14 @@ jobs:
 
           APP="WineGlass/build/Build/Products/Release-iphoneos/WineGlass.app"
 
-          test -d "$APP"
-          test -f "$APP/WineGlass"
+          test -d \
+            "$APP"
 
-          lipo -info "$APP/WineGlass"
+          test -f \
+            "$APP/WineGlass"
+
+          lipo -info \
+            "$APP/WineGlass"
 
           ID=$(
             /usr/libexec/PlistBuddy \
@@ -818,7 +3850,9 @@ jobs:
 
           echo "$ID"
 
-          test "$ID" = "com.postal2ios.native"
+          test \
+            "$ID" = \
+            "com.postal2ios.native"
 
       - name: Package IPA
         shell: bash
@@ -826,13 +3860,19 @@ jobs:
           set -euxo pipefail
 
           ROOT="$GITHUB_WORKSPACE"
+
           APP="$ROOT/WineGlass/build/Build/Products/Release-iphoneos/WineGlass.app"
+
           OUT="$ROOT/out"
 
-          rm -rf "$OUT"
+          rm -rf \
+            "$OUT"
 
-          mkdir -p "$OUT/Payload"
-          mkdir -p "$APP/VC120"
+          mkdir -p \
+            "$OUT/Payload"
+
+          mkdir -p \
+            "$APP/VC120"
 
           cp \
             "$ROOT/vc120-runtime/msvcr120.dll" \
@@ -842,14 +3882,18 @@ jobs:
             "$ROOT/vc120-runtime/msvcp120.dll" \
             "$APP/VC120/msvcp120.dll"
 
-          test -s "$APP/VC120/msvcr120.dll"
-          test -s "$APP/VC120/msvcp120.dll"
+          test -s \
+            "$APP/VC120/msvcr120.dll"
+
+          test -s \
+            "$APP/VC120/msvcp120.dll"
 
           cp -R \
             "$APP" \
             "$OUT/Payload/POSTAL 2.app"
 
-          cd "$OUT"
+          cd \
+            "$OUT"
 
           zip -qry \
             "POSTAL-2-iOS-v11.2-VC120-WIN32-FIX.ipa" \
@@ -870,7 +3914,8 @@ jobs:
         if: always()
         shell: bash
         run: |
-          mkdir -p debug-fix11-2
+          mkdir -p \
+            debug-fix11-2
 
           cp \
             WineGlass/xcodebuild.log \
