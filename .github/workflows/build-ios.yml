@@ -59,60 +59,220 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+
           ROOT="$GITHUB_WORKSPACE"
           REDIST="$ROOT/vcredist_x86.exe"
           STAGE="$ROOT/vc120-stage"
           OUT="$ROOT/vc120-runtime"
 
           rm -rf "$STAGE" "$OUT" "$REDIST"
-          mkdir -p "$STAGE/bundle" "$OUT"
+
+          mkdir -p \
+            "$STAGE/bundle" \
+            "$STAGE/pass1" \
+            "$STAGE/pass2" \
+            "$OUT"
 
           URL1="https://download.visualstudio.microsoft.com/download/pr/10912113/5da66ddebb0ad32ebd4b922fd82e8e25/vcredist_x86.exe"
           URL2="https://download.microsoft.com/download/2/E/6/2E61CFA4-993B-4DD4-91DA-3737CD5CD6E3/vcredist_x86.exe"
 
-          if ! curl -fL --retry 3 --connect-timeout 20 "$URL1" -o "$REDIST"; then
-            curl -fL --retry 3 --connect-timeout 20 "$URL2" -o "$REDIST"
+          echo "===== DOWNLOAD VC++ 2013 X86 ====="
+
+          if ! curl \
+            -fL \
+            --retry 3 \
+            --connect-timeout 20 \
+            "$URL1" \
+            -o "$REDIST"
+          then
+            curl \
+              -fL \
+              --retry 3 \
+              --connect-timeout 20 \
+              "$URL2" \
+              -o "$REDIST"
           fi
 
           test -s "$REDIST"
-          7zz x -y "$REDIST" -o"$STAGE/bundle" >/dev/null
 
-          echo "===== VCREDIST PAYLOAD ====="
-          find "$STAGE/bundle" -maxdepth 4 -type f -print | head -120
+          echo "===== REDIST FILE ====="
 
-          i=0
-          while IFS= read -r msi; do
-            i=$((i + 1))
-            d="$STAGE/msi-$i"
-            mkdir -p "$d"
-            msiextract -C "$d" "$msi" || true
-          done < <(find "$STAGE/bundle" -type f -iname '*.msi' -print)
+          ls -lh "$REDIST"
+          file "$REDIST" || true
 
-          i=0
-          while IFS= read -r cab; do
-            i=$((i + 1))
-            d="$STAGE/cab-$i"
-            mkdir -p "$d"
-            7zz x -y "$cab" -o"$d" >/dev/null || true
-          done < <(find "$STAGE/bundle" -type f -iname '*.cab' -print)
+          echo "===== EXTRACT BUNDLE ====="
 
-          MSVCR="$(find "$STAGE" -type f -iname 'msvcr120.dll' -print | head -1 || true)"
-          MSVCP="$(find "$STAGE" -type f -iname 'msvcp120.dll' -print | head -1 || true)"
+          7zz x \
+            -y \
+            "$REDIST" \
+            -o"$STAGE/bundle"
 
-          if [ -z "$MSVCR" ] || [ -z "$MSVCP" ]; then
-            echo "ERROR: VC++ 2013 x86 DLLs were not extracted"
-            find "$STAGE" -type f -print | tail -200
+          echo "===== BUNDLE CONTENT ====="
+
+          find \
+            "$STAGE/bundle" \
+            -type f \
+            -print
+
+          echo "===== PASS 1 ====="
+
+          INDEX=0
+
+          while IFS= read -r FILE
+          do
+            INDEX=$((INDEX + 1))
+
+            DEST="$STAGE/pass1/$INDEX"
+
+            mkdir -p "$DEST"
+
+            echo
+            echo "----------------------------------------"
+            echo "PASS1 FILE: $FILE"
+            echo "TYPE:"
+            file "$FILE" || true
+            echo "----------------------------------------"
+
+            7zz x \
+              -y \
+              "$FILE" \
+              -o"$DEST" \
+              >/dev/null 2>&1 || true
+
+          done < <(
+            find \
+              "$STAGE/bundle" \
+              -type f \
+              -print
+          )
+
+          echo "===== PASS 1 CONTENT ====="
+
+          find \
+            "$STAGE/pass1" \
+            -type f \
+            -print | head -300
+
+          echo "===== PASS 2 ====="
+
+          INDEX=0
+
+          while IFS= read -r FILE
+          do
+            INDEX=$((INDEX + 1))
+
+            DEST="$STAGE/pass2/$INDEX"
+
+            mkdir -p "$DEST"
+
+            7zz x \
+              -y \
+              "$FILE" \
+              -o"$DEST" \
+              >/dev/null 2>&1 || true
+
+          done < <(
+            find \
+              "$STAGE/pass1" \
+              -type f \
+              -print
+          )
+
+          echo "===== SEARCH VC120 ====="
+
+          find \
+            "$STAGE" \
+            -type f \
+            -print | grep -Ei \
+            'msvc(r|p)120|cab|msi' || true
+
+          MSVCR="$(
+            find \
+              "$STAGE" \
+              -type f \
+              -iname 'msvcr120.dll' \
+              -print \
+              | head -1
+          )"
+
+          MSVCP="$(
+            find \
+              "$STAGE" \
+              -type f \
+              -iname 'msvcp120.dll' \
+              -print \
+              | head -1
+          )"
+
+          if [ -z "$MSVCR" ]; then
+            echo "ERROR: msvcr120.dll NOT FOUND"
+
+            echo "===== ALL EXTRACTED FILES ====="
+
+            find \
+              "$STAGE" \
+              -type f \
+              -print | tail -500
+
             exit 1
           fi
 
-          cp "$MSVCR" "$OUT/msvcr120.dll"
-          cp "$MSVCP" "$OUT/msvcp120.dll"
+          if [ -z "$MSVCP" ]; then
+            echo "ERROR: msvcp120.dll NOT FOUND"
+
+            echo "===== ALL EXTRACTED FILES ====="
+
+            find \
+              "$STAGE" \
+              -type f \
+              -print | tail -500
+
+            exit 1
+          fi
+
+          echo "FOUND MSVCR:"
+          echo "$MSVCR"
+
+          echo "FOUND MSVCP:"
+          echo "$MSVCP"
+
+          cp \
+            "$MSVCR" \
+            "$OUT/msvcr120.dll"
+
+          cp \
+            "$MSVCP" \
+            "$OUT/msvcp120.dll"
 
           echo "===== VC120 READY ====="
+
           ls -lh "$OUT"
-          file "$OUT/msvcr120.dll" "$OUT/msvcp120.dll"
-          grep -a -q 'This program cannot be run in DOS mode' "$OUT/msvcr120.dll"
-          grep -a -q 'This program cannot be run in DOS mode' "$OUT/msvcp120.dll"
+
+          file \
+            "$OUT/msvcr120.dll" \
+            "$OUT/msvcp120.dll"
+
+          test -s \
+            "$OUT/msvcr120.dll"
+
+          test -s \
+            "$OUT/msvcp120.dll"
+
+          grep \
+            -a \
+            -q \
+            'This program cannot be run in DOS mode' \
+            "$OUT/msvcr120.dll"
+
+          grep \
+            -a \
+            -q \
+            'This program cannot be run in DOS mode' \
+            "$OUT/msvcp120.dll"
+
+          echo "========================================"
+          echo "FIX11 VC++ 2013 X86 RUNTIME READY"
+          echo "========================================"
 
       - name: Configure Blink for iPhone ARM64
         shell: bash
@@ -154,7 +314,6 @@ jobs:
               "HAVE_SCHED_YIELD",
               "HAVE_SCHED_H",
           ]
-
           enable = [
               "HAVE_DEV_URANDOM",
               "HAVE_SYS_MOUNT_H",
@@ -166,10 +325,8 @@ jobs:
               s = re.sub(rf'(?m)^\s*#undef\s+{re.escape(name)}\b.*$', '', s)
 
           s += "\n/* POSTAL 2 iOS FIX 11 */\n"
-
           for name in disable:
               s += f"#undef {name}\n"
-
           for name in enable:
               s += f"#define {name} 1\n"
 
@@ -191,28 +348,16 @@ jobs:
           s = p.read_text()
 
           pattern = r'''static\s+int\s+SysSchedYield\s*\(\s*struct\s+Machine\s*\*m\s*\)\s*\{.*?\n\}'''
-
           replacement = '''static int SysSchedYield(struct Machine *m) {
             (void)m;
             return 0;
           }'''
 
-          s, count = re.subn(
-              pattern,
-              replacement,
-              s,
-              count=1,
-              flags=re.S
-          )
-
+          s, count = re.subn(pattern, replacement, s, count=1, flags=re.S)
           if count != 1:
               raise SystemExit("ERROR: SysSchedYield patch failed")
 
-          s = s.replace(
-              "        sched_yield();",
-              "        /* sched_yield disabled on iOS */"
-          )
-
+          s = s.replace("        sched_yield();", "        /* sched_yield disabled on iOS */")
           if "return sched_yield();" in s:
               raise SystemExit("ERROR: sched_yield remains")
 
@@ -224,30 +369,22 @@ jobs:
         run: |
           set -euxo pipefail
           export PATH="$(brew --prefix)/bin:$PATH"
-
           ROOT="$GITHUB_WORKSPACE"
           BLINK="$ROOT/blink-src"
           WG="$ROOT/WineGlass"
-
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           CC="$(xcrun --sdk iphoneos --find clang)"
           AR="$(xcrun --sdk iphoneos --find ar)"
-
           cd "$BLINK"
           rm -f o//blink/blink.a
-
           gmake \
             -j2 \
             CC="$CC" \
             AR="$AR" \
             CFLAGS="-O2 -arch arm64 -isysroot $SDK -miphoneos-version-min=17.0" \
             o//blink/blink.a
-
           test -f o//blink/blink.a
-
-          cp o//blink/blink.a \
-            "$WG/Vendor/blink/lib/blink.a"
-
+          cp o//blink/blink.a "$WG/Vendor/blink/lib/blink.a"
           test -f "$WG/Vendor/blink/lib/blink.a"
 
       - name: Patch Blink VM mmap FIX 11
@@ -263,43 +400,29 @@ jobs:
           if "#include <errno.h>" not in s:
               if "#include <stdio.h>" not in s:
                   raise SystemExit("ERROR: stdio include missing")
-
               s = s.replace(
                   "#include <stdio.h>",
                   "#include <stdio.h>\n#include <errno.h>\n#include <sys/mman.h>",
                   1,
               )
 
-          start_marker = \
-              "static struct WGBlinkVM *create_vm_with_mode(struct XedMachineMode mode) {"
-
-          end_marker = \
-              "struct WGBlinkVM *WGBlinkVM_Create(void) {"
-
+          start_marker = "static struct WGBlinkVM *create_vm_with_mode(struct XedMachineMode mode) {"
+          end_marker = "struct WGBlinkVM *WGBlinkVM_Create(void) {"
           start = s.find(start_marker)
           end = s.find(end_marker, start)
-
           if start == -1 or end == -1:
-              raise SystemExit(
-                  "ERROR: create_vm_with_mode markers missing"
-              )
+              raise SystemExit("ERROR: create_vm_with_mode markers missing")
 
           new_function = r'''static struct WGBlinkVM *create_vm_with_mode(struct XedMachineMode mode) {
-              fprintf(stderr,
-                      "[FIX11/BLINK] CREATE VM mode=%d\n",
-                      mode.omode);
+              fprintf(stderr, "[FIX11/BLINK] CREATE VM mode=%d\n", mode.omode);
               fflush(stderr);
 
               ensure_initialized();
 
-              struct WGBlinkVM *vm =
-                  calloc(1, sizeof(struct WGBlinkVM));
-
-              if (!vm)
-                  return NULL;
+              struct WGBlinkVM *vm = calloc(1, sizeof(struct WGBlinkVM));
+              if (!vm) return NULL;
 
               vm->s = NewSystem(mode);
-
               if (!vm->s) {
                   free(vm);
                   return NULL;
@@ -307,13 +430,8 @@ jobs:
 
               if (!vm->s->real) {
                   long pagesize = FLAG_pagesize;
-
-                  long real_size =
-                      (kRealSize + pagesize - 1) &
-                      ~(pagesize - 1);
-
+                  long real_size = (kRealSize + pagesize - 1) & ~(pagesize - 1);
                   errno = 0;
-
                   vm->s->real = Mmap(
                       NULL,
                       real_size,
@@ -323,22 +441,12 @@ jobs:
                       0,
                       "real"
                   );
-
                   int e = errno;
-
-                  fprintf(
-                      stderr,
-                      "[FIX11/BLINK] Mmap real=%p errno=%d (%s)\n",
-                      (void *)vm->s->real,
-                      e,
-                      e ? strerror(e) : "OK"
-                  );
-
+                  fprintf(stderr, "[FIX11/BLINK] Mmap real=%p errno=%d (%s)\n",
+                          (void *)vm->s->real, e, e ? strerror(e) : "OK");
                   fflush(stderr);
 
-                  if (vm->s->real == MAP_FAILED ||
-                      !vm->s->real) {
-
+                  if (vm->s->real == MAP_FAILED || !vm->s->real) {
                       vm->s->real = NULL;
                       FreeSystem(vm->s);
                       free(vm);
@@ -347,7 +455,6 @@ jobs:
               }
 
               vm->m = NewMachine(vm->s, NULL);
-
               if (!vm->m) {
                   FreeSystem(vm->s);
                   free(vm);
@@ -355,56 +462,28 @@ jobs:
               }
 
               if (mode.omode == XED_MODE_LONG) {
-
-                  vm->s->cr0 =
-                      CR0_PE |
-                      CR0_MP |
-                      CR0_ET |
-                      CR0_PG;
-
-                  vm->s->cr3 =
-                      AllocatePageTable(vm->s);
-
+                  vm->s->cr0 = CR0_PE | CR0_MP | CR0_ET | CR0_PG;
+                  vm->s->cr3 = AllocatePageTable(vm->s);
                   if (vm->s->cr3 == (u64)-1) {
                       FreeMachine(vm->m);
                       FreeSystem(vm->s);
                       free(vm);
                       return NULL;
                   }
-
-              } else if (
-                  mode.omode == XED_MODE_LEGACY
-              ) {
-
-                  vm->s->cr0 =
-                      CR0_PE |
-                      CR0_MP |
-                      CR0_ET;
+              } else if (mode.omode == XED_MODE_LEGACY) {
+                  vm->s->cr0 = CR0_PE | CR0_MP | CR0_ET;
               }
 
               vm->m->flags |= (1 << 9);
-
-              fprintf(
-                  stderr,
-                  "[FIX11/BLINK] VM CREATE SUCCESS real=%p cr3=%llu\n",
-                  (void *)vm->s->real,
-                  (unsigned long long)vm->s->cr3
-              );
-
+              fprintf(stderr, "[FIX11/BLINK] VM CREATE SUCCESS real=%p cr3=%llu\n",
+                      (void *)vm->s->real, (unsigned long long)vm->s->cr3);
               fflush(stderr);
-
               return vm;
           }
 
           '''
 
-          s = (
-              s[:start] +
-              new_function +
-              "\n" +
-              s[end:]
-          )
-
+          s = s[:start] + new_function + "\n" + s[end:]
           p.write_text(s)
           PY
 
@@ -412,16 +491,12 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-
           ROOT="$GITHUB_WORKSPACE"
           BLINK="$ROOT/blink-src"
           WG="$ROOT/WineGlass"
-
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
           CC="$(xcrun --sdk iphoneos --find clang)"
-
           cd "$BLINK"
-
           "$CC" \
             -c \
             -std=c11 \
@@ -436,49 +511,32 @@ jobs:
             -include "$BLINK/config.h" \
             "$WG/Vendor/blink/wg_blink_impl.c" \
             -o "$WG/Vendor/blink/lib/wg_blink_impl.o"
-
-          test -f \
-            "$WG/Vendor/blink/lib/wg_blink_impl.o"
+          test -f "$WG/Vendor/blink/lib/wg_blink_impl.o"
 
       - name: Patch FIX 11 real VC++ 2013 + Unreal DLL loader
         shell: bash
         run: |
           set -euxo pipefail
-
           python3 <<'PY'
           from pathlib import Path
 
-          p = Path(
-              "WineGlass/Sources/Core/wg_engine.c"
-          )
-
+          p = Path("WineGlass/Sources/Core/wg_engine.c")
           s = p.read_text()
 
-          start_marker = \
-              "// Load a DLL file into the VM. Returns the guest load base, or 0 on failure."
-
-          end_marker = \
-              "// Look up an export by name in a loaded module; returns its guest address or 0."
+          start_marker = "// Load a DLL file into the VM. Returns the guest load base, or 0 on failure."
+          end_marker = "// Look up an export by name in a loaded module; returns its guest address or 0."
 
           start = s.find(start_marker)
           end = s.find(end_marker, start)
 
           if start == -1 or end == -1:
-              raise SystemExit(
-                  "ERROR: real DLL loader markers missing"
-              )
+              raise SystemExit("ERROR: real DLL loader markers missing")
 
           real_loader = r'''// Load a DLL file into the VM. Returns the guest load base, or 0 on failure.
-          // FIX 11: load the real VC++ 2013 and Unreal DLLs.
+          // FIX 11: real VC++ 2013 + Unreal game DLL loader.
 
-          static uint32_t wg_module_export(
-              uint32_t base,
-              const char *func
-          );
-
-          static uint32_t wg_module_find(
-              const char *path
-          );
+          static uint32_t wg_module_export(uint32_t base, const char *func);
+          static uint32_t wg_module_find(const char *path);
 
           #define WG_FIX11_PAGE          0x00A00000u
           #define WG_FIX11_WCMDLINE      0x00A00000u
@@ -501,14 +559,10 @@ jobs:
           #define WG_FIX11_ENV_ARRAY     0x00A00850u
           #define WG_FIX11_WENV_ARRAY    0x00A00858u
 
-          static bool wg_fix11_is_msvcr120(
-              const char *dll
-          ) {
-              if (!dll)
-                  return false;
+          static bool wg_fix11_is_msvcr120(const char *dll) {
+              if (!dll) return false;
 
               char lower[128];
-
               size_t n = strlen(dll);
 
               if (n >= sizeof(lower))
@@ -516,30 +570,20 @@ jobs:
 
               for (size_t i = 0; i < n; i++) {
                   lower[i] =
-                      (char)tolower(
-                          (unsigned char)dll[i]
-                      );
+                      (char)tolower((unsigned char)dll[i]);
               }
 
               lower[n] = '\0';
 
-              return
-                  strstr(
-                      lower,
-                      "msvcr120"
-                  ) != NULL;
+              return strstr(lower, "msvcr120") != NULL;
           }
 
           static uint32_t wg_fix11_data_import(
               const char *dll,
               const char *name
           ) {
-              if (
-                  !wg_fix11_is_msvcr120(dll) ||
-                  !name
-              ) {
+              if (!wg_fix11_is_msvcr120(dll) || !name)
                   return 0;
-              }
 
               if (!strcmp(name, "_acmdln"))
                   return WG_FIX11_ACMDLN_VAR;
@@ -592,7 +636,6 @@ jobs:
               }
 
               char wanted[64];
-
               dll_basename(
                   guest_name,
                   wanted,
@@ -610,12 +653,9 @@ jobs:
                   return false;
 
               bool found = false;
-
               struct dirent *e;
 
-              while (
-                  (e = readdir(d)) != NULL
-              ) {
+              while ((e = readdir(d)) != NULL) {
                   if (
                       !strcmp(e->d_name, ".") ||
                       !strcmp(e->d_name, "..")
@@ -631,11 +671,8 @@ jobs:
                       sizeof(got)
                   );
 
-                  if (
-                      strcmp(got, wanted) != 0
-                  ) {
+                  if (strcmp(got, wanted) != 0)
                       continue;
-                  }
 
                   snprintf(
                       out,
@@ -650,7 +687,6 @@ jobs:
               }
 
               closedir(d);
-
               return found;
           }
 
@@ -697,8 +733,7 @@ jobs:
                           base_name
                       ) == 0
                   ) {
-                      return
-                          s_modules[i].base;
+                      return s_modules[i].base;
                   }
               }
 
@@ -711,7 +746,6 @@ jobs:
                       "FIX11 failed to parse real DLL: %s",
                       real_path
                   );
-
                   return 0;
               }
 
@@ -723,7 +757,6 @@ jobs:
                   );
 
                   wg_pe_image_free(img);
-
                   return 0;
               }
 
@@ -744,7 +777,6 @@ jobs:
                   );
 
                   wg_pe_image_free(img);
-
                   return 0;
               }
 
@@ -753,11 +785,10 @@ jobs:
 
               uint32_t img_size =
                   img->size_of_image
-                  ? img->size_of_image
-                  : 0x100000;
+                      ? img->size_of_image
+                      : 0x100000;
 
               uint32_t load_base;
-
               int32_t delta;
 
               if (
@@ -779,9 +810,7 @@ jobs:
                           load_base -
                           preferred
                       );
-
               } else {
-
                   load_base =
                       preferred;
 
@@ -826,10 +855,8 @@ jobs:
 
               if (
                   img->size_of_headers &&
-                  img->raw_size >=
-                  img->size_of_headers
+                  img->raw_size >= img->size_of_headers
               ) {
-
                   if (
                       !wg_blink_load_code(
                           blink,
@@ -845,16 +872,10 @@ jobs:
                           base_name
                       );
 
-                      slot->in_use =
-                          false;
+                      slot->in_use = false;
+                      slot->img = NULL;
 
-                      slot->img =
-                          NULL;
-
-                      wg_pe_image_free(
-                          img
-                      );
-
+                      wg_pe_image_free(img);
                       return 0;
                   }
               }
@@ -869,8 +890,8 @@ jobs:
 
                   uint32_t vs =
                       sec->virtual_size
-                      ? sec->virtual_size
-                      : sec->raw_size;
+                          ? sec->virtual_size
+                          : sec->raw_size;
 
                   if (!vs)
                       continue;
@@ -890,16 +911,10 @@ jobs:
                           sec->name
                       );
 
-                      slot->in_use =
-                          false;
+                      slot->in_use = false;
+                      slot->img = NULL;
 
-                      slot->img =
-                          NULL;
-
-                      wg_pe_image_free(
-                          img
-                      );
-
+                      wg_pe_image_free(img);
                       return 0;
                   }
 
@@ -924,16 +939,10 @@ jobs:
                           vs
                       );
 
-                      slot->in_use =
-                          false;
+                      slot->in_use = false;
+                      slot->img = NULL;
 
-                      slot->img =
-                          NULL;
-
-                      wg_pe_image_free(
-                          img
-                      );
-
+                      wg_pe_image_free(img);
                       return 0;
                   }
 
@@ -943,8 +952,8 @@ jobs:
                   ) {
                       uint32_t n =
                           sec->raw_size < vs
-                          ? sec->raw_size
-                          : vs;
+                              ? sec->raw_size
+                              : vs;
 
                       if (
                           !wg_blink_write_mem(
@@ -961,16 +970,10 @@ jobs:
                               sec->name
                           );
 
-                          slot->in_use =
-                              false;
+                          slot->in_use = false;
+                          slot->img = NULL;
 
-                          slot->img =
-                              NULL;
-
-                          wg_pe_image_free(
-                              img
-                          );
-
+                          wg_pe_image_free(img);
                           return 0;
                       }
                   }
@@ -990,8 +993,7 @@ jobs:
                       const uint8_t *blk =
                           pe_rva_ptr(
                               img,
-                              img->reloc_rva +
-                              off,
+                              img->reloc_rva + off,
                               8
                           );
 
@@ -1016,7 +1018,7 @@ jobs:
                       if (
                           blk_size < 8 ||
                           off + blk_size >
-                          img->reloc_size
+                              img->reloc_size
                       ) {
                           break;
                       }
@@ -1028,8 +1030,8 @@ jobs:
                           pe_rva_ptr(
                               img,
                               img->reloc_rva +
-                              off +
-                              8,
+                                  off +
+                                  8,
                               nent * 2
                           );
 
@@ -1045,8 +1047,7 @@ jobs:
 
                           memcpy(
                               &v,
-                              ents +
-                              e * 2,
+                              ents + e * 2,
                               2
                           );
 
@@ -1056,10 +1057,7 @@ jobs:
                           uint32_t target =
                               load_base +
                               page_rva +
-                              (
-                                  v &
-                                  0x0FFFu
-                              );
+                              (v & 0x0FFFu);
 
                           uint32_t val = 0;
 
@@ -1103,8 +1101,7 @@ jobs:
                           }
                       }
 
-                      off +=
-                          blk_size;
+                      off += blk_size;
                   }
               }
 
@@ -1235,10 +1232,7 @@ jobs:
 
           '''
 
-          s =
-              s[:start] +
-              real_loader +
-              s[end:]
+          s = s[:start] + real_loader + s[end:]
 
           old = '''                WG_LOGD(TAG, "GetModuleHandleA('%s')", modname);
                           if (strcasestr(modname, "kernel32") ||'''
@@ -1260,7 +1254,7 @@ jobs:
               1
           )
 
-          helper_marker = \
+          helper_marker =
               "static bool load_pe_blink(WGEngine *engine) {"
 
           if helper_marker not in s:
@@ -1270,8 +1264,7 @@ jobs:
 
           helpers = r'''
           // ============================================================
-          // POSTAL 2 FIX 11
-          // REAL VC120 + CORE/ENGINE DLLS
+          // POSTAL 2 FIX 11 — REAL VC120 + CORE/ENGINE DLLS
           // ============================================================
 
           static void wg_fix11_put32(
@@ -1283,10 +1276,7 @@ jobs:
                   guest -
                   WG_FIX11_PAGE;
 
-              if (
-                  off + 4 <=
-                  0x1000
-              ) {
+              if (off + 4 <= 0x1000) {
                   memcpy(
                       page + off,
                       &value,
@@ -1575,8 +1565,7 @@ jobs:
                       engine->blink
                   );
 
-              uint8_t hlt =
-                  0xF4;
+              uint8_t hlt = 0xF4;
 
               if (
                   !wg_blink_load_code(
@@ -1661,17 +1650,10 @@ jobs:
                           100000
                       );
 
-                  if (
-                      r ==
-                      WG_BLINK_OK
-                  ) {
+                  if (r == WG_BLINK_OK)
                       continue;
-                  }
 
-                  if (
-                      r ==
-                      WG_BLINK_HALT
-                  ) {
+                  if (r == WG_BLINK_HALT) {
                       uint32_t rip =
                           (uint32_t)
                           wg_blink_get_rip(
@@ -1792,11 +1774,8 @@ jobs:
                       i < 16;
                       i++
                   ) {
-                      if (
-                          !s_modules[i].in_use
-                      ) {
+                      if (!s_modules[i].in_use)
                           continue;
-                      }
 
                       if (
                           strcmp(
@@ -1825,61 +1804,57 @@ jobs:
 
           s = s.replace(
               helper_marker,
-              helpers +
-              "\n" +
-              helper_marker,
+              helpers + "\n" + helper_marker,
               1
           )
 
           function_start =
-              s.find(helper_marker)
+              s.find(helper_marker);
 
           start_marker =
-              "// Resolve imports — write thunk addresses into the IAT"
+              "// Resolve imports — write thunk addresses into the IAT";
 
           end_marker =
-              "    uint64_t entry = pe->image_base + pe->entry_point;"
+              "    uint64_t entry = pe->image_base + pe->entry_point;";
 
           start =
               s.find(
                   start_marker,
                   function_start
-              )
+              );
 
-          if start == -1:
+          if (start == -1) {
               raise SystemExit(
                   "ERROR: EXE import resolver START missing"
-              )
+              );
+          }
 
           line_start =
               s.rfind(
                   "\n",
                   function_start,
                   start
-              )
+              );
 
-          line_start = (
-              start
-              if line_start == -1
-              else line_start + 1
-          )
+          line_start =
+              start if line_start == -1 else line_start + 1;
 
           end =
               s.find(
                   end_marker,
                   start
-              )
+              );
 
-          if end == -1:
+          if (end == -1) {
               raise SystemExit(
                   "ERROR: EXE import resolver END missing"
-              )
+              );
+          }
 
           replacement = r'''    // POSTAL 2 FIX 11 IMPORT RESOLUTION
-              // Real VC++ 2013 + Core.dll + Engine.dll first.
+              // Real VC++ 2013 + Core.dll / Engine.dll exports first.
 
               if (!pe->is_64bit) {
-
                   if (
                       !wg_fix11_prepare_crt_data(
                           engine
@@ -1906,7 +1881,8 @@ jobs:
                       boot_dlls[bi];
                       bi++
                   ) {
-                      char real_path[1200] = {0};
+                      char real_path[1200] =
+                          {0};
 
                       if (
                           !wg_fix11_find_local_dll(
@@ -1953,7 +1929,8 @@ jobs:
               }
 
               if (
-                  pe->num_imports > 0
+                  pe->num_imports >
+                  0
               ) {
                   WG_LOGI(
                       TAG,
@@ -1984,7 +1961,8 @@ jobs:
                           const char *fn =
                               imp->functions[j].name;
 
-                          uint64_t resolved = 0;
+                          uint64_t resolved =
+                              0;
 
                           bool real_game_export =
                               false;
@@ -2079,9 +2057,7 @@ jobs:
                           bool write_ok =
                               false;
 
-                          if (
-                              pe->is_64bit
-                          ) {
+                          if (pe->is_64bit) {
                               uint64_t v64 =
                                   resolved;
 
@@ -2092,9 +2068,7 @@ jobs:
                                       &v64,
                                       8
                                   );
-
                           } else {
-
                               uint32_t v32 =
                                   (uint32_t)resolved;
 
@@ -2116,7 +2090,7 @@ jobs:
                                       ? fn
                                       : "(ordinal)",
                                   (unsigned long long)
-                                  iat_entry
+                                      iat_entry
                               );
 
                               return false;
@@ -2141,13 +2115,12 @@ jobs:
           s =
               s[:line_start] +
               replacement +
-              s[end:]
+              s[end:];
 
-          init_marker = \
-              '''    WG_LOGI(TAG, "PE mapped via blink. Entry: 0x%llx", (unsigned long long)entry);'''
+          init_marker =
+              '''    WG_LOGI(TAG, "PE mapped via blink. Entry: 0x%llx", (unsigned long long)entry);''';
 
           init_code = r'''    if (!pe->is_64bit) {
-
                   if (
                       !wg_fix11_init_loaded_dlls(
                           engine
@@ -2172,26 +2145,28 @@ jobs:
                   "FIX11 REAL VC120/CORE/ENGINE READY — EXE entry 0x%llx",
                   (unsigned long long)entry
               );
-          '''
+          ''';
 
-          if init_marker not in s:
+          if (init_marker not in s) {
               raise SystemExit(
                   "ERROR: PE mapped log marker missing"
-              )
+              );
+          }
 
-          s = s.replace(
-              init_marker,
-              init_code +
-              "\n" +
-              init_marker,
-              1
-          )
+          s =
+              s.replace(
+                  init_marker,
+                  init_code +
+                  "\n" +
+                  init_marker,
+                  1
+              );
 
-          p.write_text(s)
+          p.write_text(s);
 
           print(
               "FIX 11 REAL VC120 + CORE/ENGINE DLL PATCH INSTALLED"
-          )
+          );
           PY
 
           echo "===== FIX11 SOURCE CHECK ====="
@@ -2204,9 +2179,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-
           cd WineGlass
-
           python3 <<'PY'
           from pathlib import Path
 
@@ -2236,7 +2209,6 @@ jobs:
           lines = []
 
           for line in s.splitlines():
-
               if "CODE_SIGN_ENTITLEMENTS:" in line:
                   continue
 
@@ -2375,10 +2347,10 @@ jobs:
               1
           )
 
-          old = \
+          old =
               '[_loadButton setTitle:@"  Load .exe  " forState:UIControlStateNormal];'
 
-          new = \
+          new =
               '[_loadButton setTitle:@"  RUN POSTAL 2  " forState:UIControlStateNormal];'
 
           if old not in s:
@@ -2392,10 +2364,10 @@ jobs:
               1
           )
 
-          old = \
+          old =
               '[_loadButton addTarget:self action:@selector(openFilePicker) forControlEvents:UIControlEventTouchUpInside];'
 
-          new = \
+          new =
               '[_loadButton addTarget:self action:@selector(runPostal2) forControlEvents:UIControlEventTouchUpInside];'
 
           if old not in s:
@@ -2409,7 +2381,7 @@ jobs:
               1
           )
 
-          marker = \
+          marker =
               "#pragma mark - UIDocumentPickerDelegate"
 
           if marker not in s:
@@ -2531,8 +2503,7 @@ jobs:
                   in vc120
               ) {
                   NSString *stem =
-                      [dllName
-                          stringByDeletingPathExtension];
+                      [dllName stringByDeletingPathExtension];
 
                   NSString *bundleDll =
                       [[NSBundle mainBundle]
@@ -2555,12 +2526,8 @@ jobs:
                           setTitle:@"  VC120 RUNTIME MISSING  "
                           forState:UIControlStateNormal];
 
-                      postalStarted =
-                          NO;
-
-                      _loadButton.enabled =
-                          YES;
-
+                      postalStarted = NO;
+                      _loadButton.enabled = YES;
                       return;
                   }
 
@@ -2568,8 +2535,7 @@ jobs:
                       nil;
 
                   if (
-                      [fm
-                          fileExistsAtPath:targetDll]
+                      [fm fileExistsAtPath:targetDll]
                   ) {
                       [fm
                           removeItemAtPath:targetDll
@@ -2595,12 +2561,8 @@ jobs:
                           setTitle:@"  VC120 COPY FAILED  "
                           forState:UIControlStateNormal];
 
-                      postalStarted =
-                          NO;
-
-                      _loadButton.enabled =
-                          YES;
-
+                      postalStarted = NO;
+                      _loadButton.enabled = YES;
                       return;
                   }
 
@@ -2650,7 +2612,7 @@ jobs:
               1
           )
 
-          old = \
+          old =
               "            [self tryLoadBundledPE];"
 
           new = '''            WG_LOGI(
@@ -2695,9 +2657,7 @@ jobs:
             "objectVersion = 77" \
             WineGlass.xcodeproj/project.pbxproj
           then
-            echo \
-              "ERROR: unsupported objectVersion 77"
-
+            echo "ERROR: unsupported objectVersion 77"
             exit 1
           fi
 
@@ -2735,7 +2695,6 @@ jobs:
           APP="WineGlass/build/Build/Products/Release-iphoneos/WineGlass.app"
 
           test -d "$APP"
-
           test -f "$APP/WineGlass"
 
           lipo -info \
@@ -2759,15 +2718,12 @@ jobs:
           set -euxo pipefail
 
           ROOT="$GITHUB_WORKSPACE"
-
           APP="$ROOT/WineGlass/build/Build/Products/Release-iphoneos/WineGlass.app"
-
           OUT="$ROOT/out"
 
           rm -rf "$OUT"
 
           mkdir -p "$OUT/Payload"
-
           mkdir -p "$APP/VC120"
 
           cp \
@@ -2809,8 +2765,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          mkdir -p \
-            debug-fix11
+          mkdir -p debug-fix11
 
           cp \
             WineGlass/xcodebuild.log \
