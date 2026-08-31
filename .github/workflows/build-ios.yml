@@ -49,6 +49,8 @@ jobs:
             throw "Could not download official VC++ 2013 x86 redistributable"
           }
 
+          Write-Host "Installing VC++ 2013 x86 runtime..."
+
           $proc = Start-Process `
             -FilePath $exe `
             -ArgumentList "/install","/quiet","/norestart" `
@@ -56,6 +58,7 @@ jobs:
             -PassThru
 
           Write-Host "vcredist exit code: $($proc.ExitCode)"
+
           if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 1638) {
             throw "vcredist_x86 failed with exit code $($proc.ExitCode)"
           }
@@ -70,8 +73,8 @@ jobs:
             "$env:WINDIR\System32\msvcp120.dll"
           ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 
-          if (-not $msvcr) { throw "msvcr120.dll was not found" }
-          if (-not $msvcp) { throw "msvcp120.dll was not found" }
+          if (-not $msvcr) { throw "msvcr120.dll was not found after install" }
+          if (-not $msvcp) { throw "msvcp120.dll was not found after install" }
 
           Copy-Item $msvcr (Join-Path $out "msvcr120.dll") -Force
           Copy-Item $msvcp (Join-Path $out "msvcp120.dll") -Force
@@ -109,14 +112,18 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+
           test -s vc120-runtime/msvcr120.dll
           test -s vc120-runtime/msvcp120.dll
+
           file vc120-runtime/msvcr120.dll
           file vc120-runtime/msvcp120.dll
+
           file vc120-runtime/msvcr120.dll | grep -q "PE32 executable"
           file vc120-runtime/msvcp120.dll | grep -q "PE32 executable"
           file vc120-runtime/msvcr120.dll | grep -q "Intel 80386"
           file vc120-runtime/msvcp120.dll | grep -q "Intel 80386"
+
           echo "FIX11.2 VC120 X86 DLLS VERIFIED"
 
       - name: Select Xcode 15.4
@@ -183,11 +190,11 @@ jobs:
           python3 <<'PY'
           import base64, zlib
           payload = (
-              "eNqNUltrwjAUfs+vOGQDW3UVfRzI6NZuymZbrMrKupVeUg3TtCSVDcT/vrRVNkcdKwSa75ZzkpPybAN5WKzWNAK6yTNegCO36PDPCUI5DCtMwd"
-              "GasvcrweNenLGULrUVVpGQdK5xEiZBQT4LhXCecTHEdMkyTqQAJVSE0ZpI3QsC+eGRvjCDB3NmWrOp7Xi4+wN2PfccJeGpbhn2pMnQwDyaUyvQ"
-              "p5Zxqr8bmUbgjc2nJnwksVdEWEPBhrkI5mcKmNhza1aZv/GJ7gS6ZVueJN0qFqUZBxZuCFAGx1vpQH3adWUtb5MTTWwjhact5WajvvmifZGQlD"
-              "Lii85OkkTEYU6UMkjd+5HWvmx1oSWXUP/K2DKZ8o8I+aKdIWCf9drg2O5Mf4IBUNuF+/Ez9PvaANo9n+GmZo49SH+K6wNhV2r2vw2nPdf6usmD"
-              "AfqlBeXaB6cFqUdLFpdzygoF35aTWBVVT2I5w/GKJHLcvgDB6s69"
+              'eNqNUm9rgkAYf3+f4uE2SK0Z7eUghptuxUpFLRZzE62zjtUpd8YG0XffqcXWsDHhwPv9u+e5e1KebSCPi9WaJkA3ecYLcOUWHf45QSiHfoUpOF'
+              'lT9n4l+Lw7z1hKl/oKq0hIOtc5iRdRQT4LhXCecdHHdMkyTqQALaiIkzWRuhcE8sMDY2pFj1Zg2YHnuDPc+QH7M/8cJWHPsE1n3GRoYJ4sz44M'
+              'zzZP9fcDy4xmQ2vUhA8k9ooIayjYtKbR5EwBY2diB5X5Gx8bbmTYjj2TpF/FojTjwOINAcrgeCttqE+7qazlbXKii22i8LSl3G7Ut1BoFwuSUk'
+              'ZC0d5Jkoh5nBOlDFL3YaJrl60OtOQS6l8ZWyZT/hEhX7TdBxyyrgau4wfGCK6BOj48DJ+h1wOtGzLc1MqxA+lOcX0c7ErN/rfhtONaX7d4MECv'
+              'tKBc/+C0IPVgydJyTlmh4LtyDquS6jksJ3i+Igs5bF9MGc5d'
           )
           code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
           exec(compile(code, "<POSTAL2-FIX11.2-1>", "exec"))
@@ -202,11 +209,11 @@ jobs:
           python3 <<'PY'
           import base64, zlib
           payload = (
-              "eNqFkcFugzAMhu95Co9LgTFYr63QTj1OncppElKVBjOihYDisLWq9u4zlFXdLuNgmdj5/t9O7boWeukbow+g275zHl74V8y5QyF6yKezMDgYbd"
-              "8fyKlsyjI6kZLGpCqIBHFXnzqU1d7j0YcRX5Teo7NccIvFgrz0WpV0r63nWJyoUA1WrxpNVVJchhzIu0GN1WepGm1xPI/bMUZjOKfxU2nLL6YJ"
-              "h72RClu0ngWufGA6/GKHFyjMSIjbCM4CIPzodBW1a04d+oF9Pq7FhBaUgOqGCewwpeFgw3mWBG50E/hpzJcJ1Ea+Uc79RSR0PQPucliuWIE1pC"
-              "YcnXlsN0ftw2Cz2213q99mx7dQDdRSG6x4q9NaKZ1FwwDmj8Yb+9M0X7QOErhWsvi2CJUmeWAWdBb0toA4CyZ7wTzzHxCvD+gfw7d4h63Ulkan"
-              "ffrptMfL61MkvgGRKsKx"
+              'eNqFkcFugzAMhu95Co9LgTFYr63QTj1OncppElKVBjOihYDisLWq9u4zlFXdLuNgmdj5/t9O7boWeukbow+g275zHl74V8y5QyF6yKezMDgYbd'
+              '8fyKlsyjI6kZLGpCqIBHFXnzqU1d7j0YcRX5Teo7NccIvFgrz0WpV0r63nWJyoUA1WrxpNVVJchhzIu0GN1WepGm1xPI/bMUZjOKfxU2nLL6YJ'
+              'h72RClu0ngWufGA6/GKHFyjMSIjbCM4CIPzodBW1a04d+oF9Pq7FhBaUgOqGCewwpeFgw3mWBG50E/hpzJcJ1Ea+Uc79RSR0PQPucliuWIE1pC'
+              'YcnXlsN0ftw2Cz2213q99mx7dQDdRSG6x4q9NaKZ1FwwDmj8Yb+9M0X7QOErhWsvi2CJUmeWAWdBb0toA4CyZ7wTzzHxCvD+gfw7d4h63Ulkan'
+              'ffrptMfL61MkvgGRKsKx'
           )
           code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
           exec(compile(code, "<POSTAL2-FIX11.2-2>", "exec"))
@@ -235,25 +242,25 @@ jobs:
           cp o//blink/blink.a "$WG/Vendor/blink/lib/blink.a"
           test -f "$WG/Vendor/blink/lib/blink.a"
 
-      - name: Patch Blink VM mmap FIX 11
+      - name: Patch Blink VM mmap FIX 11.2
         shell: bash
         run: |
           set -euxo pipefail
           python3 <<'PY'
           import base64, zlib
           payload = (
-              "eNqtVm1v2kgQ/u5fMecqF7vlJb6rTjoIqShxECpvMuSlSiPLsRdYxV6jXQPtXe5+e2fXBttAUlWqhWB3PTP7zDPP7DLjcQRLL1mE9BFotIx5Am"
-              "OcatoSWmpk6LeUkW7oCVG/ISyIef0xpOypvpm7auCiW1jzdVMT6LKsceIFbkK+JoapaXQG+hvK/HAVEDgnnLO4trjQgcUJUAaioQE+ZSuRBPSY"
-              "lXy4RwWByTeRkMj+ShNDtx1n5DRAOcE2RkSFoGyOmKSTxCUQ1zL0fGLsYh3bsvLa2y/sMJXimvgm6lHksXIgKx0iGSLxeOJGHn8iHCHpOE+oj9"
-              "D5yk/gtvtR0nkzgLc+cpgQdx25G5os3CgOiJFZ3ZFg4PkLLMkglonilwn/6hpWphR5P+Ru6HZUcGMd00B5KlSKoRllgVEEacqw+at8jwooM1PW"
-              "N/NvQdWCmIPykJO0aC8W7EiOkAYXhfJpjGzc2Yr5CY0ZIuGnp6e/jjaFcLbklCUztAywqBXQ7696d5ZV+6P+sd8bfnqAjmO3pzbgDtKtdRJ8YX"
-              "pFjWuxCtRM48zClVhkYXBNLRImVpy4lNGEeiH9hwTG9tUh/nWEGfpeGMa+YSHFaB7PjH07M9sPqTd+W0cmcJKsOIPhdb+fhV5H1Qsp+iHZpMwb"
-              "BZyZH1psGVDoOUFNRJmNqlwxrFz4T9vzr14g4WExShizOR4ncyKxI4CrfrvrbufNspn0dTM748nB2URO3uX+VbBM+B3+N0oreRjVg+h9li8VcO"
-              "GLQeQt836Xj8ymUlrZwSgvj53R1MXCX8JzOr51elO7bDNoj92x07uR6nhWs/ZwNPw8GF1P3LJl1SrPz8pTXYLQd0uFFFGZIAlSqebLP9SszFyl"
-              "1jpZps6oWzBOhCnFW9pcPuo0gLdmgb4KEPzAB6lTDBBzAzumAfrok17Ad1T0W5WUitFSBF21e30bOX2GlyR0WMVcgdvnCsWaCTsVcvn1oZaP6j"
-              "nVdEHZMlaUtk12WKThK8ppv32iIupXEP1cZ+XHiqTszr50B6NL2+2Pht3ifhlDPj9DvB3nzB1LCcrBYJwN7Gk2GHebh35/ol9bnjR4Yo6xvabe"
-              "Y0gOsBeqqFywU1d/vTer1n7FZP5FzvbJ/+UVAxLivfIaY3a33fn805w1DwRRvZiF3lzAMyZvwfk5/L098H/UhHimZ3fH5LrTsSeTXUcima2TMF"
-              "wdNOPRRjRWTNA5I0F6cMovM6/KC9dPgcB11NQwI7w6NfUfTdw31KX9gIdt6X59Bzoiwh9xj9d440Fb1jac4pWq/s4JU/sOEA7abw=="
+              'eNqtVvtv2kgQ/t1/xZxPudgtj1hXVToIqShxECovAXlUaWQ59gKr2Gtr10B7l+vf3tm1wTaQVJVqIdjHzPibb77ZZc6jEGI3WQb0EWgYRzyBMU'
+              '41LYaWGhn6LWWkG7hC1G8I8yNefwwoe6pvFo4aOOgW1Dzd1AS6xDVOXN9JyNfEMDWNzkH/kzIvWPkEzgnnLKotL3RgUQKUgWhogE/ZSiQ+PWYl'
+              'H+5SQWD6TSQktL/SxNDtyWQ0aYBygm2MkApB2QIxSSeJSyCuOHA9YuxiHXtl5bXdL+wwleKa+CbqYeiyciArHSIZInF54oQufyIcIek4T6iH0P'
+              'nKS+C2+1HSeTOANx5ymBBnHTobmiydMPKJkVndEX/gekssySCSieKXCf/pGlamFHk/5G7odFRwYx1RX3kqVIqhOWW+UQRpyrD5Vv6OCigzU9Y3'
+              '829B1YKIg/KQk7RoLxbsSI6QBheF8mmMbJz5inkJjRgi4aenp7+PNoVwHnPKkjla+ljUCuj3V707y6p/7PeGnx6gM7HbMxswvnRqnfhfmF5R41'
+              'qkwjTTKPNgJZZZEFxTi4SJFScOZTShbkD/Jb6x3TpEvw4xP88NgsgzLCQYzaO5sW9nZu9D4o0/1qEJnCQrzmB43e9noddh9UJKfkg2Ke9GAWfm'
+              'hxbb/BV6TlARYWaj6lYMKxf+1/b8qxdId1CMEkRsgYfJgkjsCOCq3+4623mzbCZ9nczOeJrgbConb3P/Klgm/AXfjdJKHkZ1IHqf5UsFXLgxCN'
+              '0473b5yGwqpZUdjPLyeDKaOVj4S3hOx7eT3swu2wzaY2c86d1IdTyrWXs4Gn4ejK6nTtmyapXnZ+WpLkHou6VCiqhLkASpVPPlnyhW5q0Sa53E'
+              'qSuqFowTYUrpll4tH3USwBuzQF4FCH7gg1QpBoi4gd3SAH30SS+gOyr5rUZKpWgpeq7avb6NjD7DSwI6rGGuv+1zhVLNZJ3KuLx9qOSjak4VXd'
+              'C1jBWmTZMdFGn4inLab56wiPoVRL/WV/mhIim7sy+dwejSdvqjYbf4vowhj58h3s7kzBlLAcrBYJwN7Fk2GHebh35/o19bnjN4Wo6xuWbuY0AO'
+              'sBeqqFywT1fv35lVa79iMv8iZ/vk//aKAQnwTnmNMbvb7nz+Zc6aB4KoXswDdyHgGZO34Pwc/tke96+3IJ7n2b0xve507Ol0149IZeskCFYHrX'
+              'i0DY0VE3TBiJ8emvLLzGvywtVToG8dNjXMBy9NTf07E/cNdV0/4EFbulnfgo6I8Efc4wXeeNDi2oZTvEzVHzlhaj8AzbDZTw=='
           )
           code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
           exec(compile(code, "<POSTAL2-FIX11.2-3>", "exec"))
@@ -292,77 +299,77 @@ jobs:
           python3 <<'PY'
           import base64, zlib
           payload = (
-              "eNrdPWFT20iy3/0rJr4KWMEQm7CpFAT2ecFhqSVAOWycK0K5hD0mWmTJJclA9i6v3o94v/D9kuvukUYzo5Esh9zV1qOyYEs9PT3dPT09Pd2z0y"
-              "icsbmbfPG9G+bN5mGUsAv42mjM2T59ajWHXsCPfTeOX34IF9GYxy8Pw4i/fLgd8eAW3m2Nm04jBvD5VsTdySjhj0nLaTT+xvaf8APNuw4b8Lnv"
-              "jjlLvnB2ywMeeWMGnfibR6enzA/dCY/Yg5d8YS57d/KJdbvsnkexFwZb0B5+ThJ2x/k8pkZsFk4WPofP4zCaxOyX/rvzQR++xqF/7wW3bMLnPJ"
-              "jwYOzxuC0QiJc8ZjTmPg14Mwk38WvKsJglocDPH+l7m7nBRDQXncdf44TPWO/iJGZhwCRD8dOrbRjcIriLt57KsEacuFEymrnRHXBlnzVfvmSn"
-              "wCLgDXJr6sHQvQBoRWZ+fL8FzE0WURAL5i54nBBH2Y0b8zYLI9ZBYqeu5y8ivtVsAGtM5OEdW8xhtOnI2c1XFrgz7AY6JfFMUqbvAYdEbx4wTP"
-              "TmTibA3pi6AvyCfsAdb029YNJSh+Ng7/mrnJQ2IzBQN2/KUgT7bLOLSKkJftltkChdL+bsA8mi/+glrWZ/MDgf7ArZKQolMMds5sUxqAVodwNB"
-              "RunrfRatr6//UOY2AJvQ311o4MUZJWNg7YMHmnaLXMWOFJVLtY2FUxZCLxEicX2cgl83U95nzYDrAQwb+gdgpAu1HdrMBM29BWh0nCxuQAlRCg"
-              "nMsgW8ebU9ShjMcyHCkeiwJd+IsYxDQM3GX9yIvZgugrGzV4GCpKe2QNsDLRp/m3B4x9nweASM6HZHF73jPpM/ncdOp9fBn0URdHj4/uj05Kxf"
-              "A7RnA+3aQS+O319cDnQCXtkJsIH+VE7A2ehjb6CAvikfVhF0xwL67v35UT+DzEHfWEAPz98rwBL00Ebr4PhQIpWg3Y4d9KMF1EbrUIOVoDZaBV"
-              "tNDnQPy0VgDGvbRmv/7OPJ4PzMBLXSqsFK0DdlHOgNBr2/q7TudEo5kMFK0Dd2WnOkEvSnTgmtRQJ+AqzZfLwJQx/n4tR7BHgvHs3i+3HU3e5o"
-              "M3Li+w77B1lMMKmtZ/RdGG+wV37M9+gdAfvhA4+uuttvrsXD2PuTw3wP0FInkc+DFrbek8gCdrBPQOG0RW0dRwCrj9gm64omU7CTrRSnB2CdPf"
-              "jzlgXwZ2MjIxJ/BB3eNcC0kDAnCelRq7UIYu82AFNIj4EagEoJ+tbImwbYdP1zZ128SocLY4B/gqw2a2bsajrs2T47+/30dK/xzWowBYcnbuKO"
-              "hME2OaybTVwzNZ5bhUSC+Oc/2TMBntLYybn7DIgdz+YtfA/kjtzxbOIHTeCxHJHFDpW3f6hoP6zRfgpGn4vmhfbSYpU3H4czicBsrlixcgQjN7"
-              "odl/Sf2bbq1vflrT8uaf2QNy/wbnnz+e1snkT25rmlqxCdgqDQfR0EPLj3ojCwIlCMYgUFCoYCBQUMuTJ/KzFX6DmABzYGPwwmgjafyL0aUccN"
-              "VudHNAsXSU341ARBg/hPbZ7mPdPEzL9eda7pCTTBv9QSLNeOaUlzU/rgBgmfXL3eSU0pDHKEDhZiaykjTAHbmc0UXx1HxTV+mFx1O9sZKkEqT+"
-              "BxC/6TTeGz41gpOjoZgJkCkxjihsiLCFRBNrG2IoFNwwV56spSAZqxGCcM8PAgYS/Spw9f0GdutTg61OCaYjdAT2ZaVfOu6hffPJiknGhuNYVB"
-              "tL3aQsUDLUm8YJERKBl0GyY5pwvcVvAAoGQXfHacPY2otGOCSgWB9HesPcfBPII1YtpCxRMqAYQ+j18+j5ttRoKRPSv9ZAwFJvL86Q2w7C5bx4"
-              "Tk/TDmgonanKL25fMKVhja3MwjjpuGwuRa3R2wqzAteulKqnsAGrWZLM01dwvak7TVGWsDntcFHsMOvhZgGuUg0LIFX7JuePyL7wV3J8BANxhz"
-              "9uIGv1bbmeHxke+/d+dz2PG9mNHf6gaqfITwYBdVv0luTTLJ0nMUlTBey42QhJXClE+kKSLvDXikum7d1wXfjeZRuj+MwTvb8oLRAjbqa2vagF"
-              "KhaJAGLQ7u9jsqbtWXUxtik3wufVOn0fD4on8yc29BdN7sFigH6c65EDDu8luS4apBBFC1X1jpTs+P+63L3jEoEC16tNcHPxS223M3irmMOuwy"
-              "mv8mWn1VVAjE/qC7zQOYua93brxkWccRny4wjsFe72wCuAgjBOzVNn2bR+GYx3FKhaIaORmCAx4yZTSNOMful1IJco/9MBnBss0fGUZh9lbVim"
-              "cWtTClq/Xh7WnvFBtZEDNpXd72ra43NjamwcPEvYHf04XvpysYagZy98fyTxoXsMtTHkUclwAZenGEAhDGXJdlG3g7wmnJkCcISQ5MOBU0sJ9t"
-              "D3dhy9ilsImBjDQ/7yR7POF+4u4ZKolryHgU3bswe5nyBLvS92spTtz7od0cBfwxGenT0njB9jXhtszXG/mwN2As7+Bn4bA19t/pZ2WxR9KRnR"
-              "k3Wzk9mznDs20i47DKlRAvgYvYdXkOj08pJPdeaNEL1D0AWstVPNfG1PjO+CzmCWlpm3WkoaWm2aqJn0ERhMVUfQQwl8F4/rUlAMqMdv6Wdt0a"
-              "0nSEhvjFO+LyvmS4RgsZTfi9lw0cp9IJTSVNgNm0gvUOp8+g3zsl0/Q8ZlM8lYC/krv7ncfnn4gU8Qk7pU9NHWc+QmMJsK6REr3+WI5Yf5wN1j"
-              "GVPptHXzjGbGN14RJTwH0QanlgzMa0QcHsgb0gr0EsOmPYA7dqeBEVpNt+JGkYpagJbhC+vFXHMe21zbIKdKgJ2SKJiwTZ03xt3yuYfUXvFUfU"
-              "gCBtFKEa9e0Sk1w0y4UFxLaOEZOCxWwU83HigcdVWNbQu/ggXoIN4GM0AYK1aQtY6fIOpQ2+x+M1ANk8gD11sgBtJoX62fJsVzzLlE7frzy7j6"
-              "1bE+zo9Q525GbLDH51clO3oXeVHt3opL4BBC/+5FGI1MJGHSx/q9sG4o1d0zOCqaMZ5+fvpYF4Hu/qKtEWJP11tCPfnOEOixz5iXAg7dMZuN1m"
-              "xAtkEth4ddeH3Qo+KXIi7gnEVeyzzsuUpamiqbONOMv+C+yp75fb1iU2VnI2k4n9dR6Q9UMQKv5y7kvsj6Y4fwW5ktOI40ObiS6ONtVMicjZG2"
-              "STV64Eb3FG/2w83IWHOjH6avAQeQkfgVegqo8kp82CgrEtm1aZDhBGTQua5Ta9xryrJ6PlcqopK7u8ckttdfqFe6a7p8sdVinLcDoVvl3u3Ys4"
-              "Fr7YYG/Y2/0qPPlWXBrMG//OcG3JN+FI1WieRDjwtkntBhLSZm8ci8IAQifb+9gVco5Mje4VL7UAAkhGqZdngIAComO5liFpI2yb7Th2sAwRgQ"
-              "HdOwK0QLbs8C0wEUOmxE/59KDI1cohBhhq3FfQbgKz2Eu2vVclC2gULxdGY6lbpcsJ9aKyERH7gm3bpIkk2cdKHogcsJAUQ/4hOvikex4qh7qv"
-              "cakvilaV232bETc2ACWQ1ibqCtBIYuueHRyw7jaFPl9Z/YuCeBI3uuWJhdX6BmsjV9UNBv2s4bkmbez2ynHfu74xRe32lJKVFHMqaGqzNUCASm"
-              "rjXq2V1lhxSRtcMrjYZW5vacn91KxGsmS5zX4E8Ra2lBtJY3GTqy6wb0ONNag7/RVWp/8AO4316y/BzwrukinYlzbtezYWafqPdV9xQu+OfB8j"
-              "l3O5s0ib0MbCCHCd2JmeMhoYmmUbPcf4IGjuIhC7FAuPK/gKWMBHwWBN+WscnESvWhrJjj8EO/4gdpgt4HnR3GmZSQFFJaCdbHP1h4ggl6yAae"
-              "bfxGJLRLYWJmvJLDc1v/DBC2IW3sOWNv4aJF84HhYcDi4ZumkmHjeYCNAsuzFPDkwTsswpNw3KzHoal5tnwSkj7UoTg0WzhXckWpdNVoUphbyw"
-              "rG2bAYn2iYNdZCjKuliqniXqSgGk05Oz30Bbn4Hubh7UNQkrmAXSyKBOuKRS5cvYWsK2b6vZGTLMVWzWpVhMVtGpL4pz1f5keAFVumTRB0KwR3"
-              "H8NUqxteqchj2J86pYrdsLyal8QcRRPI0hQr+H1fqd6vUikETkCaAsU/BnNfdsjSfyC+znz/hrlzVbYTTxAtd3mhaG5c5fBX/ygwrX5gOq/l/R"
-              "ZEMbdAgtW4hyZ6SWGgDieoBrmUDqge8s3ZcvU4GT3qXp6zyrYdtqSN8q1gplcZOn7sGXnQfIcwD4cPR31HMchgj7w4Yk+io+ii0WuaYrHASUh/"
-              "Y3Dwj5aB6CbupvDU84c07SUSvnIzDC9fX1BtVCxFe7lI1+DTqsJo9vwBseTHavG43QR7MCLeyqcZSGbI55Ig6NfgVfwee91vrzeB2EhN5GxUqO"
-              "5+VAFeYvpoCA645HAfdfbVPOA9Ea8Id/ExHaAaLhMZA/Uk2/aFXuhyQjsc8TcBZPXBzbrcAKAEWRBGGCx+PxkqIBkyNp1YBSNEBqsBWJCpYWoG"
-              "7DzvyhzbpOo/GF+7jM5eUUam4OqdScC1vWGh6LqhOMTuBfYEkTadVR1KRaQ10kOaUrTmscsKLgSSUp0P7i/MMlzOjtrD7n//7nf8Uc/3jY3e7A"
-              "fDg8H/Rf9s+OMSsf5v2HJ3ea5efch94k92/mC9DGloz0YFyh0nxL9aUj/XqgoJEL6TobIUNRA7KpFzjkGSQiTLSD4UNxDq9qfhqTQZqzyN8a9Z"
-              "WH3b6VJnjNQQPdiI/GUUJOnk2hGkq4iV5hVp34uHlAumJN+Mu4iYRdCbL1s2visnJ2jd/zVEVlewZbJjyfzRxSn8ewq+AjeEznti011yaDRRrT"
-              "z1eda5VfObbm4e7nzxchMMbf/vxZTAj5YAu6aBayLig49gJznxXXpJW/cVI56GtEsRjFEHV2Yo9b2Qcvj71hR5gtCka4ua6kyOxlo7h68K4xOv"
-              "1AmTLbHXyh73UJBbzeYN3rzFEFsTgKAjXj3QCX3ebPt6+VTa8QkGvwQzxdwoveEl7IjEjE3mY/dUBTmp+bz+PPTVhaUvIdnY757Wx1OtL6nKVk"
-              "APKMDDprNEhQ1MMgo756VJOC2jFXtMNQhblQhTmqwvYOqMLcVAWgi6AsajA31CAHzURtGEsxey0lA+1iQVVKfzWGoQ3DcBUMsmwgPy2tbqAUCt"
-              "RtkpUGtCkhpl6DjyZbZIVP3S5T8HahAG1FBOKIpVOP8qGF9OGKtA+txA9XIH74ndTndQzfybWhFUNOeg0USiVD21K2VYsMCV1XQ4f2XoerdTs0"
-              "+m1UJSBpzsCydGbFsFWDLvXCNMehGlLPNbIde2MMlowz5j68652c9o+axTxM5cQ69QriESxPdBAlczryRDt1P6t2dNS77DEqYhUb2XSzbph9Lf"
-              "ddIP1mKYYFv3g06F/+Pjijwr7DV6K81e7wYeYNxdJoR1tw9+oFLcx8xVktL5GezMRvmQSgZNfT09mtBDD23aoANZ7YEmOpHYhilqYqbjALxjyX"
-              "VcQf3Xs+GUX8Nr7qvr5eKSFZaUprppwjt7AVhcfGDGGeVmVoUuDNCyi8uY7CMZzsLz4eaHce3+3s/fCZmutXdYM1IKIaovvUSZqnyeMsxUBQls"
-              "DPMbLI/VpTNteSeK7FbpeJLdtPSQQ0mwQW/L2JuqFDTCOsmdhBpdCGVs7aVGXzB91F/hnmNQ3EapDzwOYKYs6GUA1Fw6hljAnSWUGSNwvPnzAq"
-              "csEYReKO7/IUz1khlahUqpINcYnw2nKs+QqotDCnWFsYEadmqnI2gA+XPTDwz2M1HimDlEYgcmZLhqN2BTg6d1NL6cK7PIFKN1V+GM5jYa7ER9"
-              "gOYOa++GYeDVNF0oDHC7AgkWp3okVgMkSUAJg5hxFW1gB7fsHztdH5b9YkjyLgr73Ty9KsOGEDy2ZmmTXUOkMM+7apZgsbEjf1IrqSQpGSE50v"
-              "FOhLiaQ7W1ISndKcF6qCScKCscdnmH8Sh0FhmFZmTV0UXvGopIR9BE5JutVcrJs0mmk+ChQVHzifJuLDQPYxMwA7rMoanVUlhQK6kmRSQG9/Qx"
-              "06S+p9GrXGaYzxBqwT3hwT0YShwaWmqsh99Fksp5NFk1Ys18wP7MFgib7MgEKtBauzYrndMhvqtXVXR3NjlplT6d1o24nwbtlSkfFeOOXftTbU"
-              "Nd5H52d9UmEh3romO5dSic9uL64NvESc/FB1aFwae1VjoWE04dGV7k7odbBt/fnc8lxWtyrPlELW/Clm32oOh9SjMFUkQU/oXcNHQ5lq6lx1QZ"
-              "/9yFgpr7bUfEqaKuqti7dpGDujdD+kFmEBQnvChKl15aecNuXIjwXleZB2fNNm2cHLBmt+Dprwx3iPh0bZMfjIuChLA3Vs14ANxIG1zOfCQxhx"
-              "oEzrWHYTF4/zO6xOepfmlV/aRibbfs25WoiIGZtc34FVX+zVZvqoHOMeryXnWf1P/SwjIj2Uj1L3TDnUAtvEFZ5FRASy2excXiamt6C/QJb6lO"
-              "4YoxNG5ekG6zaWXlQGiOpeTGYbXf/sSL+YjNRpJtKdo/Qg13LudvL+4hzYMuh/OD/9/fLk/KyRAg4wc+3j4cYGuJDdV3ggl5oO9pL1pcWQt41N"
-              "vShO9tKb6+hGu4jP0LBmt9jldp9Uw1KkrE/KwvmUdKqW1wfJQAusR4usnqVpL+kwJq/iHajGF+x3QqbaMMBVRrjKENO7w6Ixpud9m0HWjLJqmD"
-              "WDe5Na3JzeGzTQNxbLSwOTJZBXQCMdN/2j863SWBoXrmgdrZBXVfN+Ats+My+Jd56aRAULPp6Qi7s0QFnHi4guIxGTjq4mGSdh9LUqm0ZlwJMz"
-              "nywVzamDJa+SWGGHn4HmGXTV8DWFYg7ZUmtSkiu6SnZTHiegGxIpOSAvAq4rkXIw280KdRb2xkoZqelgLgb90/PeUZqfV1VGt5z4NCBQWsqE9l"
-              "VJCmcHtksMqnO887tPYZ+Dy41yx+TW1paFdqNTa6q24g0a4FbX0J68LhwLS+56PXGwOknrNRMgqzPUn5il/t2Z6po7pmerW5TNF/MAbwRNE7aN"
-              "4FJhbqvLt3kbi2Kvyq8R0hPOy1DY89k1Ywne+fJ09tKEc2hUlWueh4of57a0dviWpkCXp0VCLwBd1YuRTAzQe8sttC4se+zqu9PmzZxLnP2pky"
-              "gT6Gsmz39n3nWdRHpa3R7nTvnAv9VOmberuZTK2hordVntpRaYMo9bp5KUdm2CLMuvL1Vf2UuVeimqJeH3fmh5BbnZ73qnp7/0Dn9bWUNW1I46"
-              "mpHzZe8HacDyopcqMVuqF1Z1y35gNUNpRcP3MqGWt20vW1C2scsKFlYcc92qhHL/vIQlcl3FaoM01GHFWgh/VBQsWFdlcaJXOOox5VPXMIlbPF"
-              "7v0KWKgv92duT9Vin1E04di6UDI8u517JSCxjKSg3eOKWp4Eus+f2rbe086v8H+15tr9RgZwWLkbHgRxX2VlS5+P6nf7PRqG5iu7VESqS6SLjk"
-              "AowSpppuXzVvT1biLXl557/9eBvsLK+DLuxh1UKZPIIqqmXyiKZSLUNHKTIWncY59eSri3526c695zKaY1usjyLCy+1AiR6bbasoUzGKKhDsBx"
-              "NplHDqCtHMwonPCtFMWfqESDzX9/4UZe7fGdasm/uwanEWFW68VMs2RIYbHirgUi+Wy4zhjWXzKCMjq8FRBV2zqiUXvB/eWqpa9JMXpYM2y8Ut"
-              "T16093juMt8Spo7+xzax06Bs8VYzDawTT4wiFnbRuzz8lZ2cYQye0gwb/wIWcsJO"
+              'eNrdPWFT20iy3/0rJr4KWMEQm7CpFAT2ecFhqSVAOWycK0K5hD0mWmTJJclA9i6v3o94v/D9kuvukUYzo5Esh9zV1qOyYEs9PT3dPT09Pd2z0y'
+              'icsbmbfPG9G+bN5mGUsAv42mjM2T59ajWHXsCPfTeOX34IF9GYxy8Pw4i/fLgd8eAW3m2Nm04jBvD5VsTdySjhj0nLaTT+xvaf8APNuw4b8Lnv'
+              'jjlLvnB2ywMeeWMGnfibR6enzA/dCY/Yg5d8YS57d/KJdbvsnkexFwZb0B5+ThJ2x/k8pkZsFk4WPofP4zCaxOyX/rvzQR++xqF/7wW3bMLnPJ'
+              'jwYOzxuC0QiJc8ZjTmPg14Mwk38WvKsJglocDPH+l7m7nBRDQXncdf44TPWO/iJGZhwCRD8dOrbRjcIriLt57KsEacuFEymrnRHXBlnzVfvmSn'
+              'wCLgDXJr6sHQvQBoRWZ+fL8FzE0WURAL5i54nBBH2Y0b8zYLI9ZBYqeu5y8ivtVsAGtM5OEdW8xhtOnI2c1XFrgz7AY6JfFMUqbvAYdEbx4wTP'
+              'TmTibA3pi6AvyCfsAdb029YNJSh+Ng7/mrnJQ2IzBQN2/KUgT7bLOLSKkJftltkChdL+bsA8mi/+glrWZ/MDgf7ArZKQolMMds5sUxqAVodwNB'
+              'RunrfRatr6//UOY2AJvQ311o4MUZJWNg7YMHmnaLXMWOFJVLtY2FUxZCLxEicX2cgl83U95nzYDrAQwb+gdgpAu1HdrMBM29BWh0nCxuQAlRCg'
+              'nMsgW8ebU9ShjMcyHCkeiwJd+IsYxDQM3GX9yIvZgugrGzV4GCpKe2QNsDLRp/m3B4x9nweASM6HZHF73jPpM/ncdOp9fBn0URdHj4/uj05Kxf'
+              'A7RnA+3aQS+O319cDnQCXtkJsIH+VE7A2ehjb6CAvikfVhF0xwL67v35UT+DzEHfWEAPz98rwBL00Ebr4PhQIpWg3Y4d9KMF1EbrUIOVoDZaBV'
+              'tNDnQPy0VgDGvbRmv/7OPJ4PzMBLXSqsFK0DdlHOgNBr2/q7TudEo5kMFK0Dd2WnOkEvSnTgmtRQJ+AqzZfLwJQx/n4tR7BHgvHs3i+3HU3e5o'
+              'M3Li+w77B1lMMKmtZ/RdGG+wV37M9+gdAfvhA4+uuttvrsXD2PuTw3wP0FInkc+DFrbek8gCdrBPQOG0RW0dRwCrj9gm64omU7CTrRSnB2CdPf'
+              'jzlgXwZ2MjIxJ/BB3eNcC0kDAnCelRq7UIYu82AFNIj4EagEoJ+tbImwbYdP1zZ128SocLY4B/gqw2a2bsajrs2T47+/30dK/xzWowBYcnbuKO'
+              'hME2OaybTVwzNZ5bhUSC+Oc/2TMBntLYybn7DIgdz+YtfA/kjtzxbOIHTeCxHJHFDpW3f6hoP6zRfgpGn4vmhfbSYpU3H4czicBsrlixcgQjN7'
+              'odl/Sf2bbq1vflrT8uaf2QNy/wbnnz+e1snkT25rmlqxCdgqDQfR0EPLj3ojCwIlCMYgUFCoYCBQUMuTJ/KzFX6DmABzYGPwwmgjafyL0aUccN'
+              'VudHNAsXSU341ARBg/hPbZ7mPdPEzL9eda7pCTTBv9QSLNeOaUlzU/rgBgmfXL3eSU0pDHKEDhZiaykjTAHbmc0UXx1HxTV+mFx1O9sZKkEqT+'
+              'BxC/6TTeGz41gpOjoZgJkCkxjihsiLCFRBNrG2IoFNwwV56spSAZqxGCcM8PAgYS/Spw9f0GdutTg61OCaYjdAT2ZaVfOu6hffPJiknGhuNYVB'
+              'tL3aQsUDLUm8YJERKBl0GyY5pwvcVvAAoGQXfHacPY2otGOCSgWB9HesPcfBPII1YtpCxRMqAYQ+j18+j5ttRoKRPSv9ZAwFJvL86Q2w7C5bx4'
+              'Tk/TDmgonanKL25fMKVhja3MwjjpuGwuRa3R2wqzAteulKqnsAGrWZLM01dwvak7TVGWsDntcFHsMOvhZgGuUg0LIFX7JuePyL7wV3J8BANxhz'
+              '9uIGv1bbmeHxke+/d+dz2PG9mNHf6gaqfITwYBdVv0luTTLJ0nMUlTBey42QhJXClE+kKSLvDXikum7d1wXfjeZRuj+MwTvb8oLRAjbqa2vagF'
+              'KhaJAGLQ7u9jsqbtWXUxtik3wufVOn0fD4on8yc29BdN7sFigH6c65EDDu8luS4apBBFC1X1jpTs+P+63L3jEoEC16tNcHPxS223M3irmMOuwy'
+              'mv8mWn1VVAjE/qC7zQOYua93brxkWccRny4wjsFe72wCuAgjBOzVNn2bR+GYx3FKhaIaORmCAx4yZTSNOMful1IJco/9MBnBss0fGUZh9lbVim'
+              'cWtTClq/Xh7WnvFBtZEDNpXd72ra43NjamwcPEvYHf04XvpysYagZy98fyTxoXsMtTHkUclwAZenGEAhDGXJdlG3g7wmnJkCcISQ5MOBU0sJ9t'
+              'D3dhy9ilsImBjDQ/7yR7POF+4u4ZKolryHgU3bswe5nyBLvS92spTtz7od0cBfwxGenT0njB9jXhtszXG/mwN2As7+Bn4bA19t/pZ2WxR9KRnR'
+              'k3Wzk9mznDs20i47DKlRAvgYvYdXkOj08pJPdeaNEL1D0AWstVPNfG1PjO+CzmCWlpm3WkoaWm2aqJn0ERhMVUfQQwl8F4/rUlAMqMdv6Wdt0a'
+              '0nSEhvjFO+LyvmS4RgsZTfi9lw0cp9IJTSVNgNm0gvUOp8+g3zsl0/Q8ZlM8lYC/krv7ncfnn4gU8Qk7pU9NHWc+QmMJsK6REr3+WI5Yf5wN1j'
+              'GVPptHXzjGbGN14RJTwH0QanlgzMa0QcHsgb0gr0EsOmPYA7dqeBEVpNt+JGkYpagJbhC+vFXHMe21zbIKdKgJ2SKJiwTZ03xt3yuYfUXvFUfU'
+              'gCBtFKEa9e0Sk1w0y4UFxLaOEZOCxWwU83HigcdVWNbQu/ggXoIN4GM0AYK1aQtY6fIOpQ2+x+M1ANk8gD11sgBtJoX62fJsVzzLlE7frzy7j6'
+              '1bE+zo9Q525GbLDH51clO3oXeVHt3opL4BBC/+5FGI1MJGHSx/q9sG4o1d0zOCqaMZ5+fvpYF4Hu/qKtEWJP11tCPfnOEOixz5iXAg7dMZuN1m'
+              'xAtkEth4ddeH3Qo+KXIi7gnEVeyzzsuUpamiqbONOMv+C+yp75fb1iU2VnI2k4n9dR6Q9UMQKv5y7kvsj6Y4fwW5ktOI40ObiS6ONtVMicjZG2'
+              'STV64Eb3FG/2w83IWHOjH6avAQeQkfgVegqo8kp82CgrEtm1aZDhBGTQua5Ta9xryrJ6PlcqopK7u8ckttdfqFe6a7p8sdVinLcDoVvl3u3Ys4'
+              'Fr7YYG/Y2/0qPPlWXBrMG//OcG3JN+FI1WieRDjwtkntBhLSZm8ci8IAQifb+9gVco5Mje4VL7UAAkhGqZdngIAComO5liFpI2yb7Th2sAwRgQ'
+              'HdOwK0QLbs8C0wEUOmxE/59KDI1cohBhhq3FfQbgKz2Eu2vVclC2gULxdGY6lbpcsJ9aKyERH7gm3bpIkk2cdKHogcsJAUQ/4hOvikex4qh7qv'
+              'cakvilaV232bETc2ACWQ1ibqCtBIYuueHRyw7jaFPl9Z/YuCeBI3uuWJhdX6BmsjV9UNBv2s4bkmbez2ynHfu74xRe32lJKVFHMqaGqzNUCASm'
+              'rjXq2V1lhxSRtcMrjYZW5vacn91KxGsmS5zX4E8Ra2lBtJY3GTqy6wb0ONNag7/RVWp/8AO4316y/BzwrukinYlzbtezYWafqPdV9xQu+OfB8j'
+              'l3O5s0ib0MbCCHCd2JmeMhoYmmUbPcf4IGjuIhC7FAuPK/gKWMBHwWBN+WscnESvWhrJjj8EO/4gdpgt4HnR3GmZSQFFJaCdbHP1h4ggl6yAae'
+              'bfxGJLRLYWJmvJLDc1v/DBC2IW3sOWNv4aJF84HhYcDi4ZumkmHjeYCNAsuzFPDkwTsswpNw3KzHoal5tnwSkj7UoTg0WzhXckWpdNVoUphbyw'
+              'rG2bAYn2iYNdZCjKuliqniXqSgGk05Oz30Bbn4Hubh7UNQkrmAXSyKBOuKRS5cvYWsK2b6vZGTLMVWzWpVhMVtGpL4pz1f5keAFVumTRB0KwR3'
+              'H8NUqxteqchj2J86pYrdsLyal8QcRRPI0hQr+H1fqd6vUikETkCaAsU/BnNfdsjSfyC+znz/hrlzVbYTTxAtd3mhaG5c5fBX/ygwrX5gOq/l/R'
+              'ZEMbdAgtW4hyZ6SWGgDieoBrmUDqge8s3ZcvU4GT3qXp6zyrYdtqSN8q1gplcZOn7sGXnQfIcwD4cPR31HMchgj7w4Yk+io+ii0WuaYrHASUh/'
+              'Y3Dwj5aB6CbupvDU84c07SUSvnIzDC9fX1BtVCxFe7lI1+DTqsJo9vwBseTHavG43QR7MCLeyqcZSGbI55Ig6NfgVfwee91vrzeB2EhN5GxUqO'
+              '5+VAFeYvpoCA645HAfdfbVPOA9Ea8Id/ExHaAaLhMZA/Uk2/aFXuhyQjsc8TcBZPXBzbrcAKAEWRBGGCx+PxkqIBkyNp1YBSNEBqsBWJCpYWoG'
+              '7DzvyhzbpOo/GF+7jM5eUUam4OqdScC1vWGh6LqhOMTuBfYEkTadVR1KRaQ10kOaUrTmscsKLgSSUp0P7i/MMlzOjtrD7n//7nf8Uc/3jY3e7A'
+              'fDg8H/Rf9s+OMSsf5v2HJ3ea5efch94k92/mC9DGloz0YFyh0nxL9aUj/XqgoJEL6TobIUNRA7KpFzjkGSQiTLSD4UNxDq9qfhqTQZqzyN8a9Z'
+              'WH3b6VJnjNQQPdiI/GUUJOnk2hGkq4iV5hVp34uHlAumJN+Mu4iYRdCbL1s2visnJ2jd/zVEVlewZbJjyfzRxSn8ewq+AjeEznti011yaDRRrT'
+              'z1eda5VfObbm4e7nzxchMMbf/vxZTAj5YAu6aBayLig49gJznxXXpJW/cVI56GtEsRjFEHV2Yo9b2Qcvj71hR5gtCka4ua6kyOxlo7h68K4xOv'
+              '1AmTLbHXyh73UJBbzeYN3rzFEFsTgKAjXj3QCX3ebPt6+VTa8QkGvwQzxdwoveEl7IjEjE3mY/dUBTmp+bz+PPTVhaUvIdnY757Wx1OtL6nKVk'
+              'APKMDDprNEhQ1MMgo756VJOC2jFXtMNQhblQhTmqwvYOqMLcVAWgi6AsajA31CAHzURtGEsxey0lA+1iQVVKfzWGoQ3DcBUMsmwgPy2tbqAUCt'
+              'RtkpUGtCkhpl6DjyZbZIVP3S5T8HahAG1FBOKIpVOP8qGF9OGKtA+txA9XIH74ndTndQzfybWhFUNOeg0USiVD21K2VYsMCV1XQ4f2XoerdTs0'
+              '+m1UJSBpzsCydGbFsFWDLvXCNMehGlLPNbIde2MMlowz5j68652c9o+axTxM5cQ69QriESxPdBAlczryRDt1P6t2dNS77DEqYhUb2XSzbph9Lf'
+              'ddIP1mKYYFv3g06F/+Pjijwr7DV6K81e7wYeYNxdJoR1tw9+oFLcx8xVktL5GezMRvmQSgZNfT09mtBDD23aoANZ7YEmOpHYhilqYqbjALxjyX'
+              'VcQf3Xs+GUX8Nr7qvr5eKSFZaUprppwjt7AVhcfGDGGeVmVoUuDNCyi8uY7CMZzsLz4eaHce3+3s/fCZmutXdYM1IKIaovvUSZqnyeMsxUBQls'
+              'DPMbLI/VpTNteSeK7FbpeJLdtPSQQ0mwQW/L2JuqFDTCOsmdhBpdCGVs7aVGXzB91F/hnmNQ3EapDzwOYKYs6GUA1Fw6hljAnSWUGSNwvPnzAq'
+              'csEYReKO7/IUz1khlahUqpINcYnw2nKs+QqotDCnWFsYEadmqnI2gA+XPTDwz2M1HimDlEYgcmZLhqN2BTg6d1NL6cK7PIFKN1V+GM5jYa7ER9'
+              'gOYOa++GYeDVNF0oDHC7AgkWp3okVgMkSUAJg5hxFW1gB7fsHztdH5b9YkjyLgr73Ty9KsOGEDy2ZmmTXUOkMM+7apZgsbEjf1IrqSQpGSE50v'
+              'FOhLiaQ7W1ISndKcF6qCScKCscdnmH8Sh0FhmFZmTV0UXvGopIR9BE5JutVcrJs0mmk+ChQVHzifJuLDQPYxMwA7rMoanVUlhQK6kmRSQG9/Qx'
+              '06S+p9GrXGaYzxBqwT3hwT0YShwaWmqsh99Fksp5NFk1Ys18wP7MFgib7MgEKtBauzYrndMhvqtXVXR3NjlplT6d1o24nwbtlSkfFeOOXftTbU'
+              'Nd5H52d9UmEh3romO5dSic9uL64NvESc/FB1aFwae1VjoWE04dGV7k7odbBt/fnc8lxWtyrPlELW/Clm32oOh9SjMFUkQU/oXcNHQ5lq6lx1QZ'
+              '/9yFgpr7bUfEqaKuqti7dpGDujdD+kFmEBQnvChKl15aecNuXIjwXleZB2fNNm2cHLBmt+Dprwx3iPh0bZMfjIuChLA3Vs14ANxIG1zOfCQxhx'
+              'oEzrWHYTF4/zO6xOepfmlV/aRibbfs25WoiIGZtc34FVX+zVZvqoHOMeryXnWf1P/SwjIj2Uj1L3TDnUAtvEFZ5FRASy2excXiamt6C/QJb6lO'
+              '4YoxNG5ekG6zaWXlQGiOpeTGYbXf/sSL+YjNRpJtKdo/Qg13LudvL+4hzYMuh/OD/9/fLk/KyRAg4wc+3j4cYGuJDdV3ggl5oO9pL1pcWQt41N'
+              'vShO9tKb6+hGu4jP0LBmt9jldp9Uw1KkrE/KwvmUdKqW1wfJQAusR4usnqVpL+kwJq/iHajGF+x3QqbaMMBVRrjKENO7w6Ixpud9m0HWjLJqmD'
+              'WDe5Na3JzeGzTQNxbLSwOTJZBXQCMdN/2j863SWBoXrmgdrZBXVfN+Ats+My+Jd56aRAULPp6Qi7s0QFnHi4guIxGTjq4mGSdh9LUqm0ZlwJMz'
+              'nywVzamDJa+SWGGHn4HmGXTV8DWFYg7ZUmtSkiu6SnZTHiegGxIpOSAvAq4rkXIw280KdRb2xkoZqelgLgb90/PeUZqfV1VGt5z4NCBQWsqE9l'
+              'VJCmcHtksMqnO887tPYZ+Dy41yx+TW1paFdqNTa6q24g0a4FbX0J68LhwLS+56PXGwOknrNRMgqzPUn5il/t2Z6po7pmerW5TNF/MAbwRNE7aN'
+              '4FJhbqvLt3kbi2Kvyq8R0hPOy1DY89k1Ywne+fJ09tKEc2hUlWueh4of57a0dviWpkCXp0VCLwBd1YuRTAzQe8sttC4se+zqu9PmzZxLnP2pky'
+              'gT6Gsmz39n3nWdRHpa3R7nTvnAv9VOmberuZTK2hordVntpRaYMo9bp5KUdm2CLMuvL1Vf2UuVeimqJeH3fmh5BbnZ73qnp7/0Dn9bWUNW1I46'
+              'mpHzZe8HacDyopcqMVuqF1Z1y35gNUNpRcP3MqGWt20vW1C2scsKFlYcc92qhHL/vIQlcl3FaoM01GHFWgh/VBQsWFdlcaJXOOox5VPXMIlbPF'
+              '7v0KWKgv92duT9Vin1E04di6UDI8u517JSCxjKSg3eOKWp4Eus+f2rbe086v8H+15tr9RgZwWLkbHgRxX2VlS5+P6nf7PRqG5iu7VESqS6SLjk'
+              'AowSpppuXzVvT1biLXl557/9eBvsLK+DLuxh1UKZPIIqqmXyiKZSLUNHKTIWncY59eSri3526c695zKaY1usjyLCy+1AiR6bbasoUzGKKhDsBx'
+              'NplHDqCtHMwonPCtFMWfqESDzX9/4UZe7fGdasm/uwanEWFW68VMs2RIYbHirgUi+Wy4zhjWXzKCMjq8FRBV2zqiUXvB/eWqpa9JMXpYM2y8Ut'
+              'T16093juMt8Spo7+xzax06Bs8VYzDawTT4wiFnbRuzz8lZ2cYQye0gwb/wIWcsJO'
           )
           code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
           exec(compile(code, "<POSTAL2-FIX11.2-4>", "exec"))
@@ -378,67 +385,302 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+
           python3 <<'PY'
-          import base64, zlib
-          payload = (
-              "eNrtGmlTGsv2O7/ixFcR5jogjGYpjKYQB6UKgRLU1EusqQFamZvZ7iwuSfzv73T37EuEmOTmw6NCZLr7LH22PqfPXDuWAbbqLXVtBpphW44HY3"
-              "ysVGzYZ79qG5eaSY511XW3J5bvzIm73bUcsn13oxDzBuca8w2h4uJyu+EQdaF45N6rCZXKf6D+jA+C9/ofoNVqSJ02uA+uRww4GgxccMg/PsHH"
-              "BcwewFsSHFB1uOiC45ueZhBQHYLQt5rj+TgRsQ+GtfB14opgWrhLGa41fEIMqgfu0vJ1RMiQLRD6mgrm0PI8nWwvHO2WKPPGc3ekWygd11NRxv"
-              "tQrVYh+DwC0V0C2jXUXM+ZG3bt2hRhY4DLB9rMUZ0H+f5yQ4D9fWjCt28ViD8l68PVAnxFOpwwMRcrkT0m3ikT1IlqLnTSSaOqqIjEbVxr5qIW"
-              "70eozDLDSE0EVaggdpXC11tgOTDjP9tsC46qIfkJ06x8r3m1DfnsbHTWhvTGYaZb889gqM5n4qASNdfVzBs0Ob4th9i6OicGMalUnd8lVrba10"
-              "yv9VrxAL3HVA3y8VVLukIuvjYf99iC+VJ1QHXnmpabomypzo37sXkVoqMf9KqZrpmfFeZKBjFq3MnqB2wYZcphxJCmCK2mJAl7EYZrlHMNGQMN"
-              "yTX38M87eNVqweZmxKZ2hcNbW0JyywGbGmUyXoewLektvIca3YqQmGhD9X2VU32ssD+Xx8pgdNyvTTvHKDZ0Xuq78NKtVV+6VWFDBCpORgW5jW"
-              "TwgtNtXqEK4EWBRBziKbfox/sQSsImimaoNyTFPrJI1bEjKZ6QXVg/YH+UmeqmgdrQvN9t0o8fbIXbTEydaZDCKWzjr3dTSqSfha4zxHS+xjYj"
-              "xgAiuNoXYl3XohEh3DzDbpmux2n8xUOcgujcj4xIitMNNH6T6DtSAxegLINnijYcMT38wR/SoL5LnBjwZqHFD+riVrWj5zSYuyR6gqClk/jhTj"
-              "MNowjozpWUxDIXXTd+nDsPtldIbHg+GEQDjwkJzSxLB81VggNgH65VVFC5tSelGJp5RpSJgJDUUwow7ecp6AQvnuMnWIlYRtf9nB5+jPcWb43y"
-              "EWHLkoqtvnl/2Ov1EjYafpL+lmOCKSP0wfAojE9RdEuoHyDul7r+YaMYPBZO4XTNN13txsRjWLfMG/afEHCdiEY5hwrjJnVUUHUa5h5wlxj3+P"
-              "GssDMkDBNZvQUARYqJJRYsyqigiJEUM3S/zIhyS5iDGqo9869ZHM+vQHsy5/ZDjS8Kwlzk/HxUgDq0hDxsgDi/lkaB6qdmtYChRNxg2Q8TIMtn"
-              "FESg0IyuVqi16PjIHCsh42kuCrilWqAkhVKb4cywwxm9KXN+FUIVfEIoGl2RGZs4K4NS7lZeXGRoaWtiW3rP/7TLvTHp4vx/li7RvNj92FavYA"
-              "ty+coWTs3aVz8xVT5sY4JkaoZv0Lx3RwLbsTBjd7eJiUHAMinZbQzeC+uujpmbp1kmQs/IUr3VMJLS1Fpzspn1RGq2dqB7NgWW7Pn2szNh5Ebh"
-              "Cd2qKenEczDrmz7YZIWULbU+TvKCFNa23DhZjTlhuSqbWyFFTXMUJKfJ3JTiXbIE2nFXy0sRZdd3HFTQmOusv8ikm9vbcKp68yVTTaBY0BbADG"
-              "oBmskm3AcT/3jaHKbyYaOSPUxa3HS/J+kFz/zz1CfTI6U/HJ9PlZPO8Ggg79dbTZGNjs6nqeEWH2bSikelRjb1ZRTue/zz2hdSrPZCH4tYLYJ6"
-              "lYVqrQK1m4WSklCJme+JSo6diluDm60QmI/Nk/EaDYOmd5Hpbkzl0/F+t/3p05QY9qfmRmKmbOJ8Ip8NO6fy/thCArqUmuyOTlEVwYL++GQ0lF"
-              "Pz3JrPLMtjyC9ZMHBTSy77w6P+Wen0uDM9SU1+4jh3pL0UCALtpeukO7r7bCVEjxycM6lT8tMHVwlxlWTCAS1gBLYCf/AZlvgFoIlKx8xUNowi"
-              "K2pYefCWVQd0JOaMHf4GS+jw3LqhdwuKqmPRGRxdYqKyQGb+AklIcGekc7eofrtzNI8UFXA4JDK2yvGmfRYBSoqTlJnGR09xIVZsr6VZ4PfTux"
-              "Kf6DmEPO0UMdut9byr83/vKvEuZsNmaOXMpHK+tJqtm8+2bWba5vNNeS0b6/yYjQVHLRfqhCdE+XNvaJl1WqGC7RJ/YcEJqnAy7TTgdHLRHbek"
-              "Jlim/gAmIQsXPAv+8YnzAJqXP33fvGm2vnv6nmOtPpr9TeZe38QQZzCOLvMsHY5GAyhdX1vimGj2zQW5F+1bOiWaA1SWtxR1O/g1RHbJQkjbhk"
-              "ZBaA1Fz8xWNkpavhfOSQVzik7McH4nO28ycortOeGS3eIlsQ2klBhZZcAiDqI8qCzOR32lN+gcTyq5mu5aVxkv7LwRAf+1HvcozOWkp1z0J/3D"
-              "gRxBReQD12HACTumxKkENjejzR7sB1DpcuhpT0EEIudODDHEhCLjwFXZUtdVdBWdljiORQXZkiS2H55poVme93r9bl8eTpVD/Cmfld0q7GXrlZ"
-              "hqJGApIWAa8DL3VtGxzq7GmIyrl1WxquHXxO8Evx5+Vfw2q2Ly0iwranYz9gslze94nivoNWX5NW+PX4hjpSEiSew+tf3dH9r5JiUpInDqrpbl"
-              "VZFDCmuE+BgKcfMHjr08pg1Qjp25p92SsWX7dmmkDvL0vVTljBUZrZ1T9RStm3H8p1bO3TZyYquaA4PuqWrzY4Wy5LNSnfkEjjRgijWWpdMe0d"
-              "wyZhrNkALGwF1q17QvlcAg39Na2jJJjIrcElp0e0vLv1nyGLDtOnP6xcC8vXA9+sWftJHFhAKtRuMVy3jxrIadZ5ff9IpojT5UvJtV2iXx6s5a"
-              "q+X7dJlOmVyjZ9Xpjss7VdGGU42qgMKP96kShlLapKJE1u9R/X6RV/LnZmkagJaaTQMSU0EWUAsT0eJ0AE08mwckpgpxvArWsZ6AiuUJVeX35Z"
-              "BsNCFryRifie9v36TO0YvOoH+kjDtneOxNE6doPk/Nxnqmy0AK7/I9hFhAzYLrbdyUUHJHjaUr1jjFF9SYk34tvPF8qp244jUpVfhWsrbgm1gV"
-              "fHO+FAuvvhMC2drKTz/C3VLTCW0+0rMwlqrU3H0rrHG/z7KUP0x4tOBfS4DSLxZgWY8qZcyF5ptcdcBxJxbS5700yhfU+799iz29oNkWe1pOdL"
-              "n2EsUZ4noXkv4NmXPijrHAc0Ovpd0dKoSrvMPHUmvmGypPvguA0CKwtk1ORBnlFr0UEAqzqEca8sdrINjE0pW1yVvNpi9QU6J70q5oWlrtVBMD"
-              "73Dgv9WS5hBfkriKqwVD6B5YJUCdIitrOmVZkQpYUbOsfFmblfp3WHn8Qf2VJtNosysqcB1vyFshi3+/3gxXiGaFYfDPN1YqwD/FWlO8/Dvm+p"
-              "MUvZpRl7VTs5n1z++mHrXhSNdPVc2krPqOSTP9XmcwkcEgGPHpmxTK+GzUlScTpTOddron9NVBFY/cRQOOLPai4dwyPc30CU1vLdahkz/IcKd5"
-              "S6w4FuhStLP67JJugSVmYUv1iXdFeHsg2ubRaCjTd0Mc4vq6t9+8f5ntCxj1g/w7IbRLz0GE6OYOxcVfkGGKY/yl66Ack+wUjzDlkgK+B7n4fZ"
-              "eozZFWGBbjXF80prx0C950CfaTvq6mvCdeNCp4we1fESIKKKlnal1Izn2iTC1gLtev5h3xQD+1BBERspqjmXylYjd4lGAv+7pCxcaqC0mGngMX"
-              "XXotftkf7kggDy/6Z6PhKaZWMO5MuyfArs8HA/kISf8P7E/Pag=="
-          )
-          code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-          exec(compile(code, "<POSTAL2-FIX11.2-5>", "exec"))
+          from pathlib import Path
+
+          p = Path("WineGlass/Sources/Core/wg_engine.c")
+          s = p.read_text()
+
+          # ============================================================
+          # POSTAL 2 FIX 11.2
+          # Real VC120 needs several Win32 startup APIs to return sane data.
+          # LoadLibraryExW is intentionally left alone: current WineGlass
+          # already gives missing system DLLs a virtual/fake module handle.
+          # ============================================================
+
+          anchor = '''        } else if (strcmp(fn, "GetStringTypeW") == 0 ||
+                             strcmp(fn, "GetStringTypeExW") == 0) {'''
+
+          block = r'''        } else if (strcmp(fn, "GetEnvironmentStringsW") == 0) {
+              // Environment block is STRING\0STRING\0\0.
+              static const uint16_t envw[] = {
+                  'T','E','M','P','=','C',':','\\','T','e','m','p',0,
+                  'P','A','T','H','=','C',':','\\','W','i','n','d','o','w','s','\\',
+                  'S','y','s','t','e','m','3','2',0,
+                  0
+              };
+              uint32_t mem = wg_guest_alloc(engine, (uint32_t)sizeof(envw));
+              if (mem) {
+                  wg_blink_write_mem(engine->blink, mem, envw, (uint32_t)sizeof(envw));
+              }
+              ret_val = mem;
+              WG_LOGI(TAG, "FIX11.2 GetEnvironmentStringsW -> 0x%X", mem);
+
+          } else if (strcmp(fn, "GetEnvironmentStringsA") == 0) {
+              static const char enva[] =
+                  "TEMP=C:\\Temp\0"
+                  "PATH=C:\\Windows\\System32\0";
+              uint32_t mem = wg_guest_alloc(engine, (uint32_t)sizeof(enva));
+              if (mem) {
+                  wg_blink_write_mem(engine->blink, mem, enva, (uint32_t)sizeof(enva));
+              }
+              ret_val = mem;
+              WG_LOGI(TAG, "FIX11.2 GetEnvironmentStringsA -> 0x%X", mem);
+
+          } else if (strcmp(fn, "FreeEnvironmentStringsW") == 0 ||
+                     strcmp(fn, "FreeEnvironmentStringsA") == 0) {
+              // Guest heap is a bump allocator; leaving this tiny block mapped is safe.
+              ret_val = 1;
+
+          } else if (strcmp(fn, "GetCurrentProcessId") == 0) {
+              ret_val = 0x1000;
+              WG_LOGI(TAG, "FIX11.2 GetCurrentProcessId -> 0x%X", (uint32_t)ret_val);
+
+          } else if (strcmp(fn, "GetStdHandle") == 0) {
+              int32_t which = (int32_t)args[0];
+              if (which == -10)      ret_val = 0xF0;
+              else if (which == -11) ret_val = 0xF1;
+              else if (which == -12) ret_val = 0xF2;
+              else                   ret_val = 0xF1;
+
+              WG_LOGI(TAG,
+                      "FIX11.2 GetStdHandle(%d) -> 0x%X",
+                      which,
+                      (uint32_t)ret_val);
+
+          } else if (strcmp(fn, "GetProcessWindowStation") == 0) {
+              ret_val = 0x4400;
+
+              WG_LOGI(TAG,
+                      "FIX11.2 GetProcessWindowStation -> 0x%X",
+                      (uint32_t)ret_val);
+
+          } else if (strcmp(fn, "GetUserObjectInformationW") == 0 ||
+                     strcmp(fn, "GetUserObjectInformationA") == 0) {
+              uint32_t need = 12;
+
+              if (args[4]) {
+                  wg_blink_write_mem(
+                      engine->blink,
+                      args[4],
+                      &need,
+                      4
+                  );
+              }
+
+              if (
+                  args[1] == 1 &&
+                  args[2] &&
+                  args[3] >= need
+              ) {
+                  uint32_t flags[3] = {
+                      0,
+                      0,
+                      1
+                  };
+
+                  wg_blink_write_mem(
+                      engine->blink,
+                      args[2],
+                      flags,
+                      sizeof(flags)
+                  );
+
+                  ret_val = 1;
+                  s_last_error = 0;
+
+              } else if (
+                  !args[2] ||
+                  args[3] < need
+              ) {
+                  ret_val = 0;
+                  s_last_error = 122;
+
+              } else {
+                  ret_val = 1;
+                  s_last_error = 0;
+              }
+
+              WG_LOGI(
+                  TAG,
+                  "FIX11.2 %s(index=%u,len=%u) -> %u",
+                  fn,
+                  args[1],
+                  args[3],
+                  (uint32_t)ret_val
+              );
+
+          } else if (strcmp(fn, "GetLastActivePopup") == 0) {
+              ret_val =
+                  args[0]
+                      ? args[0]
+                      : 1;
+
+          } else if (strcmp(fn, "GetStringTypeW") == 0 ||
+                     strcmp(fn, "GetStringTypeExW") == 0) {'''
+
+          if "FIX11.2 GetEnvironmentStringsW" not in s:
+              if anchor not in s:
+                  raise SystemExit(
+                      "ERROR: FIX11.2 insertion anchor missing"
+                  )
+
+              s = s.replace(
+                  anchor,
+                  block,
+                  1
+              )
+
+          old_lc = '''            bool is_ex = (fn[11] == 'E');
+                      int ofs = is_ex ? 1 : 0; // LCMapStringEx has locale name as first arg'''
+
+          new_lc = '''            // FIX11.2: do not shift LCMapStringEx arguments.
+                      int ofs = 0;'''
+
+          if old_lc in s:
+              s = s.replace(
+                  old_lc,
+                  new_lc,
+                  1
+              )
+
+          elif new_lc not in s:
+              old1 = \
+                  "            bool is_ex = (fn[11] == 'E');"
+
+              old2 = \
+                  "            int ofs = is_ex ? 1 : 0; // LCMapStringEx has locale name as first arg"
+
+              if old1 in s and old2 in s:
+                  s = s.replace(
+                      old1,
+                      "            // FIX11.2 LCMapStringEx argument layout",
+                      1
+                  )
+
+                  s = s.replace(
+                      old2,
+                      "            int ofs = 0;",
+                      1
+                  )
+
+              else:
+                  raise SystemExit(
+                      "ERROR: LCMapStringEx argument block missing"
+                  )
+
+          old_dll = '''              if (!ok) {
+                  WG_LOGE(TAG, "FIX11 DllMain FAILED for %s", m->name);
+                  return false;
+              }'''
+
+          new_dll = '''              if (!ok || dll_result == 0) {
+                  WG_LOGE(TAG,
+                          "FIX11.2 DllMain FAILED for %s (runner_ok=%d result=0x%X)",
+                          m->name,
+                          ok ? 1 : 0,
+                          dll_result);
+                  return false;
+              }'''
+
+          if old_dll in s:
+              s = s.replace(
+                  old_dll,
+                  new_dll,
+                  1
+              )
+
+          elif "dll_result == 0" not in s:
+              raise SystemExit(
+                  "ERROR: FIX11 DllMain result block missing"
+              )
+
+          old_cleanup = '''    int num_args = entry ? entry->num_args : 0;
+              uint64_t new_rsp = rsp + ptr_size + (num_args * ptr_size);'''
+
+          new_cleanup = '''    int num_args = entry ? entry->num_args : 0;
+              // POSTAL 2 FIX11.2: correct stdcall cleanup for dynamically auto-stubbed APIs.
+              if (fn) {
+                  if (strcmp(fn, "GetStdHandle") == 0) num_args = 1;
+                  else if (strcmp(fn, "FreeEnvironmentStringsW") == 0 ||
+                           strcmp(fn, "FreeEnvironmentStringsA") == 0) num_args = 1;
+                  else if (strcmp(fn, "GetLastActivePopup") == 0) num_args = 1;
+                  else if (strcmp(fn, "GetUserObjectInformationW") == 0 ||
+                           strcmp(fn, "GetUserObjectInformationA") == 0) num_args = 5;
+                  else if (strcmp(fn, "LCMapStringW") == 0 ||
+                           strcmp(fn, "LCMapStringA") == 0) num_args = 6;
+                  else if (strcmp(fn, "LCMapStringEx") == 0) num_args = 9;
+              }
+              uint64_t new_rsp = rsp + ptr_size + (num_args * ptr_size);'''
+
+          if old_cleanup in s:
+              s = s.replace(
+                  old_cleanup,
+                  new_cleanup,
+                  1
+              )
+
+          elif "POSTAL 2 FIX11.2: correct stdcall cleanup" not in s:
+              raise SystemExit(
+                  "ERROR: stdcall cleanup marker missing"
+              )
+
+          p.write_text(s)
+
+          print("==============================================")
+          print("POSTAL 2 FIX 11.2 PATCH INSTALLED")
+          print("GetEnvironmentStringsW/A       FIXED")
+          print("GetCurrentProcessId             FIXED")
+          print("GetStdHandle                    FIXED")
+          print("GetProcessWindowStation         FIXED")
+          print("GetUserObjectInformationW/A     FIXED")
+          print("GetLastActivePopup              FIXED")
+          print("LCMapStringEx argument layout   FIXED")
+          print("DllMain BOOL result check       FIXED")
+          print("Dynamic stdcall cleanup         FIXED")
+          print("LoadLibraryExW                  LEFT INTACT")
+          print("==============================================")
           PY
 
-          echo "===== FIX11.2 SOURCE CHECK ====="
+          echo "===== FIX 11.2 VERIFY ====="
+
           grep -n \
-            "FIX11.2 virtual system DLL\|FIX11.2 GetEnvironmentStringsW\|FIX11.2 DllMain returned FALSE" \
+            "FIX11.2 GetEnvironmentStringsW" \
             WineGlass/Sources/Core/wg_engine.c
+
+          grep -n \
+            "FIX11.2 GetCurrentProcessId" \
+            WineGlass/Sources/Core/wg_engine.c
+
+          grep -n \
+            "FIX11.2 GetProcessWindowStation" \
+            WineGlass/Sources/Core/wg_engine.c
+
+          grep -n \
+            "dll_result == 0" \
+            WineGlass/Sources/Core/wg_engine.c
+
+          grep -n \
+            "POSTAL 2 FIX11.2: correct stdcall cleanup" \
+            WineGlass/Sources/Core/wg_engine.c
+
+          echo "FIX 11.2 VERIFY OK"
 
       - name: Patch WineGlass project
         shell: bash
         run: |
           set -euxo pipefail
           cd WineGlass
+
           python3 <<'PY'
           import base64, zlib
           payload = (
-              "eNqNUstuwjAQvOcrVr4QVBT1xSUSB0pMFSk8BAEJtZXlJqZ1ldiWbQr9+9qhLVKhD1+cXc/MzmZ3rWUNitrnij8Cr5XUFqYuDAIFveYrRErLF1"
-              "bY6K2uUDswLq8izWhJLNvZcJ8xLqMqWrAQPW5EWbG0nGq25rsYCllHWy7YU0WNQR04CVDSWFpdcmnQd8HWrpAlWzJtuBQxoItudI5aHTiRv0b3"
-              "AuDD71DqmtoYGthFl1y1jqxOZ5NkMcjJzWKcZJikCR7n6TDFs2+uI6qUd/4H/tBEJKjlr+y4l7w/u8U5TkiCl+kAk2F/lGYr775z2TT1MwA5/0"
-              "HlLHnJu4dgLTX4ELhwFYyquG1ew3YcgDt8DWgwSTCZp7dj4p3mGR65ex4jz/HgPdKfQgrLxYZ9UV19nE2mnkBy3B/9i3SoN89XGY6hv7HSTYEX"
-              "J9iN+V5zHUbyi0LnhP6Iig31a/kp2MyKiTL0gfthKtpqbtl+V916oOhFctG8mjacgU+1g3e30uyJ"
+              'eNqNUstuwjAQvOcrVr4QVBT1xSUSB0pMFSk8BAEJtZXlJqZ1ldiWbQr9+9qhLVKhD1+cXc/MzmZ3rWUNitrnij8Cr5XUFqYuDAIFveYrRErLF1'
+              'bY6K2uUDswLq8izWhJLNvZcJ8xLqMqWrAQPW5EWbG0nGq25rsYCllHWy7YU0WNQR04CVDSWFpdcmnQd8HWrpAlWzJtuBQxoItudI5aHTiRv0b3'
+              'AuDD71DqmtoYGthFl1y1jqxOZ5NkMcjJzWKcZJikCR7n6TDFs2+uI6qUd/4H/tBEJKjlr+y4l7w/u8U5TkiCl+kAk2F/lGYr775z2TT1MwA5/0'
+              'HlLHnJu4dgLTX4ELhwFYyquG1ew3YcgDt8DWgwSTCZp7dj4p3mGR65ex4jz/HgPdKfQgrLxYZ9UV19nE2mnkBy3B/9i3SoN89XGY6hv7HSTYEX'
+              'J9iN+V5zHUbyi0LnhP6Iig31a/kp2MyKiTL0gfthKtpqbtl+V916oOhFctG8mjacgU+1g3e30uyJ'
           )
           code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
           exec(compile(code, "<POSTAL2-FIX11.2-6>", "exec"))
@@ -448,46 +690,70 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+
           PLIST="WineGlass/Sources/App/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleName POSTAL 2" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Delete :CFBundleDisplayName" "$PLIST" || true
-          /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string POSTAL 2" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.11.2" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 112" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :UIFileSharingEnabled true" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :LSSupportsOpeningDocumentsInPlace true" "$PLIST"
+
+          /usr/libexec/PlistBuddy \
+            -c "Set :CFBundleName POSTAL 2" \
+            "$PLIST"
+
+          /usr/libexec/PlistBuddy \
+            -c "Delete :CFBundleDisplayName" \
+            "$PLIST" || true
+
+          /usr/libexec/PlistBuddy \
+            -c "Add :CFBundleDisplayName string POSTAL 2" \
+            "$PLIST"
+
+          /usr/libexec/PlistBuddy \
+            -c "Set :CFBundleShortVersionString 0.11.2" \
+            "$PLIST"
+
+          /usr/libexec/PlistBuddy \
+            -c "Set :CFBundleVersion 112" \
+            "$PLIST"
+
+          /usr/libexec/PlistBuddy \
+            -c "Set :UIFileSharingEnabled true" \
+            "$PLIST"
+
+          /usr/libexec/PlistBuddy \
+            -c "Set :LSSupportsOpeningDocumentsInPlace true" \
+            "$PLIST"
+
           plutil -lint "$PLIST"
 
       - name: Patch POSTAL 2 launcher and log
         shell: bash
         run: |
           set -euxo pipefail
+
           python3 <<'PY'
           import base64, zlib
           payload = (
-              "eNrNWOtu2zYU/u+nONPQ1U5dpUmBoXCWoUmsBAZcO7CddUNqBIxE2VxlUiCpJN4wYA+xJ9yT7JDUNXbSpNuP+Uci8XL4ne9cqViKFaRELxN2DW"
-              "yVCqnhHF9brRQO7VPb+8g4PUuIUrtTkcmQqt2jNN39eDYNKad9mtAF0dRfeZ2Wwj2pLymJrjS90+1Oq8Vi8L5lPEyyiMIPSkdM+MsfPeBCA+Og"
-              "ei3An9mocGOakJC2axsyznCP2dGFbcOf+BbhXdjDk0USodSXL1+aAy4GqEUkbi1m2LmtvRxC+95sR5n/By0L7XZxlYjFFeMM9TlAca0Wp7f/he"
-              "TRdKol4wvYiURoGMABSmS4NLSfCtlnkoZaSEbVgPfFijCu2nan290XYbaiXBfr1t3a5IWi0u35QNTnauaXYGqfO37MpNLj619x7wYg1NiAQEyX"
-              "Fpuy48drNDzlET6a2ROB/sIRQO+9dz6ezo6G+69LX/FRhDc/sHIvL0fTU5bQD4STBZUQ0Zhkic5f5yDpStzQgaarI20E94rjqZRC9jhLckGxpA"
-              "IBtPN5VCGh07XCjROaSqoQC9FMcPQVgl6ADoESOm6vovrmOovbbrALo4vhsAtXg/Ho+LQLbzo5B3GKmupyWcmb+XmHT/x9+sS95k7HD+xDSRCc"
-              "Dn6GvT1/f3PxJMClP53s7b+BV3AyngS7wehsMAqgPxxOceg8eLsPg6PZ5s7nAMx5ieMkU8t2ydUWp7dDH8+uhuOzQbswtQnIQgXAxQvjOEoTqW"
-              "nk5YGCwW+isBnrkjBFwZktuMMDvGAyGU96YGPDichSWBH5GX1lxZRCyXlyqXIEyu0CBmIj1i8RNYmOM60FNwafMZ1Q9E6AIY6DT+8okgSxkFN0"
-              "FNq7GJwIrqVI7OtIyBVBV3tZBPjD4iYXIyhN+hSJz2Pi2h2pzXn/ggESRTMiF1T3FE1iIKGJjd57fLH5om1iycTlOQuR6o7RIkcf3GAoqUob+z"
-              "4TWbi8SAdcsYg+RNOXzpQZPxdo42T/+ed9FYkOwRNZzJ3uEGtNKsliRawbwmvM8kW2dWQVZc8zoPJdT8QV5YIgtZI2Hb21onopIoNTmjB6De0q"
-              "M3dirCc5gwG68+//91IiBdLy9DriNDvNkqRPNCkqSLN+7MQrI/HRorKBg9tYNPssoi8icZbbzQGZ1FGAQYu3LxGCqT5oWaVVXrbcEfMOFjSdSQ"
-              "7uvURSkhtwJFsSfIQdWj0jNJRaDeRSDdyi/uGqmi9ImmC5u6HG66ptndwnSqiX5TqsO7qh5xxCoihGGMUgM0vMDJG0soRTHA6NS40l1ggaTcmK"
-              "1g9p8hyLjEdPpblAlutX/LbWGisXGcykwh3JugcvFE7Y8/yL2ek7h6DTFJWbwq6qZv5oub+1yhY0TqtpD6PxDE7HF6N+UTIL8zK0LcrA+LwRLO"
-              "pUqS0nR5luJITj8XgIqZ2ZuvpoAnSc+4Ux0TdXlGP9bLC6DVVgV9lEY5rstVdT1oE6qCtWGcWogSaxKbmZQGo+/Q2uqiN4uPzlkPzg56Bi5wl1"
-              "8DGwBkGDpE0yPjbI6GdpwkKUjm6d8XAJbIEBZ5uPx865bwjMYm6+pq1POblOmnaqyFQ2M2A0G0oNs4WTm6Kg8Wm4EWa5jN1d0/Xt7fUwYg2KBP"
-              "SSgohjFjLMTT+dvHoF+2/23sLdu+8B3UmzFcU6xiODBYPcrB6cHxWyON6xQAuoO6sSdhW6R4J9oukYweiFCTIk3NoemPa/Oqm6fUdSkvUPFSM/"
-              "ws5NaNrVQ3h/+d5bqZtQ4qsfJQlayg2kxUBBxr1khlMjTCxGTSurbv4a98i8rSb56vvUG9qDO23SmeA1h6skODr7iS0FqO6xfQdT3tzjvJE/Ul"
-              "dAJ1TZu2/PAGgsEPFsnZqwMLo1ZhgvMz5O237e2wpJ24Yph1R51xdyZ05BQWcZxaWC93P0toxi3bF0sReqbEO6kMt/OLU+nB/c3QWb5NngQwAf"
-              "BtPpYHT2nPywLVBNJNbnt8drGc7bUkAtDTgLBOaCCTuhSNfu8dBl9Ub93FbqS5PN77Nslm9caCsL37/SVtWoNKCRYBDV9ldOq8VWgd+VKsy/bP"
-              "bGdHl3dK4QE2aIxKxiJKJHuDK7dcumh2xfV2LzExGShP1Goz5VoWSpac2/3sFOxue/wOnRYBj0/zfO9WgLYxl22PMCQKO8jSkNuklHUSDxyhBG"
-              "mIgwISOWcBkx2S6zxYPfQh65vrvlEJVZykGpZG5A2SbFAkEmclwvIhwscBbfEx62JIqZzEx2KK7Tvu8/1Zjb0AxtL2DSKt52sFsyZbDWyeZ6uE"
-              "7IYDri0QT7tqBHbS+EXNsvF81LoruidaG4mL0C7xP38F8xUd3AvYYD22O0XA+t9jbJngfzA6/5CfExn8lbPtvuwd9//uUaCH8fSKbFa/uxxLsf"
-              "NvbUqhud248xz7s8V9Kf9yEm9W8l09R9/lWd1j/G2M+C"
+              'eNrNWOtu2zYU/u+nONPQ1U5dpUmBoXCWoUmsBAZcO7CddUNqBIxE2VxlUiCpJN4wYA+xJ9yT7JDUNXbSpNuP+Uci8XL4ne9cqViKFaRELxN2DW'
+              'yVCqnhHF9brRQO7VPb+8g4PUuIUrtTkcmQqt2jNN39eDYNKad9mtAF0dRfeZ2Wwj2pLymJrjS90+1Oq8Vi8L5lPEyyiMIPSkdM+MsfPeBCA+Og'
+              'ei3An9mocGOakJC2axsyznCP2dGFbcOf+BbhXdjDk0USodSXL1+aAy4GqEUkbi1m2LmtvRxC+95sR5n/By0L7XZxlYjFFeMM9TlAca0Wp7f/he'
+              'TRdKol4wvYiURoGMABSmS4NLSfCtlnkoZaSEbVgPfFijCu2nan290XYbaiXBfr1t3a5IWi0u35QNTnauaXYGqfO37MpNLj619x7wYg1NiAQEyX'
+              'Fpuy48drNDzlET6a2ROB/sIRQO+9dz6ezo6G+69LX/FRhDc/sHIvL0fTU5bQD4STBZUQ0Zhkic5f5yDpStzQgaarI20E94rjqZRC9jhLckGxpA'
+              'IBtPN5VCGh07XCjROaSqoQC9FMcPQVgl6ADoESOm6vovrmOovbbrALo4vhsAtXg/Ho+LQLbzo5B3GKmupyWcmb+XmHT/x9+sS95k7HD+xDSRCc'
+              'Dn6Gvb3NpZMAF/50srf/Bl7ByXgS7Aajs8EogP5wOMWh8+DtPgyOZps7nwMvZyWOk0wt2yVTW1zeDn08uxqOzwbtwtAmHJ0C/j7g4oVxG6WJ1D'
+              'Ty8jDB0Dcx2Ix0SZii4IwW3OEBXjCZjCc9sJHhRGQprIj8jJ6yYkqh5Dy1VBkC5XYBw7AR6ZeImkTHmdaCG3PPmE4o+ibAEMfBp3cUSYJYyCm6'
+              'Ce1dDE4E11Ik9nUk5Iqgo70swvthcZOLEZQGfYrE5zFx7Y7U5rx/wQCJohmRC6p7iiYxkNBERu89vths0TaRZKLynIVIdcdokaMPbjCQVKWNfZ'
+              '+JLFxepAOuWEQfoulLZ8qMnwu0cbL//PO+ikSH4Iks5k53iJUmlWSxItYN4TXm+CLXOrKKoucZUPmuJ+KKckGQWkmbjt5aUb0UkcEpTRi9hnaV'
+              'lzsxVpOcwQDd+ff/eyGRAml5ehVxmp1mSdInmhT1o1k9duKVkfhoSdnAwW0smn0W0ReROMvt5oBM6ijAoMXblwjB1B60rNIqL1ruiHkHy5nOJA'
+              'f3XiIpyQ04ki0JPsIOrZ4RGkqtBnKpBm5R/XBVzRckTbDY3VDjddW2Tu4TJdTLch1WHd3Qcw4hURQjjGKQmSVmhkhaWcIpDofGpcYSawSNpmRF'
+              '64c0eY5FxqOn0lwgy/UrfltrjZWLDGZS4Y5k3YMXCifsef7F7PSdQ9BpispNYVdVM3+03N9aZQsap9W0h9F4Bqfji1G/KJmFeRnaFmVgfN4IFn'
+              'Wq1JaTo0wvEsLxeDyE1M5MXX00ATrO/cKY6JsryrF+Nljdhiqwq2yiMS322qsp60Ad1BWrjGLUQJPYlNxMIDWf/gZX1RE8XP5ySH7wc1Cx84Q6'
+              '+BhYg6BB0iYZHxtk9LM0YSFKR7fOeLgEtsCAs83HY+fcNwRmMTdf09annFwnTTtVZCqbGTCaDaWG2cLJTVHQ+DTcCLNcxu6u6fn29noYsQZFAn'
+              'pJQcQxCxnmpp9OXr2C/Td7b+Hu3feA7qTZimId45HBgkFuVg/OjwpZHG9YoAXUnVUJuwrdI8E+0XSMYPTCBBkSbm0PTPtfnVTdviMpyfqHipEf'
+              'YecmNO3qIby/fO+t1E0o8dWPkgQt5QbSYqAg414yw6kRJhajppVVN3+Ne2TeVpN89X3qDe3BnTbpTPCaw1USHJ39xJYCVPfYvoMpb+5x3sgfqS'
+              'ugE6rszbdnADQWiHi2Tk1YGN0aM4yXGR+nbT/vbYWkbcOUQ6q86wu5M6egoLOM4lLB+zl6W0ax7li62AtVtiFdyOU/nFofzg/u7oJN8mzwIYAP'
+              'g+l0MDp7Tn7YFqgmEuvz2+O1DOdtKaCWBpwFAnO9hJ1QpGv3eOiyeqN+biv1pcnm91k2yzeus5WF719oq2pUGtBIMIhq+yun1WKrwO9KFeZfNn'
+              'tjurw7OleICTNEYlYxEtEjXJndumXTQ7avK7H5iQhJwn6jUZ+qULLUtOZf72An4/Nf4PRoMAz6/xvnerSFsQw77HkBoFHexpQG3aSjKJB4ZQgj'
+              'TESYkBFLuIyYbJfZ4sEvIY9c391yiMos5aBUMjegbJNigSATOa4XEQ4WOIvvCQ9bEsVMZiY7FNdp3/efasxtaIa2FzBpFW872C2ZMljrZHM9XC'
+              'dkMB3xaIJ9W9CjthdCru2Xi+Yl0V3RulBczF6B94l7+K+YqG7gXsOB7TFarodWe5tkz4P5gdf8gPiYz+Qtn2334O8//3INhL8PJNPitf1Y4t0P'
+              'G3tq1Y3O7ceY512eK+nP+xCT+reSaeo+/qpO6x+Gxc8i'
           )
           code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
           exec(compile(code, "<POSTAL2-FIX11.2-7>", "exec"))
@@ -502,6 +768,7 @@ jobs:
           xcodegen generate
           test -f WineGlass.xcodeproj/project.pbxproj
           grep -m1 "objectVersion" WineGlass.xcodeproj/project.pbxproj || true
+
           if grep -q "objectVersion = 77" WineGlass.xcodeproj/project.pbxproj; then
             echo "ERROR: unsupported objectVersion 77"
             exit 1
@@ -513,6 +780,7 @@ jobs:
           set -o pipefail
           cd WineGlass
           rm -rf build
+
           xcodebuild \
             -project WineGlass.xcodeproj \
             -scheme WineGlass \
@@ -534,33 +802,61 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+
           APP="WineGlass/build/Build/Products/Release-iphoneos/WineGlass.app"
+
           test -d "$APP"
           test -f "$APP/WineGlass"
+
           lipo -info "$APP/WineGlass"
-          ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
+
+          ID=$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :CFBundleIdentifier" \
+              "$APP/Info.plist"
+          )
+
           echo "$ID"
+
           test "$ID" = "com.postal2ios.native"
 
       - name: Package IPA
         shell: bash
         run: |
           set -euxo pipefail
+
           ROOT="$GITHUB_WORKSPACE"
           APP="$ROOT/WineGlass/build/Build/Products/Release-iphoneos/WineGlass.app"
           OUT="$ROOT/out"
+
           rm -rf "$OUT"
+
           mkdir -p "$OUT/Payload"
           mkdir -p "$APP/VC120"
-          cp "$ROOT/vc120-runtime/msvcr120.dll" "$APP/VC120/msvcr120.dll"
-          cp "$ROOT/vc120-runtime/msvcp120.dll" "$APP/VC120/msvcp120.dll"
+
+          cp \
+            "$ROOT/vc120-runtime/msvcr120.dll" \
+            "$APP/VC120/msvcr120.dll"
+
+          cp \
+            "$ROOT/vc120-runtime/msvcp120.dll" \
+            "$APP/VC120/msvcp120.dll"
+
           test -s "$APP/VC120/msvcr120.dll"
           test -s "$APP/VC120/msvcp120.dll"
 
-          cp -R "$APP" "$OUT/Payload/POSTAL 2.app"
+          cp -R \
+            "$APP" \
+            "$OUT/Payload/POSTAL 2.app"
+
           cd "$OUT"
-          zip -qry "POSTAL-2-iOS-v11.2-VC120-WIN32-FIX.ipa" Payload
-          ls -lh "POSTAL-2-iOS-v11.2-VC120-WIN32-FIX.ipa"
+
+          zip -qry \
+            "POSTAL-2-iOS-v11.2-VC120-WIN32-FIX.ipa" \
+            Payload
+
+          ls -lh \
+            "POSTAL-2-iOS-v11.2-VC120-WIN32-FIX.ipa"
 
       - name: Upload POSTAL 2 FIX 11.2 IPA
         uses: actions/upload-artifact@v4
@@ -575,14 +871,46 @@ jobs:
         shell: bash
         run: |
           mkdir -p debug-fix11-2
-          cp WineGlass/xcodebuild.log debug-fix11-2/ 2>/dev/null || true
-          cp blink-src/config.h debug-fix11-2/blink-config.h 2>/dev/null || true
-          cp WineGlass/Vendor/blink/wg_blink_impl.c debug-fix11-2/ 2>/dev/null || true
-          cp WineGlass/Sources/Core/wg_engine.c debug-fix11-2/ 2>/dev/null || true
-          cp WineGlass/Sources/App/WGSceneDelegate.m debug-fix11-2/ 2>/dev/null || true
-          cp WineGlass/project.yml debug-fix11-2/ 2>/dev/null || true
-          cp vc120-runtime/msvcr120.dll debug-fix11-2/ 2>/dev/null || true
-          cp vc120-runtime/msvcp120.dll debug-fix11-2/ 2>/dev/null || true
+
+          cp \
+            WineGlass/xcodebuild.log \
+            debug-fix11-2/ \
+            2>/dev/null || true
+
+          cp \
+            blink-src/config.h \
+            debug-fix11-2/blink-config.h \
+            2>/dev/null || true
+
+          cp \
+            WineGlass/Vendor/blink/wg_blink_impl.c \
+            debug-fix11-2/ \
+            2>/dev/null || true
+
+          cp \
+            WineGlass/Sources/Core/wg_engine.c \
+            debug-fix11-2/ \
+            2>/dev/null || true
+
+          cp \
+            WineGlass/Sources/App/WGSceneDelegate.m \
+            debug-fix11-2/ \
+            2>/dev/null || true
+
+          cp \
+            WineGlass/project.yml \
+            debug-fix11-2/ \
+            2>/dev/null || true
+
+          cp \
+            vc120-runtime/msvcr120.dll \
+            debug-fix11-2/ \
+            2>/dev/null || true
+
+          cp \
+            vc120-runtime/msvcp120.dll \
+            debug-fix11-2/ \
+            2>/dev/null || true
 
       - name: Upload FIX 11.2 debug
         if: always()
