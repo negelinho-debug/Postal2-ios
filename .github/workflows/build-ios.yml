@@ -1,4 +1,4 @@
-name: POSTAL 2 WineGlass iOS FIX 11.6.1 CLEAN
+name: POSTAL 2 WineGlass iOS FIX 11.6.2 CLEAN
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   lint:
-    name: Validate FIX 11.6.1 CLEAN
+    name: Validate FIX 11.6.2 CLEAN
     runs-on: ubuntu-24.04
     timeout-minutes: 5
 
@@ -237,7 +237,7 @@ jobs:
 
   build:
     needs: vc120
-    name: Build POSTAL 2 FIX 11.6.1 CLEAN
+    name: Build POSTAL 2 FIX 11.6.2 CLEAN
     runs-on: macos-14
     timeout-minutes: 90
 
@@ -245,11 +245,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+
       - name: Download VC120
         uses: actions/download-artifact@v4
         with:
           name: POSTAL2-VC120-x86
           path: vc120-runtime
+
 
       - name: Verify VC120
         shell: bash
@@ -1130,24 +1132,6 @@ jobs:
           )
           PY
 
-          FILE="WineGlass/Sources/Core/wg_engine.c"
-
-          grep -n \
-            "POSTAL FIX11.4 CreateFileA" \
-            "$FILE"
-
-          grep -n \
-            "POSTAL FIX11.4 VirtualAlloc" \
-            "$FILE"
-
-          grep -n \
-            "POSTAL FIX11.4 VirtualFree" \
-            "$FILE"
-
-          grep -n \
-            "POSTAL FIX11.4 ignoring SetCurrentDirectory" \
-            "$FILE"
-
 
       - name: Patch FIX 11.5 real WINMM timer
         shell: bash
@@ -1271,30 +1255,6 @@ jobs:
                   1
               )
 
-          quiet_anchor = (
-              '            '
-              '"QueryPerformanceCounter", '
-              '"GetSystemTimePreciseAsFileTime",'
-          )
-
-          quiet_replacement = (
-              '            '
-              '"timeGetTime", '
-              '"QueryPerformanceCounter", '
-              '"GetSystemTimePreciseAsFileTime",'
-          )
-
-          if (
-              '"timeGetTime", "QueryPerformanceCounter"'
-              not in s
-          ):
-              if quiet_anchor in s:
-                  s = s.replace(
-                      quiet_anchor,
-                      quiet_replacement,
-                      1
-                  )
-
           p.write_text(s)
 
           print(
@@ -1302,29 +1262,14 @@ jobs:
           )
           PY
 
-          FILE="WineGlass/Sources/Core/wg_engine.c"
 
-          grep -n \
-            'strcmp(fn, "timeGetTime")' \
-            "$FILE"
-
-          grep -n \
-            "POSTAL FIX11.5 timeBeginPeriod" \
-            "$FILE"
-
-          grep -n \
-            "POSTAL FIX11.5 timeEndPeriod" \
-            "$FILE"
-
-
-      - name: Patch FIX 11.6.1 POSTAL System root
+      - name: Patch FIX 11.6.2 POSTAL System root
         shell: bash
         run: |
           set -euxo pipefail
 
           python3 <<'PY'
           from pathlib import Path
-          import re
 
           p = Path(
               "WineGlass/Sources/Win32/wg_win32_files.c"
@@ -1332,28 +1277,30 @@ jobs:
 
           s = p.read_text()
 
-          set_exe_anchor = (
-              "    s_win_path_cached = false;\n"
-              "    ensure_bottle();"
-          )
+          # ==========================================================
+          # 1. Set initial POSTAL virtual current directory
+          # ==========================================================
 
-          set_exe_patch = r'''    s_win_path_cached = false;
+          set_exe_anchor = """    s_drive_c[0] = '\\0';   // re-anchor the bottle to this exe's directory
+              s_win_path_cached = false;
+              ensure_bottle();"""
 
-              const char *postal_name =
-                  strrchr(s_exe_path, '/');
+          set_exe_patch = r'''    s_drive_c[0] = '\0';   // re-anchor the bottle to this exe's directory
+              s_win_path_cached = false;
+
+              const char *postal_name = strrchr(s_exe_path, '/');
 
               postal_name =
                   postal_name ?
                   postal_name + 1 :
                   s_exe_path;
 
-              bool postal_system_root =
+              if (
                   strcasecmp(
                       postal_name,
                       "Postal2.exe"
-                  ) == 0;
-
-              if (postal_system_root) {
+                  ) == 0
+              ) {
                   snprintf(
                       s_cwd_win,
                       sizeof(s_cwd_win),
@@ -1362,7 +1309,7 @@ jobs:
 
                   WG_LOGI(
                       TAG,
-                      "POSTAL FIX11.6.1 System root '%s' -> '%s'",
+                      "POSTAL FIX11.6.2 System root '%s' -> '%s'",
                       s_cwd_win,
                       s_exe_dir
                   );
@@ -1371,12 +1318,12 @@ jobs:
               ensure_bottle();'''
 
           if (
-              "POSTAL FIX11.6.1 System root"
+              "POSTAL FIX11.6.2 System root"
               not in s
           ):
               if set_exe_anchor not in s:
                   raise SystemExit(
-                      "ERROR: FIX11.6.1 set_exe_path anchor missing"
+                      "ERROR: FIX11.6.2 set_exe_path anchor missing"
                   )
 
               s = s.replace(
@@ -1386,14 +1333,23 @@ jobs:
               )
 
 
-          exe_win_re = re.compile(
-              r'(const\s+char\s*\*\s*wg_files_exe_win_path'
-              r'\s*$begin:math:text$\\s\*void\\s\*$end:math:text$\s*\{\s*'
-              r'static\s+char\s+win\s*$begin:math:display$\\s\*1024\\s\*$end:math:display$\s*;\s*)'
-          )
+          # ==========================================================
+          # 2. GetModuleFileName / executable Windows path
+          # Exact current WineGlass function header
+          # ==========================================================
 
-          exe_win_insert = r'''const char *postal_name =
-                  strrchr(s_exe_path, '/');
+          exe_win_anchor = """const char *wg_files_exe_win_path(void) {
+              static char win[1024];
+              if (s_win_path_cached) return win;"""
+
+          exe_win_patch = r'''const char *wg_files_exe_win_path(void) {
+              static char win[1024];
+
+              const char *postal_name =
+                  strrchr(
+                      s_exe_path,
+                      '/'
+                  );
 
               postal_name =
                   postal_name ?
@@ -1416,54 +1372,55 @@ jobs:
 
                   WG_LOGI(
                       TAG,
-                      "POSTAL FIX11.6.1 exe win path -> %s",
+                      "POSTAL FIX11.6.2 exe win path -> %s",
                       win
                   );
 
                   return win;
               }
 
-              '''
+              if (s_win_path_cached) return win;'''
 
           if (
-              "POSTAL FIX11.6.1 exe win path"
+              "POSTAL FIX11.6.2 exe win path"
               not in s
           ):
-              s, count = exe_win_re.subn(
-                  lambda m:
-                      m.group(1) +
-                      exe_win_insert,
-                  s,
-                  count=1
-              )
-
-              if count != 1:
+              if exe_win_anchor not in s:
                   raise SystemExit(
-                      "ERROR: FIX11.6.1 exe win path anchor missing"
+                      "ERROR: FIX11.6.2 exe win path anchor missing"
                   )
 
+              s = s.replace(
+                  exe_win_anchor,
+                  exe_win_patch,
+                  1
+              )
 
-          set_cwd_re = re.compile(
-              r'(void\s+wg_files_set_cwd'
-              r'\s*$begin:math:text$\\s\*const\\s\+char\\s\*\\\*\\s\*win\_path\\s\*$end:math:text$\s*\{\s*)'
-          )
 
-          set_cwd_insert = r'''const char *postal_name =
-                  strrchr(s_exe_path, '/');
+          # ==========================================================
+          # 3. Redirect Windows/System32 cwd for POSTAL
+          # ==========================================================
+
+          set_cwd_anchor = """void wg_files_set_cwd(const char *win_path) {
+              if (!win_path) { s_cwd_win[0] = 0; return; }"""
+
+          set_cwd_patch = r'''void wg_files_set_cwd(const char *win_path) {
+              const char *postal_name =
+                  strrchr(
+                      s_exe_path,
+                      '/'
+                  );
 
               postal_name =
                   postal_name ?
                   postal_name + 1 :
                   s_exe_path;
 
-              bool postal_system_root =
+              if (
                   strcasecmp(
                       postal_name,
                       "Postal2.exe"
-                  ) == 0;
-
-              if (
-                  postal_system_root &&
+                  ) == 0 &&
                   win_path &&
                   (
                       strcasecmp(
@@ -1484,7 +1441,7 @@ jobs:
 
                   WG_LOGI(
                       TAG,
-                      "POSTAL FIX11.6.1 redirect cwd '%s' -> '%s'",
+                      "POSTAL FIX11.6.2 redirect cwd '%s' -> '%s'",
                       win_path,
                       s_cwd_win
                   );
@@ -1492,45 +1449,57 @@ jobs:
                   return;
               }
 
-              '''
+              if (!win_path) {
+                  s_cwd_win[0] = 0;
+                  return;
+              }'''
 
           if (
-              "POSTAL FIX11.6.1 redirect cwd"
+              "POSTAL FIX11.6.2 redirect cwd"
               not in s
           ):
-              s, count = set_cwd_re.subn(
-                  lambda m:
-                      m.group(1) +
-                      set_cwd_insert,
-                  s,
-                  count=1
-              )
-
-              if count != 1:
+              if set_cwd_anchor not in s:
                   raise SystemExit(
-                      "ERROR: FIX11.6.1 set_cwd function missing"
+                      "ERROR: FIX11.6.2 set_cwd anchor missing"
                   )
 
+              s = s.replace(
+                  set_cwd_anchor,
+                  set_cwd_patch,
+                  1
+              )
 
-          map_anchor = (
-              '    if (strcasecmp(src, "C:\\\\a.exe") == 0 ||\n'
-          )
 
-          map_block = r'''    const char *postal_name =
-              strrchr(s_exe_path, '/');
+          # ==========================================================
+          # 4. Map POSTAL relative files directly beside Postal2.exe
+          #
+          # Current WineGlass otherwise maps:
+          # Default.ini -> Bottle/drive_c/Default.ini
+          #
+          # We need:
+          # Default.ini -> real postal2/System/Default.ini
+          # ==========================================================
+
+          map_anchor = """    // The installer .exe itself is the file the user picked — it lives in the
+              // app sandbox, not inside the bottle, so keep mapping it to the real path."""
+
+          map_patch = r'''    const char *postal_name =
+              strrchr(
+                  s_exe_path,
+                  '/'
+              );
 
               postal_name =
                   postal_name ?
                   postal_name + 1 :
                   s_exe_path;
 
-              bool postal_system_root =
+              if (
                   strcasecmp(
                       postal_name,
                       "Postal2.exe"
-                  ) == 0;
-
-              if (postal_system_root) {
+                  ) == 0
+              ) {
                   static char postal_mapped[1024];
 
                   const char *postal_rel = NULL;
@@ -1547,13 +1516,16 @@ jobs:
                   const char *system32_prefix_fs =
                       "C:/Windows/System32/";
 
-                  bool postal_relative =
-                      src[0] &&
-                      !(src[0] && src[1] == ':') &&
-                      src[0] != '\\' &&
-                      src[0] != '/';
+                  bool is_abs =
+                      (
+                          src[0] &&
+                          src[1] == ':'
+                      ) ||
+                      src[0] == '\\' ||
+                      src[0] == '/';
 
-                  if (postal_relative) {
+                  if (!is_abs) {
+
                       postal_rel = src;
 
                   } else if (
@@ -1574,6 +1546,7 @@ jobs:
                           "C:/Windows/System32"
                       ) == 0
                   ) {
+
                       postal_rel = "";
 
                   } else if (
@@ -1583,6 +1556,7 @@ jobs:
                           strlen(postal_prefix_bs)
                       ) == 0
                   ) {
+
                       postal_rel =
                           src +
                           strlen(postal_prefix_bs);
@@ -1594,6 +1568,7 @@ jobs:
                           strlen(postal_prefix_fs)
                       ) == 0
                   ) {
+
                       postal_rel =
                           src +
                           strlen(postal_prefix_fs);
@@ -1605,6 +1580,7 @@ jobs:
                           strlen(system32_prefix_bs)
                       ) == 0
                   ) {
+
                       postal_rel =
                           src +
                           strlen(system32_prefix_bs);
@@ -1616,12 +1592,14 @@ jobs:
                           strlen(system32_prefix_fs)
                       ) == 0
                   ) {
+
                       postal_rel =
                           src +
                           strlen(system32_prefix_fs);
                   }
 
                   if (postal_rel) {
+
                       while (
                           *postal_rel == '\\' ||
                           *postal_rel == '/'
@@ -1630,6 +1608,7 @@ jobs:
                       }
 
                       if (*postal_rel) {
+
                           snprintf(
                               postal_mapped,
                               sizeof(postal_mapped),
@@ -1639,6 +1618,7 @@ jobs:
                           );
 
                       } else {
+
                           snprintf(
                               postal_mapped,
                               sizeof(postal_mapped),
@@ -1653,7 +1633,7 @@ jobs:
 
                       WG_LOGI(
                           TAG,
-                          "POSTAL FIX11.6.1 map '%s' -> '%s'",
+                          "POSTAL FIX11.6.2 map '%s' -> '%s'",
                           src,
                           postal_mapped
                       );
@@ -1662,21 +1642,21 @@ jobs:
                   }
               }
 
-          '''
+              // The installer .exe itself is the file the user picked — it lives in the
+              // app sandbox, not inside the bottle, so keep mapping it to the real path.'''
 
           if (
-              "POSTAL FIX11.6.1 map"
+              "POSTAL FIX11.6.2 map"
               not in s
           ):
               if map_anchor not in s:
                   raise SystemExit(
-                      "ERROR: FIX11.6.1 C:\\a.exe map anchor missing"
+                      "ERROR: FIX11.6.2 map anchor missing"
                   )
 
               s = s.replace(
                   map_anchor,
-                  map_block +
-                  map_anchor,
+                  map_patch,
                   1
               )
 
@@ -1684,41 +1664,46 @@ jobs:
           p.write_text(s)
 
           print(
-              "POSTAL 2 FIX 11.6.1 SYSTEM ROOT INSTALLED"
+              "POSTAL 2 FIX 11.6.2 SYSTEM ROOT INSTALLED"
           )
 
           print(
-              "Virtual cwd: C:\\Postal2\\System"
+              "POSTAL virtual cwd = C:\\Postal2\\System"
           )
 
           print(
-              "Relative INI/INT -> real Postal2 System directory"
+              "GetModuleFileName = C:\\Postal2\\System\\Postal2.exe"
           )
 
           print(
-              "System32 paths -> real Postal2 System directory"
+              "Relative INI/INT -> physical Postal2/System"
           )
           PY
 
           FILE="WineGlass/Sources/Win32/wg_win32_files.c"
 
           grep -n \
-            "POSTAL FIX11.6.1 System root" \
+            "POSTAL FIX11.6.2 System root" \
             "$FILE"
 
           grep -n \
-            "POSTAL FIX11.6.1 exe win path" \
+            "POSTAL FIX11.6.2 exe win path" \
             "$FILE"
 
           grep -n \
-            "POSTAL FIX11.6.1 redirect cwd" \
+            "POSTAL FIX11.6.2 redirect cwd" \
             "$FILE"
 
           grep -n \
-            "POSTAL FIX11.6.1 map" \
+            "POSTAL FIX11.6.2 map" \
             "$FILE"
 
-          echo "FIX 11.6.1 VERIFY OK"
+          grep -n \
+            "C:\\\\Postal2\\\\System" \
+            "$FILE" ||
+            true
+
+          echo "FIX 11.6.2 VERIFY OK"
 
 
       - name: Verify all POSTAL patches
@@ -1782,23 +1767,23 @@ jobs:
             "$ENGINE"
 
           grep -q \
-            "POSTAL FIX11.6.1 System root" \
+            "POSTAL FIX11.6.2 System root" \
             "$FILES"
 
           grep -q \
-            "POSTAL FIX11.6.1 exe win path" \
+            "POSTAL FIX11.6.2 exe win path" \
             "$FILES"
 
           grep -q \
-            "POSTAL FIX11.6.1 redirect cwd" \
+            "POSTAL FIX11.6.2 redirect cwd" \
             "$FILES"
 
           grep -q \
-            "POSTAL FIX11.6.1 map" \
+            "POSTAL FIX11.6.2 map" \
             "$FILES"
 
           echo \
-            "ALL POSTAL FIX 11.6.1 MARKERS VERIFIED"
+            "ALL POSTAL FIX 11.6.2 MARKERS VERIFIED"
 
 
       - name: Patch WineGlass project
@@ -1852,11 +1837,11 @@ jobs:
             "$PLIST"
 
           /usr/libexec/PlistBuddy \
-            -c "Set :CFBundleShortVersionString 0.11.6.1" \
+            -c "Set :CFBundleShortVersionString 0.11.6.2" \
             "$PLIST"
 
           /usr/libexec/PlistBuddy \
-            -c "Set :CFBundleVersion 1161" \
+            -c "Set :CFBundleVersion 1162" \
             "$PLIST"
 
           /usr/libexec/PlistBuddy \
@@ -1930,12 +1915,12 @@ jobs:
 
           s = s.replace(
               "FIX 11.2 CLEAN",
-              "FIX 11.6.1 CLEAN"
+              "FIX 11.6.2 CLEAN"
           )
 
           s = s.replace(
               "FIX11.2 CLEAN",
-              "FIX11.6.1 CLEAN"
+              "FIX11.6.2 CLEAN"
           )
 
           p.write_text(s)
@@ -1974,7 +1959,7 @@ jobs:
           fi
 
 
-      - name: Build POSTAL 2 FIX 11.6.1
+      - name: Build POSTAL 2 FIX 11.6.2
         shell: bash
         run: |
           set -o pipefail
@@ -2070,18 +2055,18 @@ jobs:
 
           zip \
             -qry \
-            "POSTAL-2-iOS-v11.6.1-CLEAN.ipa" \
+            "POSTAL-2-iOS-v11.6.2-CLEAN.ipa" \
             Payload
 
           ls -lh \
-            "POSTAL-2-iOS-v11.6.1-CLEAN.ipa"
+            "POSTAL-2-iOS-v11.6.2-CLEAN.ipa"
 
 
-      - name: Upload POSTAL 2 FIX 11.6.1 IPA
+      - name: Upload POSTAL 2 FIX 11.6.2 IPA
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-iOS-v11.6.1-CLEAN
-          path: out/POSTAL-2-iOS-v11.6.1-CLEAN.ipa
+          name: POSTAL-2-iOS-v11.6.2-CLEAN
+          path: out/POSTAL-2-iOS-v11.6.2-CLEAN.ipa
           if-no-files-found: error
           retention-days: 14
 
@@ -2091,68 +2076,68 @@ jobs:
         shell: bash
         run: |
           mkdir -p \
-            debug-fix11-6-1-clean
+            debug-fix11-6-2-clean
 
           cp \
             WineGlass/xcodebuild.log \
-            debug-fix11-6-1-clean/ \
+            debug-fix11-6-2-clean/ \
             2>/dev/null ||
             true
 
           cp \
             blink-src/config.h \
-            debug-fix11-6-1-clean/blink-config.h \
+            debug-fix11-6-2-clean/blink-config.h \
             2>/dev/null ||
             true
 
           cp \
             WineGlass/Vendor/blink/wg_blink_impl.c \
-            debug-fix11-6-1-clean/ \
+            debug-fix11-6-2-clean/ \
             2>/dev/null ||
             true
 
           cp \
             WineGlass/Sources/Core/wg_engine.c \
-            debug-fix11-6-1-clean/ \
+            debug-fix11-6-2-clean/ \
             2>/dev/null ||
             true
 
           cp \
             WineGlass/Sources/Win32/wg_win32_files.c \
-            debug-fix11-6-1-clean/ \
+            debug-fix11-6-2-clean/ \
             2>/dev/null ||
             true
 
           cp \
             WineGlass/Sources/App/WGSceneDelegate.m \
-            debug-fix11-6-1-clean/ \
+            debug-fix11-6-2-clean/ \
             2>/dev/null ||
             true
 
           cp \
             WineGlass/project.yml \
-            debug-fix11-6-1-clean/ \
+            debug-fix11-6-2-clean/ \
             2>/dev/null ||
             true
 
           cp \
             vc120-runtime/msvcr120.dll \
-            debug-fix11-6-1-clean/ \
+            debug-fix11-6-2-clean/ \
             2>/dev/null ||
             true
 
           cp \
             vc120-runtime/msvcp120.dll \
-            debug-fix11-6-1-clean/ \
+            debug-fix11-6-2-clean/ \
             2>/dev/null ||
             true
 
 
-      - name: Upload FIX 11.6.1 debug
+      - name: Upload FIX 11.6.2 debug
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-FIX11.6.1-CLEAN-DEBUG
-          path: debug-fix11-6-1-clean
+          name: POSTAL-2-FIX11.6.2-CLEAN-DEBUG
+          path: debug-fix11-6-2-clean
           if-no-files-found: ignore
           retention-days: 7
