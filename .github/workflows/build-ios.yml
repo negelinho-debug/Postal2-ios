@@ -1,4 +1,4 @@
-name: POSTAL 2 WineGlass iOS FIX 11.5.1 CLEAN
+name: POSTAL 2 WineGlass iOS FIX 11.6 CLEAN
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   lint:
-    name: Validate FIX 11.5.1 CLEAN
+    name: Validate FIX 11.6 CLEAN
     runs-on: ubuntu-24.04
     timeout-minutes: 5
 
@@ -16,7 +16,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate every embedded Python patch
+      - name: Validate embedded Python
         shell: bash
         run: |
           set -euxo pipefail
@@ -59,12 +59,17 @@ jobs:
                       )
 
                   blocks.append(
-                      textwrap.dedent("\n".join(body))
+                      textwrap.dedent(
+                          "\n".join(body)
+                      )
                   )
 
               i += 1
 
-          for index, code in enumerate(blocks, start=1):
+          for index, code in enumerate(
+              blocks,
+              start=1
+          ):
               ast.parse(
                   code,
                   filename=f"visible-python-{index}"
@@ -79,10 +84,13 @@ jobs:
 
           if not payloads:
               raise SystemExit(
-                  "ERROR: no compressed Python patch payloads found"
+                  "ERROR: no compressed Python payloads found"
               )
 
-          for index, payload in enumerate(payloads, start=1):
+          for index, payload in enumerate(
+              payloads,
+              start=1
+          ):
               code = zlib.decompress(
                   base64.b64decode(payload)
               ).decode("utf-8")
@@ -93,21 +101,23 @@ jobs:
               )
 
           print(
-              f"Workflow Python validation OK: "
-              f"{len(blocks)} visible blocks, "
-              f"{len(payloads)} decoded payloads"
+              "Python validation OK:",
+              len(blocks),
+              "visible blocks,",
+              len(payloads),
+              "compressed payloads"
           )
           PY
 
 
   vc120:
     needs: lint
-    name: Prepare VC++ 2013 x86 runtime
+    name: Prepare VC++ 2013 x86
     runs-on: windows-2022
     timeout-minutes: 20
 
     steps:
-      - name: Download and install official VC++ 2013 x86
+      - name: Download official VC++ 2013 x86
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -157,7 +167,7 @@ jobs:
           }
 
           if (-not $downloaded) {
-            throw "Could not download official VC++ 2013 x86 redistributable"
+            throw "Could not download VC++ 2013 x86"
           }
 
           $proc = Start-Process `
@@ -172,29 +182,33 @@ jobs:
             $proc.ExitCode -ne 0 -and
             $proc.ExitCode -ne 1638
           ) {
-            throw "vcredist_x86 failed with exit code $($proc.ExitCode)"
+            throw "vcredist failed: $($proc.ExitCode)"
           }
 
           $msvcr = @(
             "$env:WINDIR\SysWOW64\msvcr120.dll",
             "$env:WINDIR\System32\msvcr120.dll"
           ) |
-          Where-Object { Test-Path $_ } |
+          Where-Object {
+            Test-Path $_
+          } |
           Select-Object -First 1
 
           $msvcp = @(
             "$env:WINDIR\SysWOW64\msvcp120.dll",
             "$env:WINDIR\System32\msvcp120.dll"
           ) |
-          Where-Object { Test-Path $_ } |
+          Where-Object {
+            Test-Path $_
+          } |
           Select-Object -First 1
 
           if (-not $msvcr) {
-            throw "msvcr120.dll was not found"
+            throw "msvcr120.dll not found"
           }
 
           if (-not $msvcp) {
-            throw "msvcp120.dll was not found"
+            throw "msvcp120.dll not found"
           }
 
           Copy-Item `
@@ -212,8 +226,7 @@ jobs:
             (Join-Path $out "msvcp120.dll") |
             Format-List FullName,Length
 
-
-      - name: Upload VC120 runtime
+      - name: Upload VC120
         uses: actions/upload-artifact@v4
         with:
           name: POSTAL2-VC120-x86
@@ -224,7 +237,7 @@ jobs:
 
   build:
     needs: vc120
-    name: Build POSTAL 2 FIX 11.5.1 CLEAN
+    name: Build POSTAL 2 FIX 11.6 CLEAN
     runs-on: macos-14
     timeout-minutes: 90
 
@@ -232,15 +245,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-
-      - name: Download VC120 runtime
+      - name: Download VC120
         uses: actions/download-artifact@v4
         with:
           name: POSTAL2-VC120-x86
           path: vc120-runtime
 
-
-      - name: Verify VC120 runtime
+      - name: Verify VC120
         shell: bash
         run: |
           set -euxo pipefail
@@ -306,7 +317,10 @@ jobs:
 
           command -v flock
           xcodegen --version
-          xcrun --sdk iphoneos --show-sdk-version
+
+          xcrun \
+            --sdk iphoneos \
+            --show-sdk-version
 
 
       - name: Clone WineGlass and blink
@@ -326,16 +340,17 @@ jobs:
             https://github.com/jart/blink.git \
             blink-src
 
-          mkdir -p WineGlass/Vendor/blink/lib
+          mkdir -p \
+            WineGlass/Vendor/blink/lib
 
-          echo "===== WINEGLASS COMMIT ====="
+          echo "===== WINEGLASS ====="
           git -C WineGlass rev-parse HEAD
 
-          echo "===== BLINK COMMIT ====="
+          echo "===== BLINK ====="
           git -C blink-src rev-parse HEAD
 
 
-      - name: Configure Blink for iPhone ARM64
+      - name: Configure Blink ARM64
         shell: bash
         run: |
           set -euxo pipefail
@@ -425,7 +440,7 @@ jobs:
           PY
 
 
-      - name: Build blink ARM64 no-JIT
+      - name: Build blink
         shell: bash
         run: |
           set -euxo pipefail
@@ -499,7 +514,7 @@ jobs:
           PY
 
 
-      - name: Build WineGlass Blink bridge
+      - name: Build Blink bridge
         shell: bash
         run: |
           set -euxo pipefail
@@ -532,7 +547,7 @@ jobs:
             "$WG/Vendor/blink/lib/wg_blink_impl.o"
 
 
-      - name: Patch POSTAL 2 engine FIX 11.2 CLEAN
+      - name: Patch POSTAL real DLL loader and VC120
         shell: bash
         run: |
           set -euxo pipefail
@@ -629,7 +644,7 @@ jobs:
           PY
 
 
-      - name: Patch FIX 11.3 MSVCP DllMain safe
+      - name: Patch FIX 11.3 MSVCP safe
         shell: bash
         run: |
           set -euxo pipefail
@@ -653,15 +668,13 @@ jobs:
               '(strcmp(fn, "DisableThreadLibraryCalls") == 0) {',
 
               '            ret_val = 1;',
-
               '            s_last_error = 0;',
 
-              '            WG_LOGI(TAG,',
-
-              '                    '
-              '"POSTAL FIX11.3 DisableThreadLibraryCalls(0x%X) -> TRUE",',
-
-              '                    args[0]);',
+              '            WG_LOGI('
+              'TAG, '
+              '"POSTAL FIX11.3 DisableThreadLibraryCalls(0x%X) -> TRUE", '
+              'args[0]'
+              ');',
 
               '',
 
@@ -706,7 +719,7 @@ jobs:
           ):
               if cleanup_anchor not in s:
                   raise SystemExit(
-                      "ERROR: FIX11.3 stdcall cleanup anchor missing"
+                      "ERROR: FIX11.3 cleanup anchor missing"
                   )
 
               s = s.replace(
@@ -763,6 +776,7 @@ jobs:
                       new_file,
                       1
                   )
+
                   replaced += 1
 
               if old_mem in s:
@@ -771,31 +785,18 @@ jobs:
                       new_mem,
                       1
                   )
+
                   replaced += 1
 
-              if replaced == 0:
-                  print(
-                      "FIX11.3 NOTE: loader fallback layout is "
-                      "already different; continuing safely"
-                  )
-              else:
-                  print(
-                      f"FIX11.3 no-fallback blocks patched: "
-                      f"{replaced}"
-                  )
+              print(
+                  "FIX11.3 fallback replacements:",
+                  replaced
+              )
 
           p.write_text(s)
 
           print(
-              "POSTAL 2 FIX 11.3 SAFE PATCH INSTALLED"
-          )
-
-          print(
-              "DisableThreadLibraryCalls handler OK"
-          )
-
-          print(
-              "DisableThreadLibraryCalls argc=1 OK"
+              "POSTAL FIX 11.3 SAFE INSTALLED"
           )
           PY
 
@@ -809,19 +810,8 @@ jobs:
             'strcmp(cleanup_fn, "DisableThreadLibraryCalls")' \
             "$FILE"
 
-          if grep -q \
-            "POSTAL FIX11.3 NO BUILTIN FALLBACK" \
-            "$FILE"
-          then
-            echo "FIX11.3 no-fallback patch present"
-          else
-            echo "FIX11.3 no-fallback layout differs; NON-FATAL"
-          fi
 
-          echo "FIX 11.3 SAFE VERIFY OK"
-
-
-      - name: Patch FIX 11.4 Unreal memory and file API
+      - name: Patch FIX 11.4 memory and file API
         shell: bash
         run: |
           set -euxo pipefail
@@ -868,7 +858,10 @@ jobs:
                       args[4]
                   );
 
-                  if ((uint32_t)ret_val == 0xFFFFFFFFu) {
+                  if (
+                      (uint32_t)ret_val ==
+                      0xFFFFFFFFu
+                  ) {
                       s_last_error = 2;
                   } else {
                       s_last_error = 0;
@@ -928,7 +921,10 @@ jobs:
 
               if (requested != 0) {
                   uint8_t *zeros =
-                      calloc(1, rounded);
+                      calloc(
+                          1,
+                          rounded
+                      );
 
                   if (zeros) {
                       if (
@@ -1010,14 +1006,27 @@ jobs:
               '            '
               'WG_LOGI(TAG, "SetCurrentDirectory(\'%s\')", path);',
 
-              '            ret_val = 1;',
+              '            '
+              'ret_val = 1;',
           ])
 
           cwd_new = r'''            bool postal_fake_system32 =
-                strcmp(path, "C:\\Windows\\System32") == 0 ||
-                strcmp(path, "C:\\Windows\\System32\\") == 0 ||
-                strcmp(path, "c:\\windows\\system32") == 0 ||
-                strcmp(path, "c:\\windows\\system32\\") == 0;
+                strcmp(
+                    path,
+                    "C:\\Windows\\System32"
+                ) == 0 ||
+                strcmp(
+                    path,
+                    "C:\\Windows\\System32\\"
+                ) == 0 ||
+                strcmp(
+                    path,
+                    "c:\\windows\\system32"
+                ) == 0 ||
+                strcmp(
+                    path,
+                    "c:\\windows\\system32\\"
+                ) == 0;
 
             if (postal_fake_system32) {
 
@@ -1030,7 +1039,9 @@ jobs:
             } else {
 
                 wg_files_set_cwd(
-                    path[0] ? path : NULL
+                    path[0] ?
+                    path :
+                    NULL
                 );
 
                 WG_LOGI(
@@ -1103,7 +1114,7 @@ jobs:
           ):
               if cleanup_marker not in s:
                   raise SystemExit(
-                      "ERROR: FIX11.4 stdcall cleanup anchor missing"
+                      "ERROR: FIX11.4 cleanup anchor missing"
                   )
 
               s = s.replace(
@@ -1115,27 +1126,7 @@ jobs:
           p.write_text(s)
 
           print(
-              "POSTAL 2 FIX 11.4 PATCH INSTALLED"
-          )
-
-          print(
-              "CreateFileA real file mapping OK"
-          )
-
-          print(
-              "VirtualAlloc guest memory OK"
-          )
-
-          print(
-              "VirtualFree OK"
-          )
-
-          print(
-              "Postal2/System cwd guard OK"
-          )
-
-          print(
-              "stdcall cleanup OK"
+              "POSTAL FIX 11.4 INSTALLED"
           )
           PY
 
@@ -1156,12 +1147,6 @@ jobs:
           grep -n \
             "POSTAL FIX11.4 ignoring SetCurrentDirectory" \
             "$FILE"
-
-          grep -n \
-            'strcmp(cleanup_fn, "VirtualAlloc")' \
-            "$FILE"
-
-          echo "FIX 11.4 VERIFY OK"
 
 
       - name: Patch FIX 11.5 real WINMM timer
@@ -1277,7 +1262,7 @@ jobs:
           ):
               if cleanup_anchor not in s:
                   raise SystemExit(
-                      "ERROR: FIX11.5 stdcall cleanup anchor missing"
+                      "ERROR: FIX11.5 cleanup anchor missing"
                   )
 
               s = s.replace(
@@ -1310,36 +1295,10 @@ jobs:
                       1
                   )
 
-                  print(
-                      "timeGetTime generic log spam suppressed"
-                  )
-
-              else:
-                  print(
-                      "FIX11.5 NOTE: quiet-function layout changed; "
-                      "continuing without failing build"
-                  )
-
           p.write_text(s)
 
           print(
-              "POSTAL 2 FIX 11.5 REAL WINMM TIMER INSTALLED"
-          )
-
-          print(
-              "timeGetTime -> CLOCK_MONOTONIC milliseconds"
-          )
-
-          print(
-              "timeBeginPeriod -> TIMERR_NOERROR"
-          )
-
-          print(
-              "timeEndPeriod -> TIMERR_NOERROR"
-          )
-
-          print(
-              "stdcall cleanup -> corrected"
+              "POSTAL FIX 11.5 WINMM INSTALLED"
           )
           PY
 
@@ -1357,83 +1316,353 @@ jobs:
             "POSTAL FIX11.5 timeEndPeriod" \
             "$FILE"
 
-          grep -n \
-            'strcmp(cleanup_fn, "timeGetTime")' \
-            "$FILE"
 
-          echo "FIX 11.5 TIMER VERIFY OK"
-
-
-      - name: Verify POSTAL engine patch
+      - name: Patch FIX 11.6 POSTAL System root
         shell: bash
         run: |
           set -euxo pipefail
 
-          FILE="WineGlass/Sources/Core/wg_engine.c"
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path(
+              "WineGlass/Sources/Win32/wg_win32_files.c"
+          )
+
+          s = p.read_text()
+
+          flag_anchor = (
+              'static char s_cwd_win[1024] = {0}; '
+              '// current dir (Windows path), SetCurrentDirectory'
+          )
+
+          flag_block = '''static char s_cwd_win[1024] = {0}; // current dir (Windows path), SetCurrentDirectory
+          static bool s_postal_system_root = false; // POSTAL 2 external System directory'''
+
+          if "s_postal_system_root" not in s:
+
+              if flag_anchor not in s:
+                  raise SystemExit(
+                      "ERROR: FIX11.6 cwd flag anchor missing"
+                  )
+
+              s = s.replace(
+                  flag_anchor,
+                  flag_block,
+                  1
+              )
+
+          exe_anchor = (
+              "    if (last_slash) "
+              "*(last_slash + 1) = '\\0';"
+          )
+
+          exe_block = r'''    if (last_slash) *(last_slash + 1) = '\0';
+
+              const char *postal_exe_name =
+                  strrchr(
+                      s_exe_path,
+                      '/'
+                  );
+
+              postal_exe_name =
+                  postal_exe_name ?
+                  postal_exe_name + 1 :
+                  s_exe_path;
+
+              s_postal_system_root =
+                  (
+                      strcasecmp(
+                          postal_exe_name,
+                          "Postal2.exe"
+                      ) == 0
+                  );
+
+              if (s_postal_system_root) {
+
+                  snprintf(
+                      s_cwd_win,
+                      sizeof(s_cwd_win),
+                      "C:\\Postal2\\System"
+                  );
+
+                  WG_LOGI(
+                      TAG,
+                      "POSTAL FIX11.6 System root '%s' -> '%s'",
+                      s_cwd_win,
+                      s_exe_dir
+                  );
+              }'''
+
+          if (
+              "POSTAL FIX11.6 System root"
+              not in s
+          ):
+              if exe_anchor not in s:
+                  raise SystemExit(
+                      "ERROR: FIX11.6 exe-dir anchor missing"
+                  )
+
+              s = s.replace(
+                  exe_anchor,
+                  exe_block,
+                  1
+              )
+
+          winpath_anchor = '''const char *wg_files_exe_win_path(void) {
+              static char win[1024];
+              if (s_win_path_cached) return win;'''
+
+          winpath_block = r'''const char *wg_files_exe_win_path(void) {
+              static char win[1024];
+
+              if (s_postal_system_root) {
+
+                  snprintf(
+                      win,
+                      sizeof(win),
+                      "C:\\Postal2\\System\\Postal2.exe"
+                  );
+
+                  s_win_path_cached = true;
+
+                  return win;
+              }
+
+              if (s_win_path_cached) return win;'''
+
+          if (
+              'C:\\\\Postal2\\\\System\\\\Postal2.exe'
+              not in s
+          ):
+              if winpath_anchor not in s:
+                  raise SystemExit(
+                      "ERROR: FIX11.6 exe-win-path anchor missing"
+                  )
+
+              s = s.replace(
+                  winpath_anchor,
+                  winpath_block,
+                  1
+              )
+
+          map_anchor = '''    // The installer .exe itself is the file the user picked — it lives in the
+              // app sandbox, not inside the bottle, so keep mapping it to the real path.'''
+
+          map_block = r'''    // POSTAL 2 lives outside Bottle/drive_c.
+              // The physical game System directory is s_exe_dir.
+              if (s_postal_system_root) {
+
+                  const char *postal_rel = NULL;
+
+                  const char *prefix_bs =
+                      "C:\\Postal2\\System\\";
+
+                  const char *prefix_fs =
+                      "C:/Postal2/System/";
+
+                  bool postal_relative =
+                      src[0] &&
+                      !(src[0] && src[1] == ':') &&
+                      src[0] != '\\' &&
+                      src[0] != '/';
+
+                  if (postal_relative) {
+
+                      postal_rel = src;
+
+                  } else if (
+                      strncasecmp(
+                          src,
+                          prefix_bs,
+                          strlen(prefix_bs)
+                      ) == 0
+                  ) {
+
+                      postal_rel =
+                          src +
+                          strlen(prefix_bs);
+
+                  } else if (
+                      strncasecmp(
+                          src,
+                          prefix_fs,
+                          strlen(prefix_fs)
+                      ) == 0
+                  ) {
+
+                      postal_rel =
+                          src +
+                          strlen(prefix_fs);
+                  }
+
+                  if (postal_rel) {
+
+                      while (
+                          *postal_rel == '\\' ||
+                          *postal_rel == '/'
+                      ) {
+                          postal_rel++;
+                      }
+
+                      static char postal_mapped[1024];
+
+                      snprintf(
+                          postal_mapped,
+                          sizeof(postal_mapped),
+                          "%s%s",
+                          s_exe_dir,
+                          postal_rel
+                      );
+
+                      fix_separators(
+                          postal_mapped
+                      );
+
+                      WG_LOGI(
+                          TAG,
+                          "POSTAL FIX11.6 map '%s' -> '%s'",
+                          src,
+                          postal_mapped
+                      );
+
+                      return postal_mapped;
+                  }
+              }
+
+              // The installer .exe itself is the file the user picked — it lives in the
+              // app sandbox, not inside the bottle, so keep mapping it to the real path.'''
+
+          if (
+              "POSTAL FIX11.6 map"
+              not in s
+          ):
+              if map_anchor not in s:
+                  raise SystemExit(
+                      "ERROR: FIX11.6 map-path anchor missing"
+                  )
+
+              s = s.replace(
+                  map_anchor,
+                  map_block,
+                  1
+              )
+
+          p.write_text(s)
+
+          print(
+              "POSTAL 2 FIX 11.6 SYSTEM ROOT INSTALLED"
+          )
+
+          print(
+              "Virtual root: C:\\Postal2\\System"
+          )
+
+          print(
+              "Physical root: directory containing Postal2.exe"
+          )
+
+          print(
+              "Relative INI/INT files bypass Bottle/drive_c"
+          )
+          PY
+
+          FILE="WineGlass/Sources/Win32/wg_win32_files.c"
+
+          grep -n \
+            "s_postal_system_root" \
+            "$FILE"
+
+          grep -n \
+            "POSTAL FIX11.6 System root" \
+            "$FILE"
+
+          grep -n \
+            "C:\\\\\\\\Postal2\\\\\\\\System\\\\\\\\Postal2.exe" \
+            "$FILE" ||
+            true
+
+          grep -n \
+            "POSTAL FIX11.6 map" \
+            "$FILE"
+
+          echo "FIX 11.6 VERIFY OK"
+
+
+      - name: Verify all POSTAL patches
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          ENGINE="WineGlass/Sources/Core/wg_engine.c"
+          FILES="WineGlass/Sources/Win32/wg_win32_files.c"
 
           grep -q \
             "POSTAL REAL DLL READY" \
-            "$FILE"
+            "$ENGINE"
 
           grep -q \
             "POSTAL PRELOAD BEGIN" \
-            "$FILE"
+            "$ENGINE"
 
           grep -q \
             "POSTAL REAL EXE IMPORT" \
-            "$FILE"
+            "$ENGINE"
 
           grep -q \
             "POSTAL FIX11.2 GetEnvironmentStringsW" \
-            "$FILE"
+            "$ENGINE"
 
           grep -q \
             "POSTAL FIX11.2 GetProcessWindowStation" \
-            "$FILE"
+            "$ENGINE"
 
           grep -q \
             "POSTAL FIX11.3 DisableThreadLibraryCalls" \
-            "$FILE"
+            "$ENGINE"
 
           grep -q \
             "POSTAL FIX11.4 CreateFileA" \
-            "$FILE"
+            "$ENGINE"
 
           grep -q \
             "POSTAL FIX11.4 VirtualAlloc" \
-            "$FILE"
+            "$ENGINE"
 
           grep -q \
             "POSTAL FIX11.4 VirtualFree" \
-            "$FILE"
+            "$ENGINE"
 
           grep -q \
             "POSTAL FIX11.5 timeBeginPeriod" \
-            "$FILE"
+            "$ENGINE"
 
           grep -q \
             "POSTAL FIX11.5 timeEndPeriod" \
-            "$FILE"
+            "$ENGINE"
 
           grep -q \
             'strcmp(fn, "timeGetTime")' \
-            "$FILE"
+            "$ENGINE"
 
           grep -q \
             "POSTAL DLL INITIALIZATION COMPLETE" \
-            "$FILE"
+            "$ENGINE"
 
-          if grep -q \
-            "POSTAL FIX11.3 NO BUILTIN FALLBACK" \
-            "$FILE"
-          then
-            echo "No-fallback patch: installed"
-          else
-            echo "No-fallback patch: skipped because source layout differs"
-          fi
+          grep -q \
+            "POSTAL FIX11.6 System root" \
+            "$FILES"
+
+          grep -q \
+            "POSTAL FIX11.6 map" \
+            "$FILES"
+
+          grep -q \
+            "s_postal_system_root" \
+            "$FILES"
 
           echo \
-            "POSTAL engine FIX 11.5.1 markers verified"
+            "ALL POSTAL FIX 11.6 MARKERS VERIFIED"
 
 
       - name: Patch WineGlass project
@@ -1487,11 +1716,11 @@ jobs:
             "$PLIST"
 
           /usr/libexec/PlistBuddy \
-            -c "Set :CFBundleShortVersionString 0.11.5" \
+            -c "Set :CFBundleShortVersionString 0.11.6" \
             "$PLIST"
 
           /usr/libexec/PlistBuddy \
-            -c "Set :CFBundleVersion 1151" \
+            -c "Set :CFBundleVersion 1160" \
             "$PLIST"
 
           /usr/libexec/PlistBuddy \
@@ -1505,7 +1734,7 @@ jobs:
           plutil -lint "$PLIST"
 
 
-      - name: Patch POSTAL 2 launcher and log
+      - name: Patch POSTAL launcher and log
         shell: bash
         run: |
           set -euxo pipefail
@@ -1565,12 +1794,12 @@ jobs:
 
           s = s.replace(
               "FIX 11.2 CLEAN",
-              "FIX 11.5.1 CLEAN"
+              "FIX 11.6 CLEAN"
           )
 
           s = s.replace(
               "FIX11.2 CLEAN",
-              "FIX11.5.1 CLEAN"
+              "FIX11.6 CLEAN"
           )
 
           p.write_text(s)
@@ -1601,6 +1830,7 @@ jobs:
             "objectVersion = 77" \
             WineGlass.xcodeproj/project.pbxproj
           then
+
             echo \
               "ERROR: unsupported objectVersion 77"
 
@@ -1608,7 +1838,7 @@ jobs:
           fi
 
 
-      - name: Build POSTAL 2 FIX 11.5.1 CLEAN
+      - name: Build POSTAL 2 FIX 11.6
         shell: bash
         run: |
           set -o pipefail
@@ -1636,7 +1866,7 @@ jobs:
             tee xcodebuild.log
 
 
-      - name: Verify POSTAL 2 app
+      - name: Verify app
         shell: bash
         run: |
           set -euxo pipefail
@@ -1646,7 +1876,9 @@ jobs:
           test -d "$APP"
           test -f "$APP/WineGlass"
 
-          lipo -info "$APP/WineGlass"
+          lipo \
+            -info \
+            "$APP/WineGlass"
 
           ID=$(
             /usr/libexec/PlistBuddy \
@@ -1656,7 +1888,8 @@ jobs:
 
           echo "$ID"
 
-          test "$ID" = \
+          test \
+            "$ID" = \
             "com.postal2ios.native"
 
 
@@ -1701,18 +1934,18 @@ jobs:
 
           zip \
             -qry \
-            "POSTAL-2-iOS-v11.5.1-CLEAN.ipa" \
+            "POSTAL-2-iOS-v11.6-CLEAN.ipa" \
             Payload
 
           ls -lh \
-            "POSTAL-2-iOS-v11.5.1-CLEAN.ipa"
+            "POSTAL-2-iOS-v11.6-CLEAN.ipa"
 
 
-      - name: Upload POSTAL 2 FIX 11.5.1 CLEAN IPA
+      - name: Upload POSTAL 2 FIX 11.6 IPA
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-iOS-v11.5.1-CLEAN
-          path: out/POSTAL-2-iOS-v11.5.1-CLEAN.ipa
+          name: POSTAL-2-iOS-v11.6-CLEAN
+          path: out/POSTAL-2-iOS-v11.6-CLEAN.ipa
           if-no-files-found: error
           retention-days: 14
 
@@ -1721,62 +1954,69 @@ jobs:
         if: always()
         shell: bash
         run: |
-          mkdir -p debug-fix11-5-1-clean
+          mkdir -p \
+            debug-fix11-6-clean
 
           cp \
             WineGlass/xcodebuild.log \
-            debug-fix11-5-1-clean/ \
+            debug-fix11-6-clean/ \
             2>/dev/null ||
             true
 
           cp \
             blink-src/config.h \
-            debug-fix11-5-1-clean/blink-config.h \
+            debug-fix11-6-clean/blink-config.h \
             2>/dev/null ||
             true
 
           cp \
             WineGlass/Vendor/blink/wg_blink_impl.c \
-            debug-fix11-5-1-clean/ \
+            debug-fix11-6-clean/ \
             2>/dev/null ||
             true
 
           cp \
             WineGlass/Sources/Core/wg_engine.c \
-            debug-fix11-5-1-clean/ \
+            debug-fix11-6-clean/ \
+            2>/dev/null ||
+            true
+
+          cp \
+            WineGlass/Sources/Win32/wg_win32_files.c \
+            debug-fix11-6-clean/ \
             2>/dev/null ||
             true
 
           cp \
             WineGlass/Sources/App/WGSceneDelegate.m \
-            debug-fix11-5-1-clean/ \
+            debug-fix11-6-clean/ \
             2>/dev/null ||
             true
 
           cp \
             WineGlass/project.yml \
-            debug-fix11-5-1-clean/ \
+            debug-fix11-6-clean/ \
             2>/dev/null ||
             true
 
           cp \
             vc120-runtime/msvcr120.dll \
-            debug-fix11-5-1-clean/ \
+            debug-fix11-6-clean/ \
             2>/dev/null ||
             true
 
           cp \
             vc120-runtime/msvcp120.dll \
-            debug-fix11-5-1-clean/ \
+            debug-fix11-6-clean/ \
             2>/dev/null ||
             true
 
 
-      - name: Upload FIX 11.5.1 CLEAN debug
+      - name: Upload FIX 11.6 debug
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-FIX11.5.1-CLEAN-DEBUG
-          path: debug-fix11-5-1-clean
+          name: POSTAL-2-FIX11.6-CLEAN-DEBUG
+          path: debug-fix11-6-clean
           if-no-files-found: ignore
           retention-days: 7
