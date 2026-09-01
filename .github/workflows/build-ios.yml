@@ -1,4 +1,4 @@
-name: POSTAL 2 WineGlass iOS FIX 11.2 CLEAN
+name: POSTAL 2 WineGlass iOS FIX 11.3 CLEAN
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   lint:
-    name: Validate FIX 11.2 CLEAN
+    name: Validate FIX 11.3 CLEAN
     runs-on: ubuntu-24.04
     timeout-minutes: 5
 
@@ -167,7 +167,7 @@ jobs:
 
   build:
     needs: vc120
-    name: Build POSTAL 2 FIX 11.2 CLEAN
+    name: Build POSTAL 2 FIX 11.3 CLEAN
     runs-on: macos-14
     timeout-minutes: 90
 
@@ -246,7 +246,13 @@ jobs:
           cd blink-src
           chmod +x configure
 
-          ./configure             CC="$CC"             AR="$AR"             CFLAGS="-O2 -arch arm64 -isysroot $SDK -miphoneos-version-min=17.0"             --disable-threads             --disable-sockets             --disable-jit
+          ./configure \
+            CC="$CC" \
+            AR="$AR" \
+            CFLAGS="-O2 -arch arm64 -isysroot $SDK -miphoneos-version-min=17.0" \
+            --disable-threads \
+            --disable-sockets \
+            --disable-jit
 
           test -f config.h
           test -f config.mk
@@ -307,7 +313,12 @@ jobs:
           cd "$BLINK"
           rm -f o//blink/blink.a
 
-          gmake             -j2             CC="$CC"             AR="$AR"             CFLAGS="-O2 -arch arm64 -isysroot $SDK -miphoneos-version-min=17.0"             o//blink/blink.a
+          gmake \
+            -j2 \
+            CC="$CC" \
+            AR="$AR" \
+            CFLAGS="-O2 -arch arm64 -isysroot $SDK -miphoneos-version-min=17.0" \
+            o//blink/blink.a
 
           test -f o//blink/blink.a
           cp o//blink/blink.a "$WG/Vendor/blink/lib/blink.a"
@@ -354,11 +365,24 @@ jobs:
 
           cd "$BLINK"
 
-          "$CC"             -c             -std=c11             -O2             -arch arm64             -isysroot "$SDK"             -miphoneos-version-min=17.0             -D_FILE_OFFSET_BITS=64             -D_DARWIN_C_SOURCE             -DTARGET_OS_IPHONE=1             -I"$BLINK"             -include "$BLINK/config.h"             "$WG/Vendor/blink/wg_blink_impl.c"             -o "$WG/Vendor/blink/lib/wg_blink_impl.o"
+          "$CC" \
+            -c \
+            -std=c11 \
+            -O2 \
+            -arch arm64 \
+            -isysroot "$SDK" \
+            -miphoneos-version-min=17.0 \
+            -D_FILE_OFFSET_BITS=64 \
+            -D_DARWIN_C_SOURCE \
+            -DTARGET_OS_IPHONE=1 \
+            -I"$BLINK" \
+            -include "$BLINK/config.h" \
+            "$WG/Vendor/blink/wg_blink_impl.c" \
+            -o "$WG/Vendor/blink/lib/wg_blink_impl.o"
 
           test -f "$WG/Vendor/blink/lib/wg_blink_impl.o"
 
-      - name: Patch POSTAL 2 engine FIX 11.2 CLEAN
+      - name: Patch POSTAL 2 engine FIX 11.3 CLEAN
         shell: bash
         run: |
           set -euxo pipefail
@@ -444,6 +468,88 @@ jobs:
           exec(code)
           PY
 
+      - name: Patch FIX 11.3 MSVCP DllMain and no fallback
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("WineGlass/Sources/Core/wg_engine.c")
+          s = p.read_text()
+
+          handler_anchor = '        } else if (strcmp(fn, "GetEnvironmentStringsW") == 0) {'
+          handler = "\n".join([
+              '        } else if (strcmp(fn, "DisableThreadLibraryCalls") == 0) {',
+              '            ret_val = 1;',
+              '            s_last_error = 0;',
+              '            WG_LOGI(TAG,',
+              '                    "POSTAL FIX11.3 DisableThreadLibraryCalls(0x%X) -> TRUE",',
+              '                    args[0]);',
+              '',
+              '        } else if (strcmp(fn, "GetEnvironmentStringsW") == 0) {',
+          ])
+
+          if "POSTAL FIX11.3 DisableThreadLibraryCalls" not in s:
+              if handler_anchor not in s:
+                  raise SystemExit("ERROR: FIX11.3 handler anchor missing")
+              s = s.replace(handler_anchor, handler, 1)
+
+          cleanup_anchor = '        if (strcmp(cleanup_fn, "GetStdHandle") == 0) num_args = 1;'
+          cleanup_replacement = "\n".join([
+              '        if (strcmp(cleanup_fn, "DisableThreadLibraryCalls") == 0) num_args = 1;',
+              '        else if (strcmp(cleanup_fn, "GetStdHandle") == 0) num_args = 1;',
+          ])
+
+          if 'strcmp(cleanup_fn, "DisableThreadLibraryCalls")' not in s:
+              if cleanup_anchor not in s:
+                  raise SystemExit("ERROR: FIX11.3 stdcall cleanup anchor missing")
+              s = s.replace(cleanup_anchor, cleanup_replacement, 1)
+
+          load_pattern = re.compile(
+              r'bool\s+ok\s*=\s*false\s*;\s*'
+              r'if\s*\(engine->backend\s*==\s*WG_BACKEND_BLINK\)\s*\{\s*'
+              r'ok\s*=\s*load_pe_blink\(engine\)\s*;[^\n]*\n\s*'
+              r'\}\s*'
+              r'if\s*\(!ok\)\s*\{\s*'
+              r'ok\s*=\s*load_pe_builtin\(engine\)\s*;\s*'
+              r'\}'
+          )
+
+          no_fallback = "\n".join([
+              'bool ok = false;',
+              '    if (engine->backend == WG_BACKEND_BLINK) {',
+              '        ok = load_pe_blink(engine);',
+              '        if (!ok) {',
+              '            WG_LOGE(TAG, "POSTAL FIX11.3 NO BUILTIN FALLBACK: blink load failed");',
+              '        }',
+              '    } else {',
+              '        ok = load_pe_builtin(engine);',
+              '    }',
+          ])
+
+          if "POSTAL FIX11.3 NO BUILTIN FALLBACK" not in s:
+              s, count = load_pattern.subn(no_fallback, s)
+              if count != 2:
+                  raise SystemExit(
+                      f"ERROR: FIX11.3 expected 2 loader fallback blocks, found {count}"
+                  )
+
+          p.write_text(s)
+
+          print("POSTAL 2 FIX 11.3 PATCH INSTALLED")
+          print("DisableThreadLibraryCalls handler OK")
+          print("DisableThreadLibraryCalls argc=1 OK")
+          print("Blink -> builtin fallback DISABLED")
+          PY
+
+          FILE="WineGlass/Sources/Core/wg_engine.c"
+          grep -n "POSTAL FIX11.3 DisableThreadLibraryCalls" "$FILE"
+          grep -n 'strcmp(cleanup_fn, "DisableThreadLibraryCalls")' "$FILE"
+          grep -n "POSTAL FIX11.3 NO BUILTIN FALLBACK" "$FILE"
+          echo "FIX 11.3 VERIFY OK"
+
       - name: Verify POSTAL engine patch
         shell: bash
         run: |
@@ -451,6 +557,8 @@ jobs:
 
           FILE="WineGlass/Sources/Core/wg_engine.c"
 
+          grep -q "POSTAL FIX11.3 DisableThreadLibraryCalls" "$FILE"
+          grep -q "POSTAL FIX11.3 NO BUILTIN FALLBACK" "$FILE"
           grep -q "POSTAL REAL DLL READY" "$FILE"
           grep -q "POSTAL PRELOAD BEGIN" "$FILE"
           grep -q "POSTAL REAL EXE IMPORT" "$FILE"
@@ -490,8 +598,8 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleName POSTAL 2" "$PLIST"
           /usr/libexec/PlistBuddy -c "Delete :CFBundleDisplayName" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string POSTAL 2" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.11.2" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1122" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.11.3" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1130" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :UIFileSharingEnabled true" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :LSSupportsOpeningDocumentsInPlace true" "$PLIST"
 
@@ -553,7 +661,7 @@ jobs:
             exit 1
           fi
 
-      - name: Build POSTAL 2 FIX 11.2 CLEAN
+      - name: Build POSTAL 2 FIX 11.3 CLEAN
         shell: bash
         run: |
           set -o pipefail
@@ -561,7 +669,22 @@ jobs:
           cd WineGlass
           rm -rf build
 
-          xcodebuild             -project WineGlass.xcodeproj             -scheme WineGlass             -configuration Release             -sdk iphoneos             -destination "generic/platform=iOS"             -derivedDataPath build             ARCHS=arm64             ONLY_ACTIVE_ARCH=NO             CODE_SIGNING_ALLOWED=NO             CODE_SIGNING_REQUIRED=NO             CODE_SIGN_IDENTITY=""             DEVELOPMENT_TEAM=""             PRODUCT_BUNDLE_IDENTIFIER=com.postal2ios.native             build             2>&1 | tee xcodebuild.log
+          xcodebuild \
+            -project WineGlass.xcodeproj \
+            -scheme WineGlass \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath build \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            PRODUCT_BUNDLE_IDENTIFIER=com.postal2ios.native \
+            build \
+            2>&1 | tee xcodebuild.log
 
       - name: Verify POSTAL 2 app
         shell: bash
@@ -601,14 +724,14 @@ jobs:
           cp -R "$APP" "$OUT/Payload/POSTAL 2.app"
 
           cd "$OUT"
-          zip -qry "POSTAL-2-iOS-v11.2-CLEAN.ipa" Payload
-          ls -lh "POSTAL-2-iOS-v11.2-CLEAN.ipa"
+          zip -qry "POSTAL-2-iOS-v11.3-CLEAN.ipa" Payload
+          ls -lh "POSTAL-2-iOS-v11.3-CLEAN.ipa"
 
-      - name: Upload POSTAL 2 FIX 11.2 CLEAN IPA
+      - name: Upload POSTAL 2 FIX 11.3 CLEAN IPA
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-iOS-v11.2-CLEAN
-          path: out/POSTAL-2-iOS-v11.2-CLEAN.ipa
+          name: POSTAL-2-iOS-v11.3-CLEAN
+          path: out/POSTAL-2-iOS-v11.3-CLEAN.ipa
           if-no-files-found: error
           retention-days: 14
 
@@ -616,21 +739,21 @@ jobs:
         if: always()
         shell: bash
         run: |
-          mkdir -p debug-fix11-2-clean
-          cp WineGlass/xcodebuild.log debug-fix11-2-clean/ 2>/dev/null || true
-          cp blink-src/config.h debug-fix11-2-clean/blink-config.h 2>/dev/null || true
-          cp WineGlass/Vendor/blink/wg_blink_impl.c debug-fix11-2-clean/ 2>/dev/null || true
-          cp WineGlass/Sources/Core/wg_engine.c debug-fix11-2-clean/ 2>/dev/null || true
-          cp WineGlass/Sources/App/WGSceneDelegate.m debug-fix11-2-clean/ 2>/dev/null || true
-          cp WineGlass/project.yml debug-fix11-2-clean/ 2>/dev/null || true
-          cp vc120-runtime/msvcr120.dll debug-fix11-2-clean/ 2>/dev/null || true
-          cp vc120-runtime/msvcp120.dll debug-fix11-2-clean/ 2>/dev/null || true
+          mkdir -p debug-fix11-3-clean
+          cp WineGlass/xcodebuild.log debug-fix11-3-clean/ 2>/dev/null || true
+          cp blink-src/config.h debug-fix11-3-clean/blink-config.h 2>/dev/null || true
+          cp WineGlass/Vendor/blink/wg_blink_impl.c debug-fix11-3-clean/ 2>/dev/null || true
+          cp WineGlass/Sources/Core/wg_engine.c debug-fix11-3-clean/ 2>/dev/null || true
+          cp WineGlass/Sources/App/WGSceneDelegate.m debug-fix11-3-clean/ 2>/dev/null || true
+          cp WineGlass/project.yml debug-fix11-3-clean/ 2>/dev/null || true
+          cp vc120-runtime/msvcr120.dll debug-fix11-3-clean/ 2>/dev/null || true
+          cp vc120-runtime/msvcp120.dll debug-fix11-3-clean/ 2>/dev/null || true
 
-      - name: Upload FIX 11.2 CLEAN debug
+      - name: Upload FIX 11.3 CLEAN debug
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-FIX11.2-CLEAN-DEBUG
-          path: debug-fix11-2-clean
+          name: POSTAL-2-FIX11.3-CLEAN-DEBUG
+          path: debug-fix11-3-clean
           if-no-files-found: ignore
           retention-days: 7
