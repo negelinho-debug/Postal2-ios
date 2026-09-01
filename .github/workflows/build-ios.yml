@@ -1,4 +1,4 @@
-name: POSTAL 2 WineGlass iOS FIX 11.3 CLEAN
+name: POSTAL 2 WineGlass iOS FIX 11.4 CLEAN
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   lint:
-    name: Validate FIX 11.3 CLEAN
+    name: Validate FIX 11.4 CLEAN
     runs-on: ubuntu-24.04
     timeout-minutes: 5
 
@@ -167,7 +167,7 @@ jobs:
 
   build:
     needs: vc120
-    name: Build POSTAL 2 FIX 11.3 CLEAN
+    name: Build POSTAL 2 FIX 11.4 CLEAN
     runs-on: macos-14
     timeout-minutes: 90
 
@@ -246,13 +246,7 @@ jobs:
           cd blink-src
           chmod +x configure
 
-          ./configure \
-            CC="$CC" \
-            AR="$AR" \
-            CFLAGS="-O2 -arch arm64 -isysroot $SDK -miphoneos-version-min=17.0" \
-            --disable-threads \
-            --disable-sockets \
-            --disable-jit
+          ./configure             CC="$CC"             AR="$AR"             CFLAGS="-O2 -arch arm64 -isysroot $SDK -miphoneos-version-min=17.0"             --disable-threads             --disable-sockets             --disable-jit
 
           test -f config.h
           test -f config.mk
@@ -313,12 +307,7 @@ jobs:
           cd "$BLINK"
           rm -f o//blink/blink.a
 
-          gmake \
-            -j2 \
-            CC="$CC" \
-            AR="$AR" \
-            CFLAGS="-O2 -arch arm64 -isysroot $SDK -miphoneos-version-min=17.0" \
-            o//blink/blink.a
+          gmake             -j2             CC="$CC"             AR="$AR"             CFLAGS="-O2 -arch arm64 -isysroot $SDK -miphoneos-version-min=17.0"             o//blink/blink.a
 
           test -f o//blink/blink.a
           cp o//blink/blink.a "$WG/Vendor/blink/lib/blink.a"
@@ -365,24 +354,11 @@ jobs:
 
           cd "$BLINK"
 
-          "$CC" \
-            -c \
-            -std=c11 \
-            -O2 \
-            -arch arm64 \
-            -isysroot "$SDK" \
-            -miphoneos-version-min=17.0 \
-            -D_FILE_OFFSET_BITS=64 \
-            -D_DARWIN_C_SOURCE \
-            -DTARGET_OS_IPHONE=1 \
-            -I"$BLINK" \
-            -include "$BLINK/config.h" \
-            "$WG/Vendor/blink/wg_blink_impl.c" \
-            -o "$WG/Vendor/blink/lib/wg_blink_impl.o"
+          "$CC"             -c             -std=c11             -O2             -arch arm64             -isysroot "$SDK"             -miphoneos-version-min=17.0             -D_FILE_OFFSET_BITS=64             -D_DARWIN_C_SOURCE             -DTARGET_OS_IPHONE=1             -I"$BLINK"             -include "$BLINK/config.h"             "$WG/Vendor/blink/wg_blink_impl.c"             -o "$WG/Vendor/blink/lib/wg_blink_impl.o"
 
           test -f "$WG/Vendor/blink/lib/wg_blink_impl.o"
 
-      - name: Patch POSTAL 2 engine FIX 11.3 CLEAN
+      - name: Patch POSTAL 2 engine FIX 11.2 CLEAN
         shell: bash
         run: |
           set -euxo pipefail
@@ -550,6 +526,204 @@ jobs:
           grep -n "POSTAL FIX11.3 NO BUILTIN FALLBACK" "$FILE"
           echo "FIX 11.3 VERIFY OK"
 
+      - name: Patch FIX 11.4 Unreal memory and file API
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path("WineGlass/Sources/Core/wg_engine.c")
+          s = p.read_text()
+
+          createfile_anchor = '        } else if (strcmp(fn, "CreateFileW") == 0) {'
+          createfile_block = r'''        } else if (strcmp(fn, "CreateFileA") == 0) {
+              // POSTAL FIX11.4: ANSI file opens used by Unreal startup.
+              char apath[520] = {0};
+
+              if (args[0]) {
+                  wg_blink_read_mem(
+                      engine->blink,
+                      args[0],
+                      apath,
+                      sizeof(apath) - 1
+                  );
+                  apath[sizeof(apath) - 1] = 0;
+              }
+
+              const char *real = wg_files_map_path(
+                  args[0],
+                  engine->blink,
+                  apath,
+                  sizeof(apath)
+              );
+
+              if (real) {
+                  ret_val = wg_files_create(real, args[1], args[4]);
+
+                  if ((uint32_t)ret_val == 0xFFFFFFFFu) {
+                      s_last_error = 2;
+                  } else {
+                      s_last_error = 0;
+                  }
+              } else {
+                  ret_val = 0xFFFFFFFFu;
+                  s_last_error = 2;
+              }
+
+              WG_LOGI(
+                  TAG,
+                  "POSTAL FIX11.4 CreateFileA('%s', access=0x%X, share=0x%X, creation=%u) -> 0x%X",
+                  apath,
+                  args[1],
+                  args[2],
+                  args[4],
+                  (uint32_t)ret_val
+              );
+
+          } else if (strcmp(fn, "CreateFileW") == 0) {'''
+
+          if "POSTAL FIX11.4 CreateFileA" not in s:
+              if createfile_anchor not in s:
+                  raise SystemExit("ERROR: FIX11.4 CreateFileW anchor missing")
+              s = s.replace(createfile_anchor, createfile_block, 1)
+
+          virtual_anchor = '        } else if (strcmp(fn, "CloseHandle") == 0) {'
+          virtual_block = r'''        } else if (strcmp(fn, "VirtualAlloc") == 0) {
+              // VirtualAlloc(lpAddress, dwSize, flAllocationType, flProtect)
+              uint32_t requested = args[0];
+              uint32_t size = args[1];
+              uint32_t alloc_type = args[2];
+              uint32_t protect = args[3];
+
+              if (size == 0) {
+                  size = 1;
+              }
+
+              uint32_t rounded = (size + 0xFFFu) & ~0xFFFu;
+              uint32_t addr = 0;
+
+              if (requested != 0) {
+                  uint8_t *zeros = calloc(1, rounded);
+
+                  if (zeros) {
+                      if (wg_blink_load_code(
+                              engine->blink,
+                              requested,
+                              zeros,
+                              rounded,
+                              0)) {
+                          addr = requested;
+                          track_alloc(addr, size);
+                      }
+
+                      free(zeros);
+                  }
+              } else {
+                  addr = wg_guest_alloc(engine, size);
+              }
+
+              ret_val = addr;
+              s_last_error = addr ? 0 : 8;
+
+              WG_LOGI(
+                  TAG,
+                  "POSTAL FIX11.4 VirtualAlloc(addr=0x%X,size=0x%X,type=0x%X,protect=0x%X) -> 0x%X",
+                  requested,
+                  size,
+                  alloc_type,
+                  protect,
+                  addr
+              );
+
+          } else if (strcmp(fn, "VirtualFree") == 0) {
+              WG_LOGI(
+                  TAG,
+                  "POSTAL FIX11.4 VirtualFree(addr=0x%X,size=0x%X,type=0x%X) -> TRUE",
+                  args[0],
+                  args[1],
+                  args[2]
+              );
+
+              ret_val = 1;
+              s_last_error = 0;
+
+          } else if (strcmp(fn, "CloseHandle") == 0) {'''
+
+          if "POSTAL FIX11.4 VirtualAlloc" not in s:
+              if virtual_anchor not in s:
+                  raise SystemExit("ERROR: FIX11.4 CloseHandle anchor missing")
+              s = s.replace(virtual_anchor, virtual_block, 1)
+
+          cwd_old = "\n".join([
+              '            wg_files_set_cwd(path[0] ? path : NULL);',
+              '            WG_LOGI(TAG, "SetCurrentDirectory(\'%s\')", path);',
+              '            ret_val = 1;',
+          ])
+
+          cwd_new = r'''            bool postal_fake_system32 =
+                strcmp(path, "C:\\Windows\\System32") == 0 ||
+                strcmp(path, "C:\\Windows\\System32\\") == 0 ||
+                strcmp(path, "c:\\windows\\system32") == 0 ||
+                strcmp(path, "c:\\windows\\system32\\") == 0;
+
+            if (postal_fake_system32) {
+                WG_LOGI(
+                    TAG,
+                    "POSTAL FIX11.4 ignoring SetCurrentDirectory('%s'); keeping Postal2/System",
+                    path
+                );
+            } else {
+                wg_files_set_cwd(path[0] ? path : NULL);
+                WG_LOGI(TAG, "SetCurrentDirectory('%s')", path);
+            }
+
+            ret_val = 1;'''
+
+          if "POSTAL FIX11.4 ignoring SetCurrentDirectory" not in s:
+              if cwd_old not in s:
+                  raise SystemExit("ERROR: FIX11.4 SetCurrentDirectory block missing")
+              s = s.replace(cwd_old, cwd_new, 1)
+
+          cleanup_marker = (
+              '        if (strcmp(cleanup_fn, "DisableThreadLibraryCalls") == 0) '
+              'num_args = 1;'
+          )
+
+          cleanup_new = "\n".join([
+              '        if (strcmp(cleanup_fn, "VirtualAlloc") == 0) num_args = 4;',
+              '        else if (strcmp(cleanup_fn, "VirtualFree") == 0) num_args = 3;',
+              '        else if (strcmp(cleanup_fn, "CreateFileA") == 0) num_args = 7;',
+              '        else if (strcmp(cleanup_fn, "CreateFileW") == 0) num_args = 7;',
+              '        else if (strcmp(cleanup_fn, "CloseHandle") == 0) num_args = 1;',
+              '        else if (strcmp(cleanup_fn, "SetCurrentDirectoryA") == 0) num_args = 1;',
+              '        else if (strcmp(cleanup_fn, "SetCurrentDirectoryW") == 0) num_args = 1;',
+              '        else if (strcmp(cleanup_fn, "DisableThreadLibraryCalls") == 0) num_args = 1;',
+          ])
+
+          if 'strcmp(cleanup_fn, "VirtualAlloc")' not in s:
+              if cleanup_marker not in s:
+                  raise SystemExit("ERROR: FIX11.4 stdcall cleanup anchor missing")
+              s = s.replace(cleanup_marker, cleanup_new, 1)
+
+          p.write_text(s)
+
+          print("POSTAL 2 FIX 11.4 PATCH INSTALLED")
+          print("CreateFileA real file mapping        OK")
+          print("VirtualAlloc guest memory            OK")
+          print("VirtualFree                          OK")
+          print("Postal2/System cwd guard             OK")
+          print("stdcall cleanup                      OK")
+          PY
+
+          FILE="WineGlass/Sources/Core/wg_engine.c"
+          grep -n "POSTAL FIX11.4 CreateFileA" "$FILE"
+          grep -n "POSTAL FIX11.4 VirtualAlloc" "$FILE"
+          grep -n "POSTAL FIX11.4 VirtualFree" "$FILE"
+          grep -n "POSTAL FIX11.4 ignoring SetCurrentDirectory" "$FILE"
+          grep -n 'strcmp(cleanup_fn, "VirtualAlloc")' "$FILE"
+          echo "FIX 11.4 VERIFY OK"
+
       - name: Verify POSTAL engine patch
         shell: bash
         run: |
@@ -557,14 +731,17 @@ jobs:
 
           FILE="WineGlass/Sources/Core/wg_engine.c"
 
-          grep -q "POSTAL FIX11.3 DisableThreadLibraryCalls" "$FILE"
-          grep -q "POSTAL FIX11.3 NO BUILTIN FALLBACK" "$FILE"
           grep -q "POSTAL REAL DLL READY" "$FILE"
           grep -q "POSTAL PRELOAD BEGIN" "$FILE"
           grep -q "POSTAL REAL EXE IMPORT" "$FILE"
           grep -q "POSTAL FIX11.2 GetEnvironmentStringsW" "$FILE"
           grep -q "POSTAL FIX11.2 GetProcessWindowStation" "$FILE"
           grep -q "POSTAL FIX11.2 DllMain FAILED" "$FILE"
+          grep -q "POSTAL FIX11.3 DisableThreadLibraryCalls" "$FILE"
+          grep -q "POSTAL FIX11.3 NO BUILTIN FALLBACK" "$FILE"
+          grep -q "POSTAL FIX11.4 CreateFileA" "$FILE"
+          grep -q "POSTAL FIX11.4 VirtualAlloc" "$FILE"
+          grep -q "POSTAL FIX11.4 VirtualFree" "$FILE"
           grep -q "POSTAL DLL INITIALIZATION COMPLETE" "$FILE"
 
           echo "POSTAL engine patch markers verified"
@@ -598,8 +775,8 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleName POSTAL 2" "$PLIST"
           /usr/libexec/PlistBuddy -c "Delete :CFBundleDisplayName" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string POSTAL 2" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.11.3" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1130" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.11.4" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1140" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :UIFileSharingEnabled true" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :LSSupportsOpeningDocumentsInPlace true" "$PLIST"
 
@@ -644,6 +821,16 @@ jobs:
           exec(code)
           PY
 
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path("WineGlass/Sources/App/WGSceneDelegate.m")
+          s = p.read_text()
+          s = s.replace("FIX 11.2 CLEAN", "FIX 11.4 CLEAN")
+          s = s.replace("FIX11.2 CLEAN", "FIX11.4 CLEAN")
+          p.write_text(s)
+          PY
+
       - name: Generate Xcode project
         shell: bash
         run: |
@@ -661,7 +848,7 @@ jobs:
             exit 1
           fi
 
-      - name: Build POSTAL 2 FIX 11.3 CLEAN
+      - name: Build POSTAL 2 FIX 11.4 CLEAN
         shell: bash
         run: |
           set -o pipefail
@@ -669,22 +856,7 @@ jobs:
           cd WineGlass
           rm -rf build
 
-          xcodebuild \
-            -project WineGlass.xcodeproj \
-            -scheme WineGlass \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination "generic/platform=iOS" \
-            -derivedDataPath build \
-            ARCHS=arm64 \
-            ONLY_ACTIVE_ARCH=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM="" \
-            PRODUCT_BUNDLE_IDENTIFIER=com.postal2ios.native \
-            build \
-            2>&1 | tee xcodebuild.log
+          xcodebuild             -project WineGlass.xcodeproj             -scheme WineGlass             -configuration Release             -sdk iphoneos             -destination "generic/platform=iOS"             -derivedDataPath build             ARCHS=arm64             ONLY_ACTIVE_ARCH=NO             CODE_SIGNING_ALLOWED=NO             CODE_SIGNING_REQUIRED=NO             CODE_SIGN_IDENTITY=""             DEVELOPMENT_TEAM=""             PRODUCT_BUNDLE_IDENTIFIER=com.postal2ios.native             build             2>&1 | tee xcodebuild.log
 
       - name: Verify POSTAL 2 app
         shell: bash
@@ -724,14 +896,14 @@ jobs:
           cp -R "$APP" "$OUT/Payload/POSTAL 2.app"
 
           cd "$OUT"
-          zip -qry "POSTAL-2-iOS-v11.3-CLEAN.ipa" Payload
-          ls -lh "POSTAL-2-iOS-v11.3-CLEAN.ipa"
+          zip -qry "POSTAL-2-iOS-v11.4-CLEAN.ipa" Payload
+          ls -lh "POSTAL-2-iOS-v11.4-CLEAN.ipa"
 
-      - name: Upload POSTAL 2 FIX 11.3 CLEAN IPA
+      - name: Upload POSTAL 2 FIX 11.4 CLEAN IPA
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-iOS-v11.3-CLEAN
-          path: out/POSTAL-2-iOS-v11.3-CLEAN.ipa
+          name: POSTAL-2-iOS-v11.4-CLEAN
+          path: out/POSTAL-2-iOS-v11.4-CLEAN.ipa
           if-no-files-found: error
           retention-days: 14
 
@@ -739,21 +911,21 @@ jobs:
         if: always()
         shell: bash
         run: |
-          mkdir -p debug-fix11-3-clean
-          cp WineGlass/xcodebuild.log debug-fix11-3-clean/ 2>/dev/null || true
-          cp blink-src/config.h debug-fix11-3-clean/blink-config.h 2>/dev/null || true
-          cp WineGlass/Vendor/blink/wg_blink_impl.c debug-fix11-3-clean/ 2>/dev/null || true
-          cp WineGlass/Sources/Core/wg_engine.c debug-fix11-3-clean/ 2>/dev/null || true
-          cp WineGlass/Sources/App/WGSceneDelegate.m debug-fix11-3-clean/ 2>/dev/null || true
-          cp WineGlass/project.yml debug-fix11-3-clean/ 2>/dev/null || true
-          cp vc120-runtime/msvcr120.dll debug-fix11-3-clean/ 2>/dev/null || true
-          cp vc120-runtime/msvcp120.dll debug-fix11-3-clean/ 2>/dev/null || true
+          mkdir -p debug-fix11-4-clean
+          cp WineGlass/xcodebuild.log debug-fix11-4-clean/ 2>/dev/null || true
+          cp blink-src/config.h debug-fix11-4-clean/blink-config.h 2>/dev/null || true
+          cp WineGlass/Vendor/blink/wg_blink_impl.c debug-fix11-4-clean/ 2>/dev/null || true
+          cp WineGlass/Sources/Core/wg_engine.c debug-fix11-4-clean/ 2>/dev/null || true
+          cp WineGlass/Sources/App/WGSceneDelegate.m debug-fix11-4-clean/ 2>/dev/null || true
+          cp WineGlass/project.yml debug-fix11-4-clean/ 2>/dev/null || true
+          cp vc120-runtime/msvcr120.dll debug-fix11-4-clean/ 2>/dev/null || true
+          cp vc120-runtime/msvcp120.dll debug-fix11-4-clean/ 2>/dev/null || true
 
-      - name: Upload FIX 11.3 CLEAN debug
+      - name: Upload FIX 11.4 CLEAN debug
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-FIX11.3-CLEAN-DEBUG
-          path: debug-fix11-3-clean
+          name: POSTAL-2-FIX11.4-CLEAN-DEBUG
+          path: debug-fix11-4-clean
           if-no-files-found: ignore
           retention-days: 7
