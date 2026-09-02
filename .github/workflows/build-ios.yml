@@ -1,4 +1,4 @@
-name: POSTAL 2 WineGlass iOS FIX 11.8.1 CLEAN
+name: POSTAL 2 WineGlass iOS FIX 11.9 CLEAN
 
 on:
   workflow_dispatch:
@@ -8,20 +8,37 @@ permissions:
 
 jobs:
   lint:
-    name: Validate FIX 11.8.1 CLEAN
+    name: Validate FIX 11.9 CLEAN
     runs-on: ubuntu-24.04
     timeout-minutes: 5
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Validate every embedded Python patch
+      - name: Validate workflow and successful FIX 11.8.1 base
         shell: bash
         run: |
           set -euxo pipefail
-          python3 <<'PY'
 
+          BASE_COMMIT="0bae098"
+          BASE_FILE="/tmp/POSTAL-FIX11.8.1-success.yml"
+
+          if git cat-file -e "${BASE_COMMIT}^{commit}" 2>/dev/null; then
+            git show "${BASE_COMMIT}:.github/workflows/build-ios.yml" > "$BASE_FILE"
+          else
+            curl -fsSL \
+              "https://raw.githubusercontent.com/negelinho-debug/Postal2-ios/${BASE_COMMIT}/.github/workflows/build-ios.yml" \
+              -o "$BASE_FILE"
+          fi
+
+          grep -q \
+            '^name: POSTAL 2 WineGlass iOS FIX 11.8.1 CLEAN$' \
+            "$BASE_FILE"
+
+          python3 <<'PY'
           from pathlib import Path
           import ast
           import base64
@@ -29,10 +46,9 @@ jobs:
           import textwrap
           import zlib
 
-          path = Path(".github/workflows/build-ios.yml")
-          text = path.read_text()
-
-          lines = text.splitlines()
+          # Validate every visible Python heredoc in the NEW workflow.
+          current = Path(".github/workflows/build-ios.yml").read_text()
+          lines = current.splitlines()
           blocks = []
           i = 0
 
@@ -44,10 +60,10 @@ jobs:
                   i += 1
 
                   while i < len(lines) and lines[i].strip() != "PY":
-                      current = lines[i]
-                      if current.startswith(" " * base_indent):
-                          current = current[base_indent:]
-                      body.append(current)
+                      cur = lines[i]
+                      if cur.startswith(" " * base_indent):
+                          cur = cur[base_indent:]
+                      body.append(cur)
                       i += 1
 
                   if i >= len(lines):
@@ -60,22 +76,52 @@ jobs:
           for index, code in enumerate(blocks, start=1):
               ast.parse(code, filename=f"visible-python-{index}")
 
-          payload_re = re.compile(
-              r'payload\s*=\s*"""([A-Za-z0-9+/=\s]+)"""',
-              re.S
+          # Decode and syntax-check the exact payloads from the SUCCESSFUL 11.8.1 commit.
+          base = Path("/tmp/POSTAL-FIX11.8.1-success.yml").read_text()
+
+          pattern = re.compile(
+              r'payload\s*=\s*"""(.*?)"""\s*'
+              r'code\s*=\s*zlib\.decompress\(.*?\)\.decode\("utf-8"\)\s*'
+              r'compile\(\s*code,\s*"([^"]+)"',
+              re.S,
           )
-          payloads = payload_re.findall(text)
 
-          if not payloads:
-              raise SystemExit("ERROR: no compressed Python patch payloads found")
+          wanted = {
+              "<POSTAL-blink-config>",
+              "<POSTAL-blink-sched>",
+              "<POSTAL-blink-mmap>",
+              "<POSTAL-engine>",
+              "<POSTAL-FIX11.8.1-cumulative>",
+              "<POSTAL-project>",
+              "<POSTAL-launcher>",
+          }
 
-          for index, payload in enumerate(payloads, start=1):
-              code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-              ast.parse(code, filename=f"decoded-patch-{index}")
+          found = {}
+
+          for payload, label in pattern.findall(base):
+              if label not in wanted:
+                  continue
+
+              code = zlib.decompress(
+                  base64.b64decode(payload)
+              ).decode("utf-8")
+
+              ast.parse(code, filename=label)
+              found[label] = code
+
+          missing = sorted(wanted - set(found))
+          if missing:
+              raise SystemExit(
+                  "ERROR: missing successful 11.8.1 payloads: "
+                  + ", ".join(missing)
+              )
 
           print(
-              f"Workflow Python validation OK: "
-              f"{len(blocks)} visible blocks, {len(payloads)} decoded payloads"
+              "FIX 11.9 validation OK:",
+              len(blocks),
+              "visible Python blocks and",
+              len(found),
+              "successful 11.8.1 payloads"
           )
           PY
 
@@ -167,13 +213,15 @@ jobs:
 
   build:
     needs: vc120
-    name: Build POSTAL 2 FIX 11.8.1 CLEAN
+    name: Build POSTAL 2 FIX 11.9 CLEAN
     runs-on: macos-14
     timeout-minutes: 90
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download VC120 runtime
         uses: actions/download-artifact@v4
@@ -193,6 +241,84 @@ jobs:
           file vc120-runtime/msvcp120.dll | grep -q "PE32 executable"
           file vc120-runtime/msvcr120.dll | grep -q "Intel 80386"
           file vc120-runtime/msvcp120.dll | grep -q "Intel 80386"
+
+      - name: Recover exact successful FIX 11.8.1 patches
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          BASE_COMMIT="0bae098"
+          BASE_FILE="/tmp/POSTAL-FIX11.8.1-success.yml"
+          PATCH_DIR="$GITHUB_WORKSPACE/.postal-base-patches"
+
+          rm -rf "$PATCH_DIR"
+          mkdir -p "$PATCH_DIR"
+
+          if git cat-file -e "${BASE_COMMIT}^{commit}" 2>/dev/null; then
+            git show "${BASE_COMMIT}:.github/workflows/build-ios.yml" > "$BASE_FILE"
+          else
+            curl -fsSL \
+              "https://raw.githubusercontent.com/negelinho-debug/Postal2-ios/${BASE_COMMIT}/.github/workflows/build-ios.yml" \
+              -o "$BASE_FILE"
+          fi
+
+          grep -q \
+            '^name: POSTAL 2 WineGlass iOS FIX 11.8.1 CLEAN$' \
+            "$BASE_FILE"
+
+          python3 <<'PY'
+          from pathlib import Path
+          import ast
+          import base64
+          import re
+          import zlib
+
+          src = Path("/tmp/POSTAL-FIX11.8.1-success.yml").read_text()
+          out = Path(".postal-base-patches")
+
+          names = {
+              "<POSTAL-blink-config>": "blink-config.py",
+              "<POSTAL-blink-sched>": "blink-sched.py",
+              "<POSTAL-blink-mmap>": "blink-mmap.py",
+              "<POSTAL-engine>": "engine-fix11.2.py",
+              "<POSTAL-FIX11.8.1-cumulative>": "cumulative-fix11.8.1.py",
+              "<POSTAL-project>": "project.py",
+              "<POSTAL-launcher>": "launcher.py",
+          }
+
+          pattern = re.compile(
+              r'payload\s*=\s*"""(.*?)"""\s*'
+              r'code\s*=\s*zlib\.decompress\(.*?\)\.decode\("utf-8"\)\s*'
+              r'compile\(\s*code,\s*"([^"]+)"',
+              re.S,
+          )
+
+          written = set()
+
+          for payload, label in pattern.findall(src):
+              filename = names.get(label)
+              if not filename:
+                  continue
+
+              code = zlib.decompress(
+                  base64.b64decode(payload)
+              ).decode("utf-8")
+
+              ast.parse(code, filename=label)
+              (out / filename).write_text(code)
+              written.add(label)
+
+          missing = sorted(set(names) - written)
+          if missing:
+              raise SystemExit(
+                  "ERROR: missing successful FIX11.8.1 payloads: "
+                  + ", ".join(missing)
+              )
+
+          print("Recovered", len(written), "successful FIX11.8.1 patches")
+          PY
+
+          ls -lh "$PATCH_DIR"
 
       - name: Select Xcode 15.4
         shell: bash
@@ -246,49 +372,29 @@ jobs:
           cd blink-src
           chmod +x configure
 
-          ./configure             CC="$CC"             AR="$AR"             CFLAGS="-O2 -arch arm64 -isysroot $SDK -miphoneos-version-min=17.0"             --disable-threads             --disable-sockets             --disable-jit
+          ./configure \
+            CC="$CC" \
+            AR="$AR" \
+            CFLAGS="-O2 -arch arm64 -isysroot $SDK -miphoneos-version-min=17.0" \
+            --disable-threads \
+            --disable-sockets \
+            --disable-jit
 
           test -f config.h
           test -f config.mk
 
-      - name: Patch Blink iOS config
+      - name: Patch Blink iOS config from successful 11.8.1
         shell: bash
         run: |
           set -euxo pipefail
-          python3 <<'PY'
-          import base64
-          import zlib
-
-          payload = """eNqdU2FrwjAQ/Z5fcWQD2+oq+nEgo7PdlGkrtspk3UqrqYZpWpLKBuJ/X9rqpqzCWD7dvbt3dzxeUMyTDaRhtlrTCOgmTXgGI5mi
-          Q8wJQil0CkzB0Zqy9xvB5815wmK61FdYRUKWU52TcBFk5DNTCOcJFx1MlyzhRDagBRVhtCay7wWBfLhnTK3g0fIs2xs7oxlunMDu
-          zL1UkvDYsE1nWEWoqDxZYzswxrZ53t/tWWYw61uDKrwnsVeECKu42LSmweTCBUNnYnsF+wcfGqPAsB17JotuOTdOOLBwQ4AyOMpS
-          h3LbbUHN5eREF9tIKfL88bim3G3UN19oVwsSU0Z8Ud/JLiLmYUqUfKK69yNdu641vlm1k1gUkfqnDVsmd/x3gbRDvQPYZ00NRo7r
-          GQNoA3VceOg/Q6ult6E7sAwbtKbPcKUeRxnkmBiXx8Au79n/YpzrVhJKfQ4MaBWcVP/gNCOlP4WKUk5ZpuD73M7FcaWd848wX5GF
-          9OwXQqLXOA=="""
-          code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-          compile(code, "<POSTAL-blink-config>", "exec")
-          exec(code)
-          PY
-
+          python3 .postal-base-patches/blink-config.py
           grep -q '^#define HAVE_MAP_ANONYMOUS 1$' blink-src/config.h
 
-      - name: Patch Blink sched_yield
+      - name: Patch Blink sched_yield from successful 11.8.1
         shell: bash
         run: |
           set -euxo pipefail
-          python3 <<'PY'
-          import base64
-          import zlib
-
-          payload = """eNqFksFqwzAMhu9+Ci2XJlmXrteWMBj0ODqa0yBQHEdZzRInWO7WUvbuk50w2l2Wg2LJ0udfskVj+w4G6Q6trkB3Q28dvLIrprVF
-          IQbIQyyOqlabjweyahFWCzqTkm2bqSgRxFlDZlHWe4cnFydcKJ1Da3jDzmYzctJpVdK9No5tcaZCHbB+09jWJaVlzIacPSq/+yLV
-          QRv08bTzNvHmkqVPpSm/mSYsDq1U2KFxfMAvH5gON+x4hMKEhLRL4CIA4s9e10m35qVFd2Sdj2sR0ILmoPpjAFvM6FiZmLMApobm
-          wbkSMAZo/IXKfDk6TSvfKWdIIXggupm4dzksVyNFakIv2GG3OWkXR5vdbrtb3fbgT1YHaKRuseZhh2lTNkkYxUUwfeTL9ufQe7KO
-          5re7i/Q6AWpNsmIo9Ab0toB0EU1Ko2kqf3A8YKB/tF8fYLGT2pAXPWRfVjsc3wclYrB8WXH07N/STU3oNjT6A+2m0ls="""
-          code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-          compile(code, "<POSTAL-blink-sched>", "exec")
-          exec(code)
-          PY
+          python3 .postal-base-patches/blink-sched.py
 
       - name: Build blink ARM64 no-JIT
         shell: bash
@@ -307,38 +413,22 @@ jobs:
           cd "$BLINK"
           rm -f o//blink/blink.a
 
-          gmake             -j2             CC="$CC"             AR="$AR"             CFLAGS="-O2 -arch arm64 -isysroot $SDK -miphoneos-version-min=17.0"             o//blink/blink.a
+          gmake \
+            -j2 \
+            CC="$CC" \
+            AR="$AR" \
+            CFLAGS="-O2 -arch arm64 -isysroot $SDK -miphoneos-version-min=17.0" \
+            o//blink/blink.a
 
           test -f o//blink/blink.a
           cp o//blink/blink.a "$WG/Vendor/blink/lib/blink.a"
           test -f "$WG/Vendor/blink/lib/blink.a"
 
-      - name: Patch Blink VM mmap
+      - name: Patch Blink VM mmap from successful 11.8.1
         shell: bash
         run: |
           set -euxo pipefail
-          python3 <<'PY'
-          import base64
-          import zlib
-
-          payload = """eNqtVm1v4kYQ/u5fMXWVxr7jJahVpUJIxREHRcebgCR3ykWWY69hlfXa2jVwd0372zu7tjEmJGrV8gFmd2dmZ555ZhYjFHEEiZeu
-          GH0EGiWxSGGKS8NIoKsly7yjnAyYJ2XzlvAgFs1HRvlTc7t0teCiGWv4pm1INEkagniBm5KvqWUbBg3B/JFyn60DAudECB43Vhcm
-          8DgFykG2DcBPVUumAT2mpT7Co5LA/JtMSeR8pallOrPZZNYGbQSFj4hKSfkSY1JGKi6JcSXM84m183Xsytpbp1/4y1T29+Q32Ywi
-          j1cdtTIRwZCpJ1I38sQTERiSieuU+hi6WPsp3A0+KDhvR/DORwxT4m4id0vTlRvFAbFyrU8kGHn+CksyilWi+GXDH6aBlal4PnS5
-          E92+dm5tYhpoyywsDVFIeWDtR2krv+VReUkNtFpW4dxBF+otiAVoE7XIyvZqyY5kCZl3uVdAg5OtG665n9KYYyji9PT0/wMOIwwT
-          QXkaol6ARa2BeT+dzBe9YfPD8Hr88QH6M6e3cADdK5vuSfCFmzUtN2LtpaOchGwtV7kP3MEtwuVaEJdymlKP0e8ksLKDl2FvIkzM
-          9xiLfauF0KJyHFqHera+CfG2fthENgiSrgWH8c1wqN1uovqFYvqYbDOwrV10uQ2eZyljvIIgBSJ9ClVXAH8aFZv6BaLKCksW8yVO
-          jCVRUeJ1V8PewC3WnVJF2bi5jvU0w9VcLd6XtnVo2fAT/GVVdnQuiJ7qLzQ9y1zuBYKbo8hLyj5WYZfttru33JrOJgsXq3gJz5l8
-          N7teOOX5qDd1p7PrW1XmZ73qjSfjz6PJzdwtteqtUj7bmxPqQrMIG5kEKmMdfr5XEGxnkjOtdHHAOJWezqN7kmSekHVgnUhbUW9n
-          plsY3tl72JSHe+kT+F1xDh3FwkLSt8GcfDTz0h8hblb7CuJdjcpV73roIIjPcIwYh0Uq2KQ+V0i3nJQZDYuDKg9fMFFxMeejsosy
-          eud9nLmqaeUqzaMiplfu/WfsL1tcAfDJuXRHk0vHHU7Gg8J/nrEvzjCy/uzMnSoGKWE0zQVnkQvTQadq8zPa9FTP48iaYgssvEdG
-          dnEeFkLrYyutf/3FrrdK0FWK+4CUWP5H0IEwnNtvAeEMev3P/wqKTqWa9YuQeUsJz5hWC87P4bcs74OGqbbLYbPg/Mwn9Pym33fm
-          813nIGLdE8bWe03zRstYay7pkpMgG1/qyy6hf23I59Btoo6BeeHTZOh/QfK+rR/FB5x3lffrPZgYDv7Ie3wm2w9G0tgKik+W/sMk
-          bUOnbpl65Os3R80C/IPmr3C2oE/GSICv4t8LmNO9"""
-          code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-          compile(code, "<POSTAL-blink-mmap>", "exec")
-          exec(code)
-          PY
+          python3 .postal-base-patches/blink-mmap.py
 
       - name: Build WineGlass Blink bridge
         shell: bash
@@ -354,166 +444,34 @@ jobs:
 
           cd "$BLINK"
 
-          "$CC"             -c             -std=c11             -O2             -arch arm64             -isysroot "$SDK"             -miphoneos-version-min=17.0             -D_FILE_OFFSET_BITS=64             -D_DARWIN_C_SOURCE             -DTARGET_OS_IPHONE=1             -I"$BLINK"             -include "$BLINK/config.h"             "$WG/Vendor/blink/wg_blink_impl.c"             -o "$WG/Vendor/blink/lib/wg_blink_impl.o"
+          "$CC" \
+            -c \
+            -std=c11 \
+            -O2 \
+            -arch arm64 \
+            -isysroot "$SDK" \
+            -miphoneos-version-min=17.0 \
+            -D_FILE_OFFSET_BITS=64 \
+            -D_DARWIN_C_SOURCE \
+            -DTARGET_OS_IPHONE=1 \
+            -I"$BLINK" \
+            -include "$BLINK/config.h" \
+            "$WG/Vendor/blink/wg_blink_impl.c" \
+            -o "$WG/Vendor/blink/lib/wg_blink_impl.o"
 
           test -f "$WG/Vendor/blink/lib/wg_blink_impl.o"
 
-      - name: Patch POSTAL 2 engine FIX 11.2 CLEAN
+      - name: Apply POSTAL engine FIX 11.2 from successful 11.8.1
         shell: bash
         run: |
           set -euxo pipefail
-          python3 <<'PY'
-          import base64
-          import zlib
+          python3 .postal-base-patches/engine-fix11.2.py
 
-          payload = """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
-          d2vbVp+sQ+07/nh2SnmhF0vN39JTPDYiU0PcU+OTdmZpLztHWDyl2PR4XdOV0kx2ZTMS89IjkcVzd+C5gRa3lkpdPZGnbec891xe
-          s3K5Jmf0fqxMl53ZU5aAZafOvuPkWbX7VkFbZsXwOJ5cJM0+hb5w1pzoM3KwKj4xYnO3s007goJ5jU9o6omblCY81r6zXX6xRG3h
-          YfEg/1a/kIP6oaht9cslqaZTpKXYVzmHp/oo10I8uS+Bp/FyhwUP5c1QhfLyAulpaCZ4mJ7Ju3MdRohvsiEija/Deul5D23bmM1M
-          c/R6aK4fYaIzmZ+OL473T47/Y//i+PQTOzj9eHYyvBjqAbHAVzqic/EWjNQ/qg1/1UDPlCDKkp/LX7YjjimSGwSAXMdz/xBV2CJE
-          aJtfkKM5+8ocbLpnUrtA1vHQqkvN/R3CLQULqprZZSECHsWCE2ohXWP0iMNNMYPo3acx3sAd9E674i2Vcn2UB/hcfNGjR5JJ+7Fc
-          huLNlfJ1lSmLT39V254NYdZvb4wfE56fHY7NbamQT7zBVWYc09iooq08XcfzKjcj3GIJqP5XbKuXFdW1TXOyP5+eAi9uOVgJve3/
-          AufQ7EQ="""
-          code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-          compile(code, "<POSTAL-engine>", "exec")
-          exec(code)
-          PY
-
-      - name: Patch POSTAL cumulative FIX 11.8.1
+      - name: Apply cumulative FIX 11.8.1 exactly as successful build
         shell: bash
         run: |
           set -euxo pipefail
-          python3 <<'PY'
-          import base64
-          import zlib
-
-          payload = """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
-          /x+AvoBy
-          """
-          code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-          compile(code, "<POSTAL-FIX11.8.1-cumulative>", "exec")
-          exec(code)
-          PY
+          python3 .postal-base-patches/cumulative-fix11.8.1.py
 
           ENGINE="WineGlass/Sources/Core/wg_engine.c"
           FILES="WineGlass/Sources/Win32/wg_win32_files.c"
@@ -527,9 +485,204 @@ jobs:
           grep -n "POSTAL FIX11.6.2 System root" "$FILES"
           grep -n "POSTAL FIX11.6.2 map" "$FILES"
 
-          echo "POSTAL FIX 11.8.1 CUMULATIVE VERIFY OK"
+      - name: Patch FIX 11.9 GPackage before native DllMain
+        shell: bash
+        run: |
+          set -euxo pipefail
 
-      - name: Verify POSTAL engine patch
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path("WineGlass/Sources/Core/wg_engine.c")
+          s = p.read_text()
+
+          marker = "POSTAL FIX11.9 GPackage BEFORE"
+
+          if marker not in s:
+              helper_anchor = "static bool postal_init_preloaded_dlls(WGEngine *engine) {"
+
+              if helper_anchor not in s:
+                  raise SystemExit(
+                      "ERROR: FIX11.9 postal_init_preloaded_dlls anchor missing"
+                  )
+
+              helper = r'''static void postal_fix_gpackage(
+              WGEngine *engine,
+              WGLoadedModule *m
+          ) {
+              if (!engine || !engine->blink || !m || !m->in_use) {
+                  return;
+              }
+
+              const char *expected = NULL;
+
+              if (strcmp(m->name, "core.dll") == 0) {
+                  expected = "Core";
+              } else if (strcmp(m->name, "engine.dll") == 0) {
+                  expected = "Engine";
+              } else {
+                  return;
+              }
+
+              uint32_t addr =
+                  wg_module_export(
+                      m->base,
+                      "GPackage"
+                  );
+
+              if (!addr) {
+                  WG_LOGW(
+                      TAG,
+                      "POSTAL FIX11.9 GPackage export missing for %s base=0x%X",
+                      m->name,
+                      m->base
+                  );
+                  return;
+              }
+
+              uint16_t before[64] = {0};
+              char before_ascii[64] = {0};
+
+              if (wg_blink_read_mem(
+                      engine->blink,
+                      addr,
+                      before,
+                      sizeof(before)
+                  )) {
+                  for (int i = 0; i < 63 && before[i]; i++) {
+                      before_ascii[i] =
+                          before[i] < 128 ?
+                          (char)before[i] :
+                          '?';
+                  }
+              } else {
+                  strcpy(
+                      before_ascii,
+                      "<READ-FAILED>"
+                  );
+              }
+
+              WG_LOGI(
+                  TAG,
+                  "POSTAL FIX11.9 GPackage BEFORE %s base=0x%X addr=0x%X value='%s'",
+                  m->name,
+                  m->base,
+                  addr,
+                  before_ascii
+              );
+
+              size_t chars = strlen(expected);
+              uint16_t fixed[16] = {0};
+
+              if (chars >= 15) {
+                  WG_LOGE(
+                      TAG,
+                      "POSTAL FIX11.9 expected package name too long for %s",
+                      m->name
+                  );
+                  return;
+              }
+
+              for (size_t i = 0; i < chars; i++) {
+                  fixed[i] = (uint8_t)expected[i];
+              }
+
+              size_t bytes =
+                  (chars + 1) * sizeof(uint16_t);
+
+              if (!wg_blink_write_mem(
+                      engine->blink,
+                      addr,
+                      fixed,
+                      bytes
+                  )) {
+                  WG_LOGE(
+                      TAG,
+                      "POSTAL FIX11.9 GPackage write failed for %s addr=0x%X",
+                      m->name,
+                      addr
+                  );
+                  return;
+              }
+
+              uint16_t after[64] = {0};
+              char after_ascii[64] = {0};
+
+              if (wg_blink_read_mem(
+                      engine->blink,
+                      addr,
+                      after,
+                      sizeof(after)
+                  )) {
+                  for (int i = 0; i < 63 && after[i]; i++) {
+                      after_ascii[i] =
+                          after[i] < 128 ?
+                          (char)after[i] :
+                          '?';
+                  }
+              } else {
+                  strcpy(
+                      after_ascii,
+                      "<READ-FAILED>"
+                  );
+              }
+
+              WG_LOGI(
+                  TAG,
+                  "POSTAL FIX11.9 GPackage AFTER %s base=0x%X addr=0x%X value='%s'",
+                  m->name,
+                  m->base,
+                  addr,
+                  after_ascii
+              );
+          }
+
+          '''
+
+              s = s.replace(
+                  helper_anchor,
+                  helper + helper_anchor,
+                  1
+              )
+
+              call_anchor = '''            if (strcmp(s_modules[i].name, order[oi]) != 0) continue;
+
+              if (!postal_call_dll_entry(engine, &s_modules[i])) {'''
+
+              call_replacement = '''            if (strcmp(s_modules[i].name, order[oi]) != 0) continue;
+
+              postal_fix_gpackage(
+                  engine,
+                  &s_modules[i]
+              );
+
+              if (!postal_call_dll_entry(engine, &s_modules[i])) {'''
+
+              if call_anchor not in s:
+                  raise SystemExit(
+                      "ERROR: FIX11.9 DllMain call anchor missing"
+                  )
+
+              s = s.replace(
+                  call_anchor,
+                  call_replacement,
+                  1
+              )
+
+              p.write_text(s)
+
+          print("POSTAL FIX 11.9 GPackage patch installed")
+          PY
+
+          ENGINE="WineGlass/Sources/Core/wg_engine.c"
+
+          grep -n "POSTAL FIX11.9 GPackage BEFORE" "$ENGINE"
+          grep -n "POSTAL FIX11.9 GPackage AFTER" "$ENGINE"
+          grep -n "postal_fix_gpackage(" "$ENGINE"
+
+          echo "POSTAL FIX 11.9 GPACKAGE VERIFY OK"
+
+      - name: Verify all POSTAL FIX 11.9 markers
         shell: bash
         run: |
           set -euxo pipefail
@@ -554,6 +707,8 @@ jobs:
           grep -q "POSTAL FIX11.7 GetModuleFileNameW" "$ENGINE"
           grep -q "POSTAL FIX11.8.1 %s request" "$ENGINE"
           grep -q "POSTAL FIX11.8.1 %s STRICT FAIL" "$ENGINE"
+          grep -q "POSTAL FIX11.9 GPackage BEFORE" "$ENGINE"
+          grep -q "POSTAL FIX11.9 GPackage AFTER" "$ENGINE"
           grep -q "POSTAL DLL INITIALIZATION COMPLETE" "$ENGINE"
 
           grep -q "POSTAL FIX11.6.2 System root" "$FILES"
@@ -561,26 +716,13 @@ jobs:
           grep -q "POSTAL FIX11.6.2 redirect cwd" "$FILES"
           grep -q "POSTAL FIX11.6.2 map" "$FILES"
 
-          echo "ALL POSTAL FIX 11.8.1 MARKERS VERIFIED"
+          echo "ALL POSTAL FIX 11.9 MARKERS VERIFIED"
 
-      - name: Patch WineGlass project
+      - name: Apply WineGlass project patch from successful 11.8.1
         shell: bash
         run: |
           set -euxo pipefail
-          python3 <<'PY'
-          import base64
-          import zlib
-
-          payload = """eNqNU99PIyEQfuevILx0NzZ7p6cvm/jQ69Jmk+2PtKvG6IXgLj0xLBCgZ/3vBbzW07invMDMfPPNfDCAjVEd1NTdC34HeaeVcXDp
-          TQA0PI+nBF1xyaaCWvtNG/XAGpc9dQKlwHqEzgyjLXFs55IURJf1Li1owxIA/UJ3W9kKVrZLwzZ8l8NGddmjp/wdKNGwH6SVdVSc
-          cGUR+Jh7sGtUyy6ZsVzJHKLjs+w7Ggz7YqfoVkL4V8REmY66HEbY8Rn5MegpgparRXExrsnPi3lRYVIWeF6XkxKv3mnJqNZ7PZ/k
-          vErLJHX8D+tVWI9WU1zjghT4shxjMhnNyuo66BmeHKT2g1BUJXyLgfzmF9goA4MJufS1rBbcxWiS5pGLbyAaLwpM1uV0TkLXdYVn
-          fl/nKOQE8AsyrEZJx+WWHVJ9A7haLEMCqfFo9qWk13rr+rrCORxtnfKPw5sPsmPz53F7e1X79T+64SfIGZVbKtABlYJ9yfi6TLZJ
-          MPyV6uzRcMdeJt/PFcoeFJcxalN4BIMrBdpw6f75QfvhC1+uuWethzwDalAE5Q=="""
-          code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-          compile(code, "<POSTAL-project>", "exec")
-          exec(code)
-          PY
+          python3 .postal-base-patches/project.py
 
       - name: Patch Info plist
         shell: bash
@@ -592,53 +734,20 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleName POSTAL 2" "$PLIST"
           /usr/libexec/PlistBuddy -c "Delete :CFBundleDisplayName" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string POSTAL 2" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.11.8.1" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1181" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.11.9" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1190" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :UIFileSharingEnabled true" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :LSSupportsOpeningDocumentsInPlace true" "$PLIST"
 
           plutil -lint "$PLIST"
 
-      - name: Patch POSTAL 2 launcher and log
+      - name: Apply POSTAL launcher and log from successful 11.8.1
         shell: bash
         run: |
           set -euxo pipefail
-          python3 <<'PY'
-          import base64
-          import zlib
+          python3 .postal-base-patches/launcher.py
 
-          payload = """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"""
-          code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-          compile(code, "<POSTAL-launcher>", "exec")
-          exec(code)
-          PY
-
-      - name: Stamp POSTAL FIX 11.8.1 launcher
+      - name: Stamp POSTAL FIX 11.9 launcher
         shell: bash
         run: |
           set -euxo pipefail
@@ -647,8 +756,19 @@ jobs:
 
           p = Path("WineGlass/Sources/App/WGSceneDelegate.m")
           s = p.read_text()
-          s = s.replace("FIX 11.2 CLEAN", "FIX 11.8.1 CLEAN")
-          s = s.replace("FIX11.2 CLEAN", "FIX11.8.1 CLEAN")
+
+          for old in (
+              "FIX 11.2 CLEAN",
+              "FIX11.2 CLEAN",
+              "FIX 11.8.1 CLEAN",
+              "FIX11.8.1 CLEAN",
+          ):
+              if "11.8.1" in old:
+                  new = "FIX 11.9 CLEAN" if "FIX " in old else "FIX11.9 CLEAN"
+              else:
+                  new = "FIX 11.9 CLEAN" if "FIX " in old else "FIX11.9 CLEAN"
+              s = s.replace(old, new)
+
           p.write_text(s)
           PY
 
@@ -669,7 +789,7 @@ jobs:
             exit 1
           fi
 
-      - name: Build POSTAL 2 FIX 11.8.1 CLEAN
+      - name: Build POSTAL 2 FIX 11.9 CLEAN
         shell: bash
         run: |
           set -o pipefail
@@ -677,7 +797,22 @@ jobs:
           cd WineGlass
           rm -rf build
 
-          xcodebuild             -project WineGlass.xcodeproj             -scheme WineGlass             -configuration Release             -sdk iphoneos             -destination "generic/platform=iOS"             -derivedDataPath build             ARCHS=arm64             ONLY_ACTIVE_ARCH=NO             CODE_SIGNING_ALLOWED=NO             CODE_SIGNING_REQUIRED=NO             CODE_SIGN_IDENTITY=""             DEVELOPMENT_TEAM=""             PRODUCT_BUNDLE_IDENTIFIER=com.postal2ios.native             build             2>&1 | tee xcodebuild.log
+          xcodebuild \
+            -project WineGlass.xcodeproj \
+            -scheme WineGlass \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath build \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            PRODUCT_BUNDLE_IDENTIFIER=com.postal2ios.native \
+            build \
+            2>&1 | tee xcodebuild.log
 
       - name: Verify POSTAL 2 app
         shell: bash
@@ -717,14 +852,14 @@ jobs:
           cp -R "$APP" "$OUT/Payload/POSTAL 2.app"
 
           cd "$OUT"
-          zip -qry "POSTAL-2-iOS-v11.8.1-CLEAN.ipa" Payload
-          ls -lh "POSTAL-2-iOS-v11.8.1-CLEAN.ipa"
+          zip -qry "POSTAL-2-iOS-v11.9-CLEAN.ipa" Payload
+          ls -lh "POSTAL-2-iOS-v11.9-CLEAN.ipa"
 
-      - name: Upload POSTAL 2 FIX 11.8.1 CLEAN IPA
+      - name: Upload POSTAL 2 FIX 11.9 CLEAN IPA
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-iOS-v11.8.1-CLEAN
-          path: out/POSTAL-2-iOS-v11.8.1-CLEAN.ipa
+          name: POSTAL-2-iOS-v11.9-CLEAN
+          path: out/POSTAL-2-iOS-v11.9-CLEAN.ipa
           if-no-files-found: error
           retention-days: 14
 
@@ -732,21 +867,24 @@ jobs:
         if: always()
         shell: bash
         run: |
-          mkdir -p debug-fix11-8-1-clean
-          cp WineGlass/xcodebuild.log debug-fix11-8-1-clean/ 2>/dev/null || true
-          cp blink-src/config.h debug-fix11-8-1-clean/blink-config.h 2>/dev/null || true
-          cp WineGlass/Vendor/blink/wg_blink_impl.c debug-fix11-8-1-clean/ 2>/dev/null || true
-          cp WineGlass/Sources/Core/wg_engine.c debug-fix11-8-1-clean/ 2>/dev/null || true
-          cp WineGlass/Sources/App/WGSceneDelegate.m debug-fix11-8-1-clean/ 2>/dev/null || true
-          cp WineGlass/project.yml debug-fix11-8-1-clean/ 2>/dev/null || true
-          cp vc120-runtime/msvcr120.dll debug-fix11-8-1-clean/ 2>/dev/null || true
-          cp vc120-runtime/msvcp120.dll debug-fix11-8-1-clean/ 2>/dev/null || true
+          mkdir -p debug-fix11-9-clean
 
-      - name: Upload FIX 11.8.1 CLEAN debug
+          cp WineGlass/xcodebuild.log debug-fix11-9-clean/ 2>/dev/null || true
+          cp blink-src/config.h debug-fix11-9-clean/blink-config.h 2>/dev/null || true
+          cp WineGlass/Vendor/blink/wg_blink_impl.c debug-fix11-9-clean/ 2>/dev/null || true
+          cp WineGlass/Sources/Core/wg_engine.c debug-fix11-9-clean/ 2>/dev/null || true
+          cp WineGlass/Sources/Win32/wg_win32_files.c debug-fix11-9-clean/ 2>/dev/null || true
+          cp WineGlass/Sources/App/WGSceneDelegate.m debug-fix11-9-clean/ 2>/dev/null || true
+          cp WineGlass/project.yml debug-fix11-9-clean/ 2>/dev/null || true
+          cp vc120-runtime/msvcr120.dll debug-fix11-9-clean/ 2>/dev/null || true
+          cp vc120-runtime/msvcp120.dll debug-fix11-9-clean/ 2>/dev/null || true
+          cp .postal-base-patches/cumulative-fix11.8.1.py debug-fix11-9-clean/ 2>/dev/null || true
+
+      - name: Upload FIX 11.9 CLEAN debug
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-FIX11.8.1-CLEAN-DEBUG
-          path: debug-fix11-8-1-clean
+          name: POSTAL-2-FIX11.9-CLEAN-DEBUG
+          path: debug-fix11-9-clean
           if-no-files-found: ignore
           retention-days: 7
