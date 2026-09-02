@@ -1,4 +1,4 @@
-name: POSTAL 2 WineGlass iOS FIX 11.9 CLEAN
+name: POSTAL 2 WineGlass iOS FIX 11.9.1 CLEAN
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   lint:
-    name: Validate FIX 11.9 CLEAN
+    name: Validate FIX 11.9.1 CLEAN
     runs-on: ubuntu-24.04
     timeout-minutes: 5
 
@@ -46,7 +46,7 @@ jobs:
           import textwrap
           import zlib
 
-          # Validate every visible Python heredoc in the NEW workflow.
+          # Check all visible Python blocks in THIS workflow.
           current = Path(".github/workflows/build-ios.yml").read_text()
           lines = current.splitlines()
           blocks = []
@@ -54,6 +54,7 @@ jobs:
 
           while i < len(lines):
               line = lines[i]
+
               if line.strip() == "python3 <<'PY'":
                   base_indent = len(line) - len(line.lstrip())
                   body = []
@@ -61,8 +62,10 @@ jobs:
 
                   while i < len(lines) and lines[i].strip() != "PY":
                       cur = lines[i]
+
                       if cur.startswith(" " * base_indent):
                           cur = cur[base_indent:]
+
                       body.append(cur)
                       i += 1
 
@@ -76,7 +79,7 @@ jobs:
           for index, code in enumerate(blocks, start=1):
               ast.parse(code, filename=f"visible-python-{index}")
 
-          # Decode and syntax-check the exact payloads from the SUCCESSFUL 11.8.1 commit.
+          # Check the exact compressed patches from the successful 11.8.1 workflow.
           base = Path("/tmp/POSTAL-FIX11.8.1-success.yml").read_text()
 
           pattern = re.compile(
@@ -96,7 +99,7 @@ jobs:
               "<POSTAL-launcher>",
           }
 
-          found = {}
+          found = set()
 
           for payload, label in pattern.findall(base):
               if label not in wanted:
@@ -107,9 +110,10 @@ jobs:
               ).decode("utf-8")
 
               ast.parse(code, filename=label)
-              found[label] = code
+              found.add(label)
 
-          missing = sorted(wanted - set(found))
+          missing = sorted(wanted - found)
+
           if missing:
               raise SystemExit(
                   "ERROR: missing successful 11.8.1 payloads: "
@@ -117,7 +121,7 @@ jobs:
               )
 
           print(
-              "FIX 11.9 validation OK:",
+              "FIX 11.9.1 validation OK:",
               len(blocks),
               "visible Python blocks and",
               len(found),
@@ -213,7 +217,7 @@ jobs:
 
   build:
     needs: vc120
-    name: Build POSTAL 2 FIX 11.9 CLEAN
+    name: Build POSTAL 2 FIX 11.9.1 CLEAN
     runs-on: macos-14
     timeout-minutes: 90
 
@@ -233,10 +237,13 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+
           test -s vc120-runtime/msvcr120.dll
           test -s vc120-runtime/msvcp120.dll
+
           file vc120-runtime/msvcr120.dll
           file vc120-runtime/msvcp120.dll
+
           file vc120-runtime/msvcr120.dll | grep -q "PE32 executable"
           file vc120-runtime/msvcp120.dll | grep -q "PE32 executable"
           file vc120-runtime/msvcr120.dll | grep -q "Intel 80386"
@@ -297,6 +304,7 @@ jobs:
 
           for payload, label in pattern.findall(src):
               filename = names.get(label)
+
               if not filename:
                   continue
 
@@ -309,13 +317,18 @@ jobs:
               written.add(label)
 
           missing = sorted(set(names) - written)
+
           if missing:
               raise SystemExit(
                   "ERROR: missing successful FIX11.8.1 payloads: "
                   + ", ".join(missing)
               )
 
-          print("Recovered", len(written), "successful FIX11.8.1 patches")
+          print(
+              "Recovered",
+              len(written),
+              "successful FIX11.8.1 patches"
+          )
           PY
 
           ls -lh "$PATCH_DIR"
@@ -342,8 +355,10 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+
           brew install xcodegen make flock
           export PATH="$(brew --prefix)/bin:$PATH"
+
           command -v flock
           xcodegen --version
           xcrun --sdk iphoneos --show-sdk-version
@@ -352,10 +367,19 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+
           rm -rf WineGlass blink-src
-          git clone --depth 1 https://github.com/Contonion/WineGlass.git WineGlass
-          git clone --depth 1 https://github.com/jart/blink.git blink-src
+
+          git clone --depth 1 \
+            https://github.com/Contonion/WineGlass.git \
+            WineGlass
+
+          git clone --depth 1 \
+            https://github.com/jart/blink.git \
+            blink-src
+
           mkdir -p WineGlass/Vendor/blink/lib
+
           git -C WineGlass rev-parse HEAD
           git -C blink-src rev-parse HEAD
 
@@ -387,8 +411,12 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+
           python3 .postal-base-patches/blink-config.py
-          grep -q '^#define HAVE_MAP_ANONYMOUS 1$' blink-src/config.h
+
+          grep -q \
+            '^#define HAVE_MAP_ANONYMOUS 1$' \
+            blink-src/config.h
 
       - name: Patch Blink sched_yield from successful 11.8.1
         shell: bash
@@ -471,6 +499,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+
           python3 .postal-base-patches/cumulative-fix11.8.1.py
 
           ENGINE="WineGlass/Sources/Core/wg_engine.c"
@@ -485,7 +514,9 @@ jobs:
           grep -n "POSTAL FIX11.6.2 System root" "$FILES"
           grep -n "POSTAL FIX11.6.2 map" "$FILES"
 
-      - name: Patch FIX 11.9 GPackage before native DllMain
+          echo "SUCCESSFUL FIX 11.8.1 BASE RESTORED"
+
+      - name: Patch FIX 11.9.1 GPackage inside DllMain runner
         shell: bash
         run: |
           set -euxo pipefail
@@ -496,17 +527,22 @@ jobs:
           p = Path("WineGlass/Sources/Core/wg_engine.c")
           s = p.read_text()
 
-          marker = "POSTAL FIX11.9 GPackage BEFORE"
+          marker = "POSTAL FIX11.9.1 GPackage BEFORE"
 
           if marker not in s:
-              helper_anchor = "static bool postal_init_preloaded_dlls(WGEngine *engine) {"
+              function_anchor = (
+                  "static bool postal_call_dll_entry("
+                  "WGEngine *engine, WGLoadedModule *m) {"
+              )
 
-              if helper_anchor not in s:
+              function_pos = s.find(function_anchor)
+
+              if function_pos < 0:
                   raise SystemExit(
-                      "ERROR: FIX11.9 postal_init_preloaded_dlls anchor missing"
+                      "ERROR: FIX11.9.1 postal_call_dll_entry function missing"
                   )
 
-              helper = r'''static void postal_fix_gpackage(
+              helper = r'''static void postal_fix_gpackage_1191(
               WGEngine *engine,
               WGLoadedModule *m
           ) {
@@ -533,156 +569,294 @@ jobs:
               if (!addr) {
                   WG_LOGW(
                       TAG,
-                      "POSTAL FIX11.9 GPackage export missing for %s base=0x%X",
+                      "POSTAL FIX11.9.1 GPackage export missing for %s base=0x%X",
                       m->name,
                       m->base
                   );
                   return;
               }
 
-              uint16_t before[64] = {0};
-              char before_ascii[64] = {0};
+              uint8_t raw[64] = {0};
 
-              if (wg_blink_read_mem(
+              if (!wg_blink_read_mem(
                       engine->blink,
                       addr,
-                      before,
-                      sizeof(before)
+                      raw,
+                      sizeof(raw)
                   )) {
-                  for (int i = 0; i < 63 && before[i]; i++) {
-                      before_ascii[i] =
-                          before[i] < 128 ?
-                          (char)before[i] :
-                          '?';
-                  }
-              } else {
-                  strcpy(
-                      before_ascii,
-                      "<READ-FAILED>"
-                  );
-              }
-
-              WG_LOGI(
-                  TAG,
-                  "POSTAL FIX11.9 GPackage BEFORE %s base=0x%X addr=0x%X value='%s'",
-                  m->name,
-                  m->base,
-                  addr,
-                  before_ascii
-              );
-
-              size_t chars = strlen(expected);
-              uint16_t fixed[16] = {0};
-
-              if (chars >= 15) {
-                  WG_LOGE(
+                  WG_LOGW(
                       TAG,
-                      "POSTAL FIX11.9 expected package name too long for %s",
-                      m->name
-                  );
-                  return;
-              }
-
-              for (size_t i = 0; i < chars; i++) {
-                  fixed[i] = (uint8_t)expected[i];
-              }
-
-              size_t bytes =
-                  (chars + 1) * sizeof(uint16_t);
-
-              if (!wg_blink_write_mem(
-                      engine->blink,
-                      addr,
-                      fixed,
-                      bytes
-                  )) {
-                  WG_LOGE(
-                      TAG,
-                      "POSTAL FIX11.9 GPackage write failed for %s addr=0x%X",
+                      "POSTAL FIX11.9.1 GPackage read failed for %s addr=0x%X",
                       m->name,
                       addr
                   );
                   return;
               }
 
-              uint16_t after[64] = {0};
-              char after_ascii[64] = {0};
+              char ansi[32] = {0};
+              char wide[32] = {0};
 
-              if (wg_blink_read_mem(
-                      engine->blink,
-                      addr,
-                      after,
-                      sizeof(after)
-                  )) {
-                  for (int i = 0; i < 63 && after[i]; i++) {
-                      after_ascii[i] =
-                          after[i] < 128 ?
-                          (char)after[i] :
-                          '?';
+              for (int i = 0; i < 31; i++) {
+                  uint8_t c = raw[i];
+
+                  if (!c) {
+                      break;
                   }
-              } else {
-                  strcpy(
-                      after_ascii,
-                      "<READ-FAILED>"
-                  );
+
+                  ansi[i] =
+                      (c >= 32 && c < 127) ?
+                      (char)c :
+                      '?';
+              }
+
+              for (int i = 0; i < 31; i++) {
+                  uint8_t lo = raw[i * 2];
+                  uint8_t hi = raw[i * 2 + 1];
+
+                  if (!lo && !hi) {
+                      break;
+                  }
+
+                  wide[i] =
+                      (!hi && lo >= 32 && lo < 127) ?
+                      (char)lo :
+                      '?';
               }
 
               WG_LOGI(
                   TAG,
-                  "POSTAL FIX11.9 GPackage AFTER %s base=0x%X addr=0x%X value='%s'",
+                  "POSTAL FIX11.9.1 GPackage BEFORE %s base=0x%X addr=0x%X ansi='%s' wide='%s' raw=%02X %02X %02X %02X %02X %02X %02X %02X",
                   m->name,
                   m->base,
                   addr,
-                  after_ascii
+                  ansi,
+                  wide,
+                  raw[0],
+                  raw[1],
+                  raw[2],
+                  raw[3],
+                  raw[4],
+                  raw[5],
+                  raw[6],
+                  raw[7]
+              );
+
+              if (
+                  strcmp(ansi, expected) == 0 ||
+                  strcmp(wide, expected) == 0
+              ) {
+                  WG_LOGI(
+                      TAG,
+                      "POSTAL FIX11.9.1 GPackage already correct for %s",
+                      m->name
+                  );
+                  return;
+              }
+
+              bool looks_wide =
+                  raw[1] == 0 &&
+                  raw[3] == 0 &&
+                  raw[5] == 0 &&
+                  raw[7] == 0;
+
+              bool all_zero = true;
+
+              for (int i = 0; i < 16; i++) {
+                  if (raw[i] != 0) {
+                      all_zero = false;
+                      break;
+                  }
+              }
+
+              bool write_wide =
+                  looks_wide ||
+                  all_zero;
+
+              if (write_wide) {
+                  uint16_t fixed[16] = {0};
+                  size_t chars = strlen(expected);
+
+                  if (chars >= 15) {
+                      return;
+                  }
+
+                  for (size_t i = 0; i < chars; i++) {
+                      fixed[i] =
+                          (uint8_t)expected[i];
+                  }
+
+                  if (!wg_blink_write_mem(
+                          engine->blink,
+                          addr,
+                          fixed,
+                          (chars + 1) * sizeof(uint16_t)
+                      )) {
+                      WG_LOGE(
+                          TAG,
+                          "POSTAL FIX11.9.1 GPackage UTF16 write failed for %s",
+                          m->name
+                      );
+                      return;
+                  }
+
+              } else {
+                  char fixed[16] = {0};
+                  size_t chars = strlen(expected);
+
+                  if (chars >= sizeof(fixed)) {
+                      return;
+                  }
+
+                  memcpy(
+                      fixed,
+                      expected,
+                      chars
+                  );
+
+                  if (!wg_blink_write_mem(
+                          engine->blink,
+                          addr,
+                          fixed,
+                          chars + 1
+                      )) {
+                      WG_LOGE(
+                          TAG,
+                          "POSTAL FIX11.9.1 GPackage ANSI write failed for %s",
+                          m->name
+                      );
+                      return;
+                  }
+              }
+
+              memset(raw, 0, sizeof(raw));
+
+              if (!wg_blink_read_mem(
+                      engine->blink,
+                      addr,
+                      raw,
+                      sizeof(raw)
+                  )) {
+                  WG_LOGW(
+                      TAG,
+                      "POSTAL FIX11.9.1 GPackage reread failed for %s",
+                      m->name
+                  );
+                  return;
+              }
+
+              memset(ansi, 0, sizeof(ansi));
+              memset(wide, 0, sizeof(wide));
+
+              for (int i = 0; i < 31; i++) {
+                  uint8_t c = raw[i];
+
+                  if (!c) {
+                      break;
+                  }
+
+                  ansi[i] =
+                      (c >= 32 && c < 127) ?
+                      (char)c :
+                      '?';
+              }
+
+              for (int i = 0; i < 31; i++) {
+                  uint8_t lo = raw[i * 2];
+                  uint8_t hi = raw[i * 2 + 1];
+
+                  if (!lo && !hi) {
+                      break;
+                  }
+
+                  wide[i] =
+                      (!hi && lo >= 32 && lo < 127) ?
+                      (char)lo :
+                      '?';
+              }
+
+              WG_LOGI(
+                  TAG,
+                  "POSTAL FIX11.9.1 GPackage AFTER %s base=0x%X addr=0x%X ansi='%s' wide='%s'",
+                  m->name,
+                  m->base,
+                  addr,
+                  ansi,
+                  wide
               );
           }
 
           '''
 
-              s = s.replace(
-                  helper_anchor,
-                  helper + helper_anchor,
-                  1
+              # Put the helper immediately before postal_call_dll_entry.
+              s = (
+                  s[:function_pos]
+                  + helper
+                  + s[function_pos:]
               )
 
-              call_anchor = '''            if (strcmp(s_modules[i].name, order[oi]) != 0) continue;
+              # Insert the call inside postal_call_dll_entry, before registers are saved.
+              function_pos = s.find(function_anchor)
 
-              if (!postal_call_dll_entry(engine, &s_modules[i])) {'''
+              next_function = s.find(
+                  "\nstatic ",
+                  function_pos + len(function_anchor)
+              )
 
-              call_replacement = '''            if (strcmp(s_modules[i].name, order[oi]) != 0) continue;
+              if next_function < 0:
+                  next_function = len(s)
 
-              postal_fix_gpackage(
-                  engine,
-                  &s_modules[i]
-              );
+              function_text = s[
+                  function_pos:next_function
+              ]
 
-              if (!postal_call_dll_entry(engine, &s_modules[i])) {'''
+              save_anchor = "    uint64_t saved_regs[16];"
+              save_rel = function_text.find(save_anchor)
 
-              if call_anchor not in s:
+              if save_rel < 0:
                   raise SystemExit(
-                      "ERROR: FIX11.9 DllMain call anchor missing"
+                      "ERROR: FIX11.9.1 saved_regs anchor missing inside postal_call_dll_entry"
                   )
 
-              s = s.replace(
-                  call_anchor,
-                  call_replacement,
-                  1
+              insert_at = function_pos + save_rel
+
+              call = '''    postal_fix_gpackage_1191(
+                  engine,
+                  m
+              );
+
+          '''
+
+              s = (
+                  s[:insert_at]
+                  + call
+                  + s[insert_at:]
               )
 
               p.write_text(s)
 
-          print("POSTAL FIX 11.9 GPackage patch installed")
+          print(
+              "POSTAL FIX 11.9.1 GPackage patch installed"
+          )
           PY
 
           ENGINE="WineGlass/Sources/Core/wg_engine.c"
 
-          grep -n "POSTAL FIX11.9 GPackage BEFORE" "$ENGINE"
-          grep -n "POSTAL FIX11.9 GPackage AFTER" "$ENGINE"
-          grep -n "postal_fix_gpackage(" "$ENGINE"
+          grep -n \
+            "POSTAL FIX11.9.1 GPackage BEFORE" \
+            "$ENGINE"
 
-          echo "POSTAL FIX 11.9 GPACKAGE VERIFY OK"
+          grep -n \
+            "POSTAL FIX11.9.1 GPackage AFTER" \
+            "$ENGINE"
 
-      - name: Verify all POSTAL FIX 11.9 markers
+          grep -n \
+            "postal_fix_gpackage_1191(" \
+            "$ENGINE"
+
+          echo \
+            "POSTAL FIX 11.9.1 GPACKAGE VERIFY OK"
+
+      - name: Verify all POSTAL FIX 11.9.1 markers
         shell: bash
         run: |
           set -euxo pipefail
@@ -707,8 +881,8 @@ jobs:
           grep -q "POSTAL FIX11.7 GetModuleFileNameW" "$ENGINE"
           grep -q "POSTAL FIX11.8.1 %s request" "$ENGINE"
           grep -q "POSTAL FIX11.8.1 %s STRICT FAIL" "$ENGINE"
-          grep -q "POSTAL FIX11.9 GPackage BEFORE" "$ENGINE"
-          grep -q "POSTAL FIX11.9 GPackage AFTER" "$ENGINE"
+          grep -q "POSTAL FIX11.9.1 GPackage BEFORE" "$ENGINE"
+          grep -q "POSTAL FIX11.9.1 GPackage AFTER" "$ENGINE"
           grep -q "POSTAL DLL INITIALIZATION COMPLETE" "$ENGINE"
 
           grep -q "POSTAL FIX11.6.2 System root" "$FILES"
@@ -716,7 +890,7 @@ jobs:
           grep -q "POSTAL FIX11.6.2 redirect cwd" "$FILES"
           grep -q "POSTAL FIX11.6.2 map" "$FILES"
 
-          echo "ALL POSTAL FIX 11.9 MARKERS VERIFIED"
+          echo "ALL POSTAL FIX 11.9.1 MARKERS VERIFIED"
 
       - name: Apply WineGlass project patch from successful 11.8.1
         shell: bash
@@ -734,8 +908,8 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleName POSTAL 2" "$PLIST"
           /usr/libexec/PlistBuddy -c "Delete :CFBundleDisplayName" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string POSTAL 2" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.11.9" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1190" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.11.9.1" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1191" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :UIFileSharingEnabled true" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :LSSupportsOpeningDocumentsInPlace true" "$PLIST"
 
@@ -747,26 +921,28 @@ jobs:
           set -euxo pipefail
           python3 .postal-base-patches/launcher.py
 
-      - name: Stamp POSTAL FIX 11.9 launcher
+      - name: Stamp POSTAL FIX 11.9.1 launcher
         shell: bash
         run: |
           set -euxo pipefail
+
           python3 <<'PY'
           from pathlib import Path
 
-          p = Path("WineGlass/Sources/App/WGSceneDelegate.m")
+          p = Path(
+              "WineGlass/Sources/App/WGSceneDelegate.m"
+          )
+
           s = p.read_text()
 
-          for old in (
-              "FIX 11.2 CLEAN",
-              "FIX11.2 CLEAN",
-              "FIX 11.8.1 CLEAN",
-              "FIX11.8.1 CLEAN",
-          ):
-              if "11.8.1" in old:
-                  new = "FIX 11.9 CLEAN" if "FIX " in old else "FIX11.9 CLEAN"
-              else:
-                  new = "FIX 11.9 CLEAN" if "FIX " in old else "FIX11.9 CLEAN"
+          replacements = {
+              "FIX 11.2 CLEAN": "FIX 11.9.1 CLEAN",
+              "FIX11.2 CLEAN": "FIX11.9.1 CLEAN",
+              "FIX 11.8.1 CLEAN": "FIX 11.9.1 CLEAN",
+              "FIX11.8.1 CLEAN": "FIX11.9.1 CLEAN",
+          }
+
+          for old, new in replacements.items():
               s = s.replace(old, new)
 
           p.write_text(s)
@@ -789,7 +965,7 @@ jobs:
             exit 1
           fi
 
-      - name: Build POSTAL 2 FIX 11.9 CLEAN
+      - name: Build POSTAL 2 FIX 11.9.1 CLEAN
         shell: bash
         run: |
           set -o pipefail
@@ -826,7 +1002,12 @@ jobs:
 
           lipo -info "$APP/WineGlass"
 
-          ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
+          ID=$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :CFBundleIdentifier" \
+              "$APP/Info.plist"
+          )
+
           echo "$ID"
           test "$ID" = "com.postal2ios.native"
 
@@ -843,23 +1024,36 @@ jobs:
           mkdir -p "$OUT/Payload"
           mkdir -p "$APP/VC120"
 
-          cp "$ROOT/vc120-runtime/msvcr120.dll" "$APP/VC120/msvcr120.dll"
-          cp "$ROOT/vc120-runtime/msvcp120.dll" "$APP/VC120/msvcp120.dll"
+          cp \
+            "$ROOT/vc120-runtime/msvcr120.dll" \
+            "$APP/VC120/msvcr120.dll"
+
+          cp \
+            "$ROOT/vc120-runtime/msvcp120.dll" \
+            "$APP/VC120/msvcp120.dll"
 
           test -s "$APP/VC120/msvcr120.dll"
           test -s "$APP/VC120/msvcp120.dll"
 
-          cp -R "$APP" "$OUT/Payload/POSTAL 2.app"
+          cp -R \
+            "$APP" \
+            "$OUT/Payload/POSTAL 2.app"
 
           cd "$OUT"
-          zip -qry "POSTAL-2-iOS-v11.9-CLEAN.ipa" Payload
-          ls -lh "POSTAL-2-iOS-v11.9-CLEAN.ipa"
 
-      - name: Upload POSTAL 2 FIX 11.9 CLEAN IPA
+          zip \
+            -qry \
+            "POSTAL-2-iOS-v11.9.1-CLEAN.ipa" \
+            Payload
+
+          ls -lh \
+            "POSTAL-2-iOS-v11.9.1-CLEAN.ipa"
+
+      - name: Upload POSTAL 2 FIX 11.9.1 CLEAN IPA
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-iOS-v11.9-CLEAN
-          path: out/POSTAL-2-iOS-v11.9-CLEAN.ipa
+          name: POSTAL-2-iOS-v11.9.1-CLEAN
+          path: out/POSTAL-2-iOS-v11.9.1-CLEAN.ipa
           if-no-files-found: error
           retention-days: 14
 
@@ -867,24 +1061,24 @@ jobs:
         if: always()
         shell: bash
         run: |
-          mkdir -p debug-fix11-9-clean
+          mkdir -p debug-fix11-9-1-clean
 
-          cp WineGlass/xcodebuild.log debug-fix11-9-clean/ 2>/dev/null || true
-          cp blink-src/config.h debug-fix11-9-clean/blink-config.h 2>/dev/null || true
-          cp WineGlass/Vendor/blink/wg_blink_impl.c debug-fix11-9-clean/ 2>/dev/null || true
-          cp WineGlass/Sources/Core/wg_engine.c debug-fix11-9-clean/ 2>/dev/null || true
-          cp WineGlass/Sources/Win32/wg_win32_files.c debug-fix11-9-clean/ 2>/dev/null || true
-          cp WineGlass/Sources/App/WGSceneDelegate.m debug-fix11-9-clean/ 2>/dev/null || true
-          cp WineGlass/project.yml debug-fix11-9-clean/ 2>/dev/null || true
-          cp vc120-runtime/msvcr120.dll debug-fix11-9-clean/ 2>/dev/null || true
-          cp vc120-runtime/msvcp120.dll debug-fix11-9-clean/ 2>/dev/null || true
-          cp .postal-base-patches/cumulative-fix11.8.1.py debug-fix11-9-clean/ 2>/dev/null || true
+          cp WineGlass/xcodebuild.log debug-fix11-9-1-clean/ 2>/dev/null || true
+          cp blink-src/config.h debug-fix11-9-1-clean/blink-config.h 2>/dev/null || true
+          cp WineGlass/Vendor/blink/wg_blink_impl.c debug-fix11-9-1-clean/ 2>/dev/null || true
+          cp WineGlass/Sources/Core/wg_engine.c debug-fix11-9-1-clean/ 2>/dev/null || true
+          cp WineGlass/Sources/Win32/wg_win32_files.c debug-fix11-9-1-clean/ 2>/dev/null || true
+          cp WineGlass/Sources/App/WGSceneDelegate.m debug-fix11-9-1-clean/ 2>/dev/null || true
+          cp WineGlass/project.yml debug-fix11-9-1-clean/ 2>/dev/null || true
+          cp vc120-runtime/msvcr120.dll debug-fix11-9-1-clean/ 2>/dev/null || true
+          cp vc120-runtime/msvcp120.dll debug-fix11-9-1-clean/ 2>/dev/null || true
+          cp .postal-base-patches/cumulative-fix11.8.1.py debug-fix11-9-1-clean/ 2>/dev/null || true
 
-      - name: Upload FIX 11.9 CLEAN debug
+      - name: Upload FIX 11.9.1 CLEAN debug
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-FIX11.9-CLEAN-DEBUG
-          path: debug-fix11-9-clean
+          name: POSTAL-2-FIX11.9.1-CLEAN-DEBUG
+          path: debug-fix11-9-1-clean
           if-no-files-found: ignore
           retention-days: 7
