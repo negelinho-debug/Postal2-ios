@@ -1,4 +1,4 @@
-name: POSTAL 2 WineGlass iOS FIX 11.8 CLEAN
+name: POSTAL 2 WineGlass iOS FIX 11.8.1 CLEAN
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   lint:
-    name: Validate FIX 11.8 CLEAN
+    name: Validate FIX 11.8.1 CLEAN
     runs-on: ubuntu-24.04
     timeout-minutes: 5
 
@@ -20,8 +20,8 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          python3 <<'PY'
 
+          python3 <<'PY'
           from pathlib import Path
           import ast
           import base64
@@ -38,6 +38,7 @@ jobs:
 
           while i < len(lines):
               line = lines[i]
+
               if line.strip() == "python3 <<'PY'":
                   base_indent = len(line) - len(line.lstrip())
                   body = []
@@ -45,39 +46,67 @@ jobs:
 
                   while i < len(lines) and lines[i].strip() != "PY":
                       current = lines[i]
+
                       if current.startswith(" " * base_indent):
                           current = current[base_indent:]
+
                       body.append(current)
                       i += 1
 
                   if i >= len(lines):
-                      raise SystemExit("ERROR: unterminated Python heredoc")
+                      raise SystemExit(
+                          "ERROR: unterminated Python heredoc"
+                      )
 
-                  blocks.append(textwrap.dedent("\n".join(body)))
+                  blocks.append(
+                      textwrap.dedent(
+                          "\n".join(body)
+                      )
+                  )
 
               i += 1
 
-          for index, code in enumerate(blocks, start=1):
-              ast.parse(code, filename=f"visible-python-{index}")
+          for index, code in enumerate(
+              blocks,
+              start=1
+          ):
+              ast.parse(
+                  code,
+                  filename=f"visible-python-{index}"
+              )
 
           payload_re = re.compile(
               r'payload\s*=\s*"""([A-Za-z0-9+/=\s]+)"""',
               re.S
           )
+
           payloads = payload_re.findall(text)
 
           if not payloads:
-              raise SystemExit("ERROR: no compressed Python patch payloads found")
+              raise SystemExit(
+                  "ERROR: no compressed Python patch payloads found"
+              )
 
-          for index, payload in enumerate(payloads, start=1):
-              code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-              ast.parse(code, filename=f"decoded-patch-{index}")
+          for index, payload in enumerate(
+              payloads,
+              start=1
+          ):
+              code = zlib.decompress(
+                  base64.b64decode(payload)
+              ).decode("utf-8")
+
+              ast.parse(
+                  code,
+                  filename=f"decoded-patch-{index}"
+              )
 
           print(
               f"Workflow Python validation OK: "
-              f"{len(blocks)} visible blocks, {len(payloads)} decoded payloads"
+              f"{len(blocks)} visible blocks, "
+              f"{len(payloads)} decoded payloads"
           )
           PY
+
 
   vc120:
     needs: lint
@@ -95,8 +124,17 @@ jobs:
           $exe = Join-Path $root "vcredist_x86.exe"
           $out = Join-Path $root "vc120-runtime"
 
-          Remove-Item $out -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Remove-Item `
+            $out `
+            -Recurse `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          New-Item `
+            -ItemType Directory `
+            -Force `
+            -Path $out |
+            Out-Null
 
           $urls = @(
             "https://download.visualstudio.microsoft.com/download/pr/10912113/5da66ddebb0ad32ebd4b922fd82e8e25/vcredist_x86.exe",
@@ -108,9 +146,15 @@ jobs:
           foreach ($url in $urls) {
             try {
               Write-Host "Downloading $url"
-              Invoke-WebRequest -Uri $url -OutFile $exe
 
-              if ((Test-Path $exe) -and ((Get-Item $exe).Length -gt 100000)) {
+              Invoke-WebRequest `
+                -Uri $url `
+                -OutFile $exe
+
+              if (
+                (Test-Path $exe) -and
+                ((Get-Item $exe).Length -gt 100000)
+              ) {
                 $downloaded = $true
                 break
               }
@@ -132,30 +176,54 @@ jobs:
 
           Write-Host "vcredist exit code: $($proc.ExitCode)"
 
-          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 1638) {
+          if (
+            $proc.ExitCode -ne 0 -and
+            $proc.ExitCode -ne 1638
+          ) {
             throw "vcredist_x86 failed with exit code $($proc.ExitCode)"
           }
 
           $msvcr = @(
             "$env:WINDIR\SysWOW64\msvcr120.dll",
             "$env:WINDIR\System32\msvcr120.dll"
-          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          ) |
+          Where-Object {
+            Test-Path $_
+          } |
+          Select-Object -First 1
 
           $msvcp = @(
             "$env:WINDIR\SysWOW64\msvcp120.dll",
             "$env:WINDIR\System32\msvcp120.dll"
-          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          ) |
+          Where-Object {
+            Test-Path $_
+          } |
+          Select-Object -First 1
 
-          if (-not $msvcr) { throw "msvcr120.dll was not found" }
-          if (-not $msvcp) { throw "msvcp120.dll was not found" }
+          if (-not $msvcr) {
+            throw "msvcr120.dll was not found"
+          }
 
-          Copy-Item $msvcr (Join-Path $out "msvcr120.dll") -Force
-          Copy-Item $msvcp (Join-Path $out "msvcp120.dll") -Force
+          if (-not $msvcp) {
+            throw "msvcp120.dll was not found"
+          }
+
+          Copy-Item `
+            $msvcr `
+            (Join-Path $out "msvcr120.dll") `
+            -Force
+
+          Copy-Item `
+            $msvcp `
+            (Join-Path $out "msvcp120.dll") `
+            -Force
 
           Get-Item `
             (Join-Path $out "msvcr120.dll"), `
             (Join-Path $out "msvcp120.dll") |
             Format-List FullName,Length
+
 
       - name: Upload VC120 runtime
         uses: actions/upload-artifact@v4
@@ -165,9 +233,10 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+
   build:
     needs: vc120
-    name: Build POSTAL 2 FIX 11.8 CLEAN
+    name: Build POSTAL 2 FIX 11.8.1 CLEAN
     runs-on: macos-14
     timeout-minutes: 90
 
@@ -175,24 +244,37 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+
       - name: Download VC120 runtime
         uses: actions/download-artifact@v4
         with:
           name: POSTAL2-VC120-x86
           path: vc120-runtime
 
+
       - name: Verify VC120 runtime
         shell: bash
         run: |
           set -euxo pipefail
+
           test -s vc120-runtime/msvcr120.dll
           test -s vc120-runtime/msvcp120.dll
+
           file vc120-runtime/msvcr120.dll
           file vc120-runtime/msvcp120.dll
-          file vc120-runtime/msvcr120.dll | grep -q "PE32 executable"
-          file vc120-runtime/msvcp120.dll | grep -q "PE32 executable"
-          file vc120-runtime/msvcr120.dll | grep -q "Intel 80386"
-          file vc120-runtime/msvcp120.dll | grep -q "Intel 80386"
+
+          file vc120-runtime/msvcr120.dll |
+            grep -q "PE32 executable"
+
+          file vc120-runtime/msvcp120.dll |
+            grep -q "PE32 executable"
+
+          file vc120-runtime/msvcr120.dll |
+            grep -q "Intel 80386"
+
+          file vc120-runtime/msvcp120.dll |
+            grep -q "Intel 80386"
+
 
       - name: Select Xcode 15.4
         shell: bash
@@ -200,43 +282,80 @@ jobs:
           set -euxo pipefail
 
           if [ -d "/Applications/Xcode_15.4.app" ]; then
-            sudo xcode-select -s "/Applications/Xcode_15.4.app/Contents/Developer"
+
+            sudo xcode-select \
+              -s "/Applications/Xcode_15.4.app/Contents/Developer"
+
           elif [ -d "/Applications/Xcode_15.4.0.app" ]; then
-            sudo xcode-select -s "/Applications/Xcode_15.4.0.app/Contents/Developer"
+
+            sudo xcode-select \
+              -s "/Applications/Xcode_15.4.0.app/Contents/Developer"
+
           else
+
             echo "ERROR: Xcode 15.4 not found"
-            ls -1 /Applications | grep Xcode || true
+
+            ls -1 /Applications |
+              grep Xcode ||
+              true
+
             exit 1
+
           fi
 
           xcodebuild -version
           xcode-select -p
 
+
       - name: Install tools
         shell: bash
         run: |
           set -euxo pipefail
+
           brew install xcodegen make flock
+
           export PATH="$(brew --prefix)/bin:$PATH"
+
           command -v flock
           xcodegen --version
-          xcrun --sdk iphoneos --show-sdk-version
+
+          xcrun \
+            --sdk iphoneos \
+            --show-sdk-version
+
 
       - name: Clone WineGlass and blink
         shell: bash
         run: |
           set -euxo pipefail
+
           rm -rf WineGlass blink-src
-          git clone --depth 1 https://github.com/Contonion/WineGlass.git WineGlass
-          git clone --depth 1 https://github.com/jart/blink.git blink-src
-          mkdir -p WineGlass/Vendor/blink/lib
+
+          git clone \
+            --depth 1 \
+            https://github.com/Contonion/WineGlass.git \
+            WineGlass
+
+          git clone \
+            --depth 1 \
+            https://github.com/jart/blink.git \
+            blink-src
+
+          mkdir -p \
+            WineGlass/Vendor/blink/lib
+
+          echo "===== WINEGLASS ====="
           git -C WineGlass rev-parse HEAD
+
+          echo "===== BLINK ====="
           git -C blink-src rev-parse HEAD
+
 
       - name: Configure Blink for iPhone ARM64
         shell: bash
         run: |
           set -euxo pipefail
+
           export PATH="$(brew --prefix)/bin:$PATH"
 
           SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
@@ -244,6 +363,7 @@ jobs:
           AR="$(xcrun --sdk iphoneos --find ar)"
 
           cd blink-src
+
           chmod +x configure
 
           ./configure \
@@ -257,10 +377,12 @@ jobs:
           test -f config.h
           test -f config.mk
 
+
       - name: Patch Blink iOS config
         shell: bash
         run: |
           set -euxo pipefail
+
           python3 <<'PY'
           import base64
           import zlib
@@ -271,17 +393,30 @@ jobs:
           h3LbbUHN5eREF9tIKfL88bim3G3UN19oVwsSU0Z8Ud/JLiLmYUqUfKK69yNdu641vlm1k1gUkfqnDVsmd/x3gbRDvQPYZ00NRo7r
           GQNoA3VceOg/Q6ult6E7sAwbtKbPcKUeRxnkmBiXx8Au79n/YpzrVhJKfQ4MaBWcVP/gNCOlP4WKUk5ZpuD73M7FcaWd848wX5GF
           9OwXQqLXOA=="""
-          code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-          compile(code, "<POSTAL-blink-config>", "exec")
+
+          code = zlib.decompress(
+              base64.b64decode(payload)
+          ).decode("utf-8")
+
+          compile(
+              code,
+              "<POSTAL-blink-config>",
+              "exec"
+          )
+
           exec(code)
           PY
 
-          grep -q '^#define HAVE_MAP_ANONYMOUS 1$' blink-src/config.h
+          grep -q \
+            '^#define HAVE_MAP_ANONYMOUS 1$' \
+            blink-src/config.h
+
 
       - name: Patch Blink sched_yield
         shell: bash
         run: |
           set -euxo pipefail
+
           python3 <<'PY'
           import base64
           import zlib
@@ -291,15 +426,26 @@ jobs:
           QRv08bTzNvHmkqVPpSm/mSYsDq1U2KFxfMAvH5gON+x4hMKEhLRL4CIA4s9e10m35qVFd2Sdj2sR0ILmoPpjAFvM6FiZmLMApobm
           wbkSMAZo/IXKfDk6TSvfKWdIIXggupm4dzksVyNFakIv2GG3OWkXR5vdbrtb3fbgT1YHaKRuseZhh2lTNkkYxUUwfeTL9ufQe7KO
           5re7i/Q6AWpNsmIo9Ab0toB0EU1Ko2kqf3A8YKB/tF8fYLGT2pAXPWRfVjsc3wclYrB8WXH07N/STU3oNjT6A+2m0ls="""
-          code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-          compile(code, "<POSTAL-blink-sched>", "exec")
+
+          code = zlib.decompress(
+              base64.b64decode(payload)
+          ).decode("utf-8")
+
+          compile(
+              code,
+              "<POSTAL-blink-sched>",
+              "exec"
+          )
+
           exec(code)
           PY
+
 
       - name: Build blink ARM64 no-JIT
         shell: bash
         run: |
           set -euxo pipefail
+
           export PATH="$(brew --prefix)/bin:$PATH"
 
           ROOT="$GITHUB_WORKSPACE"
@@ -311,6 +457,7 @@ jobs:
           AR="$(xcrun --sdk iphoneos --find ar)"
 
           cd "$BLINK"
+
           rm -f o//blink/blink.a
 
           gmake \
@@ -321,13 +468,20 @@ jobs:
             o//blink/blink.a
 
           test -f o//blink/blink.a
-          cp o//blink/blink.a "$WG/Vendor/blink/lib/blink.a"
-          test -f "$WG/Vendor/blink/lib/blink.a"
+
+          cp \
+            o//blink/blink.a \
+            "$WG/Vendor/blink/lib/blink.a"
+
+          test -f \
+            "$WG/Vendor/blink/lib/blink.a"
+
 
       - name: Patch Blink VM mmap
         shell: bash
         run: |
           set -euxo pipefail
+
           python3 <<'PY'
           import base64
           import zlib
@@ -346,10 +500,20 @@ jobs:
           dnEeFkLrYyutf/3FrrdK0FWK+4CUWP5H0IEwnNtvAeEMev3P/wqKTqWa9YuQeUsJz5hWC87P4bcs74OGqbbLYbPg/Mwn9Pym33fm
           813nIGLdE8bWe03zRstYay7pkpMgG1/qyy6hf23I59Btoo6BeeHTZOh/QfK+rR/FB5x3lffrPZgYDv7Ie3wm2w9G0tgKik+W/sMk
           bUOnbpl65Os3R80C/IPmr3C2oE/GSICv4t8LmNO9"""
-          code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-          compile(code, "<POSTAL-blink-mmap>", "exec")
+
+          code = zlib.decompress(
+              base64.b64decode(payload)
+          ).decode("utf-8")
+
+          compile(
+              code,
+              "<POSTAL-blink-mmap>",
+              "exec"
+          )
+
           exec(code)
           PY
+
 
       - name: Build WineGlass Blink bridge
         shell: bash
@@ -380,12 +544,15 @@ jobs:
             "$WG/Vendor/blink/wg_blink_impl.c" \
             -o "$WG/Vendor/blink/lib/wg_blink_impl.o"
 
-          test -f "$WG/Vendor/blink/lib/wg_blink_impl.o"
+          test -f \
+            "$WG/Vendor/blink/lib/wg_blink_impl.o"
+
 
       - name: Patch POSTAL 2 engine FIX 11.2 CLEAN
         shell: bash
         run: |
           set -euxo pipefail
+
           python3 <<'PY'
           import base64
           import zlib
@@ -463,15 +630,26 @@ jobs:
           aJtfkKM5+8ocbLpnUrtA1vHQqkvN/R3CLQULqprZZSECHsWCE2ohXWP0iMNNMYPo3acx3sAd9E674i2Vcn2UB/hcfNGjR5JJ+7Fc
           huLNlfJ1lSmLT39V254NYdZvb4wfE56fHY7NbamQT7zBVWYc09iooq08XcfzKjcj3GIJqP5XbKuXFdW1TXOyP5+eAi9uOVgJve3/
           AufQ7EQ="""
-          code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-          compile(code, "<POSTAL-engine>", "exec")
+
+          code = zlib.decompress(
+              base64.b64decode(payload)
+          ).decode("utf-8")
+
+          compile(
+              code,
+              "<POSTAL-engine>",
+              "exec"
+          )
+
           exec(code)
           PY
+
 
       - name: Patch POSTAL cumulative FIX 11.7
         shell: bash
         run: |
           set -euxo pipefail
+
           python3 <<'PY'
           import base64
           import zlib
@@ -524,25 +702,56 @@ jobs:
           KPIVdIHG1sKPZOpC7F8mkCljJRPgFMmacImh6xxfsEybpdk9iqso1an5FmtkqQoYjiZ3RqBEboByzXe6UjyohygM5DEI9PSXJN5dDRAizTpPD7
           No3G9wB71IgTeimApgTrlgKZKP4KADMdRiMJKhPAUqp2SjVgG74RP63TfPhXMRNVWDB41Is8/Gt+hJy8LXbYIRM68YMvXa7CvdND2UpUHZ7KN2
           zydqfqkK/EPdjhuVCw2LkTp2pzHf4LOuKIJA=="""
-          code = zlib.decompress(base64.b64decode(payload)).decode("utf-8")
-          compile(code, "<POSTAL-FIX11.7-cumulative>", "exec")
+
+          code = zlib.decompress(
+              base64.b64decode(payload)
+          ).decode("utf-8")
+
+          compile(
+              code,
+              "<POSTAL-FIX11.7-cumulative>",
+              "exec"
+          )
+
           exec(code)
           PY
 
           ENGINE="WineGlass/Sources/Core/wg_engine.c"
           FILES="WineGlass/Sources/Win32/wg_win32_files.c"
 
-          grep -n "POSTAL FIX11.3 DisableThreadLibraryCalls" "$ENGINE"
-          grep -n "POSTAL FIX11.4 VirtualAlloc" "$ENGINE"
-          grep -n "POSTAL FIX11.5 timeBeginPeriod" "$ENGINE"
-          grep -n "POSTAL FIX11.7 GetModuleFileNameA" "$ENGINE"
-          grep -n "POSTAL FIX11.7 GetModuleFileNameW" "$ENGINE"
-          grep -n "POSTAL FIX11.6.2 System root" "$FILES"
-          grep -n "POSTAL FIX11.6.2 map" "$FILES"
+          grep -n \
+            "POSTAL FIX11.3 DisableThreadLibraryCalls" \
+            "$ENGINE"
 
-          echo "POSTAL FIX 11.7 CUMULATIVE VERIFY OK"
+          grep -n \
+            "POSTAL FIX11.4 VirtualAlloc" \
+            "$ENGINE"
 
-      - name: Patch FIX 11.8 strict real LoadLibrary
+          grep -n \
+            "POSTAL FIX11.5 timeBeginPeriod" \
+            "$ENGINE"
+
+          grep -n \
+            "POSTAL FIX11.7 GetModuleFileNameA" \
+            "$ENGINE"
+
+          grep -n \
+            "POSTAL FIX11.7 GetModuleFileNameW" \
+            "$ENGINE"
+
+          grep -n \
+            "POSTAL FIX11.6.2 System root" \
+            "$FILES"
+
+          grep -n \
+            "POSTAL FIX11.6.2 map" \
+            "$FILES"
+
+          echo \
+            "POSTAL FIX 11.7 CUMULATIVE VERIFY OK"
+
+
+      - name: Patch FIX 11.8.1 strict real LoadLibrary
         shell: bash
         run: |
           set -euxo pipefail
@@ -550,44 +759,142 @@ jobs:
           python3 <<'PY'
           from pathlib import Path
 
-          p = Path("WineGlass/Sources/Core/wg_engine.c")
+          p = Path(
+              "WineGlass/Sources/Core/wg_engine.c"
+          )
+
           s = p.read_text()
 
-          old = r'''        } else if (strcmp(fn, "LoadLibraryExW") == 0 ||
+          if (
+              "POSTAL FIX11.8.1 %s request"
+              not in s
+          ):
+              lines = s.splitlines(
+                  keepends=True
+              )
+
+              hit = None
+
+              for i, line in enumerate(lines):
+                  if (
+                      'strcmp(fn, "LoadLibraryW")'
+                      in line
+                      or
+                      'strcmp(fn, "LoadLibraryExW")'
+                      in line
+                  ):
+                      hit = i
+                      break
+
+              if hit is None:
+                  raise SystemExit(
+                      "ERROR: FIX11.8.1 "
+                      "LoadLibraryW handler not found"
+                  )
+
+              start = hit
+
+              while start >= 0:
+                  if (
+                      "} else if ("
+                      in lines[start]
+                  ):
+                      break
+
+                  start -= 1
+
+              if (
+                  start < 0
+                  or
+                  hit - start > 6
+              ):
+                  raise SystemExit(
+                      "ERROR: FIX11.8.1 "
+                      "LoadLibraryW handler start not found"
+                  )
+
+              open_end = hit
+
+              while open_end < len(lines):
+                  if "{" in lines[open_end]:
+                      break
+
+                  open_end += 1
+
+              if (
+                  open_end >= len(lines)
+                  or
+                  open_end - start > 8
+              ):
+                  raise SystemExit(
+                      "ERROR: FIX11.8.1 "
+                      "LoadLibraryW opening brace not found"
+                  )
+
+              end = open_end + 1
+
+              while end < len(lines):
+                  if (
+                      lines[end].startswith(
+                          "        } else if ("
+                      )
+                      or
+                      lines[end].startswith(
+                          "        } else {"
+                      )
+                  ):
+                      break
+
+                  end += 1
+
+              if end >= len(lines):
+                  raise SystemExit(
+                      "ERROR: FIX11.8.1 "
+                      "next Win32 handler not found"
+                  )
+
+              old_block = "".join(
+                  lines[start:end]
+              )
+
+              if (
+                  'strcmp(fn, "LoadLibraryW")'
+                  not in old_block
+                  and
+                  'strcmp(fn, "LoadLibraryExW")'
+                  not in old_block
+              ):
+                  raise SystemExit(
+                      "ERROR: FIX11.8.1 "
+                      "selected wrong handler"
+                  )
+
+              print(
+                  "===== OLD LOADLIBRARY HANDLER ====="
+              )
+
+              print(
+                  old_block[:3000]
+              )
+
+              new_block = r'''        } else if (strcmp(fn, "LoadLibraryExW") == 0 ||
                    strcmp(fn, "LoadLibraryW") == 0) {
-            // LoadLibrary[Ex]W(lpLibFileName, [hFile, dwFlags])
             uint16_t libname[512] = {0};
             char ascii[512] = {0};
-            if (args[0]) {
-                wg_blink_read_mem(engine->blink, args[0], libname, 1022);
-                for (int i = 0; i < 511 && libname[i]; i++)
-                    ascii[i] = libname[i] < 128 ? (char)libname[i] : '?';
-            }
-            WG_LOGI(TAG, "%s('%s')", fn, ascii);
-            if (!ascii[0] || !args[0]) {
-                // Empty or NULL library name — return main module handle
-                ret_val = engine->pe_image ? (uint32_t)engine->pe_image->image_base : 0x400000;
-            } else {
-                uint32_t base = 0;
-                char mapbuf[512];
-                strncpy(mapbuf, ascii, sizeof(mapbuf) - 1);
-                mapbuf[sizeof(mapbuf) - 1] = '\0';
-                const char *real = wg_files_map_path(args[0], engine->blink,
-                                                     mapbuf, sizeof(mapbuf));
-                if (real) base = wg_load_dll(engine->blink, engine->dll_mapper, real, ascii);
-                ret_val = base ? base
-                               : 0x10000000 + (uint32_t)(engine->dll_mapper->count * 0x1000);
-            }'''
-
-          new = r'''        } else if (strcmp(fn, "LoadLibraryExW") == 0 ||
-                   strcmp(fn, "LoadLibraryW") == 0) {
-            uint16_t libname[512] = {0};
-            char ascii[512] = {0};
 
             if (args[0]) {
-                wg_blink_read_mem(engine->blink, args[0], libname, 1022);
+                wg_blink_read_mem(
+                    engine->blink,
+                    args[0],
+                    libname,
+                    sizeof(libname) - 2
+                );
 
-                for (int i = 0; i < 511 && libname[i]; i++) {
+                for (
+                    int i = 0;
+                    i < 511 && libname[i];
+                    i++
+                ) {
                     ascii[i] =
                         libname[i] < 128 ?
                         (char)libname[i] :
@@ -597,33 +904,41 @@ jobs:
 
             WG_LOGI(
                 TAG,
-                "POSTAL FIX11.8 %s request='%s'",
+                "POSTAL FIX11.8.1 %s request='%s'",
                 fn,
                 ascii
             );
 
-            if (!ascii[0] || !args[0]) {
+            if (
+                !args[0]
+                ||
+                !ascii[0]
+            ) {
                 ret_val =
                     engine->pe_image ?
-                    (uint32_t)engine->pe_image->image_base :
-                    0x400000;
+                    (uint32_t)
+                    engine->pe_image->image_base :
+                    0x400000u;
 
                 s_last_error = 0;
+
+                WG_LOGI(
+                    TAG,
+                    "POSTAL FIX11.8.1 %s empty request -> main module 0x%X",
+                    fn,
+                    (uint32_t)ret_val
+                );
 
             } else {
                 uint32_t base = 0;
 
-                char mapbuf[512];
+                char mapbuf[512] = {0};
 
                 strncpy(
                     mapbuf,
                     ascii,
                     sizeof(mapbuf) - 1
                 );
-
-                mapbuf[
-                    sizeof(mapbuf) - 1
-                ] = '\0';
 
                 const char *real =
                     wg_files_map_path(
@@ -633,7 +948,19 @@ jobs:
                         sizeof(mapbuf)
                     );
 
-                if (real) {
+                WG_LOGI(
+                    TAG,
+                    "POSTAL FIX11.8.1 %s mapped '%s' -> '%s'",
+                    fn,
+                    ascii,
+                    real ? real : "(null)"
+                );
+
+                if (
+                    real
+                    &&
+                    real[0]
+                ) {
                     base =
                         wg_load_dll(
                             engine->blink,
@@ -649,7 +976,7 @@ jobs:
 
                     WG_LOGI(
                         TAG,
-                        "POSTAL FIX11.8 %s real DLL '%s' -> 0x%X",
+                        "POSTAL FIX11.8.1 %s real DLL '%s' -> 0x%X",
                         fn,
                         ascii,
                         base
@@ -660,9 +987,11 @@ jobs:
                         strlen(ascii);
 
                     bool ends_in_sep =
-                        n > 0 &&
+                        n > 0
+                        &&
                         (
-                            ascii[n - 1] == '\\' ||
+                            ascii[n - 1] == '\\'
+                            ||
                             ascii[n - 1] == '/'
                         );
 
@@ -670,111 +999,135 @@ jobs:
                         strchr(
                             ascii,
                             '\\'
-                        ) != NULL ||
+                        ) != NULL
+                        ||
                         strchr(
                             ascii,
                             '/'
-                        ) != NULL ||
+                        ) != NULL
+                        ||
                         (
-                            ascii[0] &&
+                            n >= 2
+                            &&
                             ascii[1] == ':'
                         );
 
-                    bool windows_system_path =
-                        strcasestr(
+                    const char *system32_bs =
+                        "C:\\Windows\\System32\\";
+
+                    const char *system32_fs =
+                        "C:/Windows/System32/";
+
+                    bool system_path =
+                        strncasecmp(
                             ascii,
-                            "\\Windows\\System32\\"
-                        ) != NULL ||
-                        strcasestr(
+                            system32_bs,
+                            strlen(system32_bs)
+                        ) == 0
+                        ||
+                        strncasecmp(
                             ascii,
-                            "/Windows/System32/"
-                        ) != NULL;
+                            system32_fs,
+                            strlen(system32_fs)
+                        ) == 0;
 
                     if (
-                        ends_in_sep ||
+                        ends_in_sep
+                        ||
                         (
-                            has_path &&
-                            !windows_system_path
+                            has_path
+                            &&
+                            !system_path
                         )
                     ) {
                         ret_val = 0;
+
                         s_last_error = 126;
 
                         WG_LOGW(
                             TAG,
-                            "POSTAL FIX11.8 %s STRICT FAIL '%s' -> NULL (error 126)",
+                            "POSTAL FIX11.8.1 %s STRICT FAIL '%s' -> NULL (error 126)",
                             fn,
                             ascii
                         );
 
                     } else {
                         ret_val =
-                            0xBFFF0000u;
+                            0x10000000u
+                            +
+                            (uint32_t)(
+                                engine
+                                ->dll_mapper
+                                ->count
+                                *
+                                0x1000u
+                            );
 
                         s_last_error = 0;
 
                         WG_LOGI(
                             TAG,
-                            "POSTAL FIX11.8 %s system/fake '%s' -> 0x%X",
+                            "POSTAL FIX11.8.1 %s compatibility fake '%s' -> 0x%X",
                             fn,
                             ascii,
                             (uint32_t)ret_val
                         );
                     }
                 }
-            }'''
+            }
+'''
 
-          if (
-              "POSTAL FIX11.8 %s request"
-              not in s
-          ):
-              if old not in s:
-                  raise SystemExit(
-                      "ERROR: FIX11.8 LoadLibraryW block missing"
+              s = (
+                  "".join(
+                      lines[:start]
                   )
-
-              s = s.replace(
-                  old,
-                  new,
-                  1
+                  +
+                  new_block
+                  +
+                  "".join(
+                      lines[end:]
+                  )
               )
 
-          p.write_text(s)
+              p.write_text(s)
 
           print(
-              "POSTAL 2 FIX 11.8 STRICT LOADLIBRARY INSTALLED"
+              "POSTAL 2 FIX 11.8.1 "
+              "STRICT LOADLIBRARY INSTALLED"
           )
 
           print(
-              "real DLL success -> real HMODULE"
+              "LoadLibraryW handler located "
+              "by function boundaries"
           )
 
           print(
-              "invalid/local path -> NULL + ERROR_MOD_NOT_FOUND"
-          )
-
-          print(
-              "bare/system DLL -> mapper fake HMODULE"
+              "invalid POSTAL path -> "
+              "NULL + error 126"
           )
           PY
 
           ENGINE="WineGlass/Sources/Core/wg_engine.c"
 
           grep -n \
-            "POSTAL FIX11.8 %s request" \
+            "POSTAL FIX11.8.1 %s request" \
             "$ENGINE"
 
           grep -n \
-            "POSTAL FIX11.8 %s STRICT FAIL" \
+            "POSTAL FIX11.8.1 %s mapped" \
             "$ENGINE"
 
           grep -n \
-            "ERROR_MOD_NOT_FOUND" \
-            "$ENGINE" ||
-            true
+            "POSTAL FIX11.8.1 %s STRICT FAIL" \
+            "$ENGINE"
+
+          grep -n \
+            "POSTAL FIX11.8.1 %s real DLL" \
+            "$ENGINE"
 
           echo \
-            "POSTAL FIX 11.8 LOADLIBRARY VERIFY OK"
+            "POSTAL FIX 11.8.1 LOADLIBRARY VERIFY OK"
+
 
       - name: Verify POSTAL engine patch
         shell: bash
@@ -782,6 +1135,7 @@ jobs:
           set -euxo pipefail
 
           ENGINE="WineGlass/Sources/Core/wg_engine.c"
+
           FILES="WineGlass/Sources/Win32/wg_win32_files.c"
 
           grep -q \
@@ -845,11 +1199,11 @@ jobs:
             "$ENGINE"
 
           grep -q \
-            "POSTAL FIX11.8 %s request" \
+            "POSTAL FIX11.8.1 %s request" \
             "$ENGINE"
 
           grep -q \
-            "POSTAL FIX11.8 %s STRICT FAIL" \
+            "POSTAL FIX11.8.1 %s STRICT FAIL" \
             "$ENGINE"
 
           grep -q \
@@ -873,7 +1227,8 @@ jobs:
             "$FILES"
 
           echo \
-            "ALL POSTAL FIX 11.8 MARKERS VERIFIED"
+            "ALL POSTAL FIX 11.8.1 MARKERS VERIFIED"
+
 
       - name: Patch WineGlass project
         shell: bash
@@ -904,6 +1259,7 @@ jobs:
           exec(code)
           PY
 
+
       - name: Patch Info plist
         shell: bash
         run: |
@@ -929,7 +1285,7 @@ jobs:
             "$PLIST"
 
           /usr/libexec/PlistBuddy \
-            -c "Set :CFBundleVersion 1180" \
+            -c "Set :CFBundleVersion 1181" \
             "$PLIST"
 
           /usr/libexec/PlistBuddy \
@@ -941,6 +1297,7 @@ jobs:
             "$PLIST"
 
           plutil -lint "$PLIST"
+
 
       - name: Patch POSTAL 2 launcher and log
         shell: bash
@@ -991,7 +1348,8 @@ jobs:
           exec(code)
           PY
 
-      - name: Stamp POSTAL FIX 11.8 launcher
+
+      - name: Stamp POSTAL FIX 11.8.1 launcher
         shell: bash
         run: |
           set -euxo pipefail
@@ -1007,16 +1365,27 @@ jobs:
 
           s = s.replace(
               "FIX 11.2 CLEAN",
-              "FIX 11.8 CLEAN"
+              "FIX 11.8.1 CLEAN"
           )
 
           s = s.replace(
               "FIX11.2 CLEAN",
-              "FIX11.8 CLEAN"
+              "FIX11.8.1 CLEAN"
+          )
+
+          s = s.replace(
+              "FIX 11.7 CLEAN",
+              "FIX 11.8.1 CLEAN"
+          )
+
+          s = s.replace(
+              "FIX11.7 CLEAN",
+              "FIX11.8.1 CLEAN"
           )
 
           p.write_text(s)
           PY
+
 
       - name: Generate Xcode project
         shell: bash
@@ -1042,13 +1411,15 @@ jobs:
             "objectVersion = 77" \
             WineGlass.xcodeproj/project.pbxproj
           then
+
             echo \
               "ERROR: unsupported objectVersion 77"
 
             exit 1
           fi
 
-      - name: Build POSTAL 2 FIX 11.8 CLEAN
+
+      - name: Build POSTAL 2 FIX 11.8.1 CLEAN
         shell: bash
         run: |
           set -o pipefail
@@ -1075,6 +1446,7 @@ jobs:
             2>&1 |
             tee xcodebuild.log
 
+
       - name: Verify POSTAL 2 app
         shell: bash
         run: |
@@ -1085,7 +1457,9 @@ jobs:
           test -d "$APP"
           test -f "$APP/WineGlass"
 
-          lipo -info "$APP/WineGlass"
+          lipo \
+            -info \
+            "$APP/WineGlass"
 
           ID=$(
             /usr/libexec/PlistBuddy \
@@ -1098,6 +1472,7 @@ jobs:
           test \
             "$ID" = \
             "com.postal2ios.native"
+
 
       - name: Package IPA
         shell: bash
@@ -1140,86 +1515,89 @@ jobs:
 
           zip \
             -qry \
-            "POSTAL-2-iOS-v11.8-CLEAN.ipa" \
+            "POSTAL-2-iOS-v11.8.1-CLEAN.ipa" \
             Payload
 
           ls -lh \
-            "POSTAL-2-iOS-v11.8-CLEAN.ipa"
+            "POSTAL-2-iOS-v11.8.1-CLEAN.ipa"
 
-      - name: Upload POSTAL 2 FIX 11.8 CLEAN IPA
+
+      - name: Upload POSTAL 2 FIX 11.8.1 CLEAN IPA
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-iOS-v11.8-CLEAN
-          path: out/POSTAL-2-iOS-v11.8-CLEAN.ipa
+          name: POSTAL-2-iOS-v11.8.1-CLEAN
+          path: out/POSTAL-2-iOS-v11.8.1-CLEAN.ipa
           if-no-files-found: error
           retention-days: 14
+
 
       - name: Prepare debug files
         if: always()
         shell: bash
         run: |
           mkdir -p \
-            debug-fix11-8-clean
+            debug-fix11-8-1-clean
 
           cp \
             WineGlass/xcodebuild.log \
-            debug-fix11-8-clean/ \
+            debug-fix11-8-1-clean/ \
             2>/dev/null ||
             true
 
           cp \
             blink-src/config.h \
-            debug-fix11-8-clean/blink-config.h \
+            debug-fix11-8-1-clean/blink-config.h \
             2>/dev/null ||
             true
 
           cp \
             WineGlass/Vendor/blink/wg_blink_impl.c \
-            debug-fix11-8-clean/ \
+            debug-fix11-8-1-clean/ \
             2>/dev/null ||
             true
 
           cp \
             WineGlass/Sources/Core/wg_engine.c \
-            debug-fix11-8-clean/ \
+            debug-fix11-8-1-clean/ \
             2>/dev/null ||
             true
 
           cp \
             WineGlass/Sources/Win32/wg_win32_files.c \
-            debug-fix11-8-clean/ \
+            debug-fix11-8-1-clean/ \
             2>/dev/null ||
             true
 
           cp \
             WineGlass/Sources/App/WGSceneDelegate.m \
-            debug-fix11-8-clean/ \
+            debug-fix11-8-1-clean/ \
             2>/dev/null ||
             true
 
           cp \
             WineGlass/project.yml \
-            debug-fix11-8-clean/ \
+            debug-fix11-8-1-clean/ \
             2>/dev/null ||
             true
 
           cp \
             vc120-runtime/msvcr120.dll \
-            debug-fix11-8-clean/ \
+            debug-fix11-8-1-clean/ \
             2>/dev/null ||
             true
 
           cp \
             vc120-runtime/msvcp120.dll \
-            debug-fix11-8-clean/ \
+            debug-fix11-8-1-clean/ \
             2>/dev/null ||
             true
 
-      - name: Upload FIX 11.8 CLEAN debug
+
+      - name: Upload FIX 11.8.1 CLEAN debug
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-FIX11.8-CLEAN-DEBUG
-          path: debug-fix11-8-clean
+          name: POSTAL-2-FIX11.8.1-CLEAN-DEBUG
+          path: debug-fix11-8-1-clean
           if-no-files-found: ignore
           retention-days: 7
