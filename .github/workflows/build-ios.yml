@@ -1,4 +1,4 @@
-name: POSTAL 2 WineGlass iOS FIX 11.9.1 CLEAN
+name: POSTAL 2 WineGlass iOS FIX 11.10 CLEAN
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   lint:
-    name: Validate FIX 11.9.1 CLEAN
+    name: Validate FIX 11.10 CLEAN
     runs-on: ubuntu-24.04
     timeout-minutes: 5
 
@@ -46,7 +46,6 @@ jobs:
           import textwrap
           import zlib
 
-          # Check all visible Python blocks in THIS workflow.
           current = Path(".github/workflows/build-ios.yml").read_text()
           lines = current.splitlines()
           blocks = []
@@ -79,7 +78,6 @@ jobs:
           for index, code in enumerate(blocks, start=1):
               ast.parse(code, filename=f"visible-python-{index}")
 
-          # Check the exact compressed patches from the successful 11.8.1 workflow.
           base = Path("/tmp/POSTAL-FIX11.8.1-success.yml").read_text()
 
           pattern = re.compile(
@@ -121,7 +119,7 @@ jobs:
               )
 
           print(
-              "FIX 11.9.1 validation OK:",
+              "FIX 11.10 validation OK:",
               len(blocks),
               "visible Python blocks and",
               len(found),
@@ -217,7 +215,7 @@ jobs:
 
   build:
     needs: vc120
-    name: Build POSTAL 2 FIX 11.9.1 CLEAN
+    name: Build POSTAL 2 FIX 11.10 CLEAN
     runs-on: macos-14
     timeout-minutes: 90
 
@@ -516,7 +514,7 @@ jobs:
 
           echo "SUCCESSFUL FIX 11.8.1 BASE RESTORED"
 
-      - name: Patch FIX 11.9.1 GPackage inside DllMain runner
+      - name: Patch FIX 11.10 native registrant probe
         shell: bash
         run: |
           set -euxo pipefail
@@ -527,336 +525,433 @@ jobs:
           p = Path("WineGlass/Sources/Core/wg_engine.c")
           s = p.read_text()
 
-          marker = "POSTAL FIX11.9.1 GPackage BEFORE"
+          marker = "POSTAL FIX11.10 REG ENTER"
 
           if marker not in s:
-              function_anchor = (
-                  "static bool postal_call_dll_entry("
-                  "WGEngine *engine, WGLoadedModule *m) {"
-              )
+              run_anchor = "bool wg_engine_run(WGEngine *engine) {"
 
-              function_pos = s.find(function_anchor)
+              run_pos = s.find(run_anchor)
 
-              if function_pos < 0:
+              if run_pos < 0:
                   raise SystemExit(
-                      "ERROR: FIX11.9.1 postal_call_dll_entry function missing"
+                      "ERROR: FIX11.10 wg_engine_run anchor missing"
                   )
 
-              helper = r'''static void postal_fix_gpackage_1191(
-              WGEngine *engine,
-              WGLoadedModule *m
+              helper = r'''// ============================================================
+          // POSTAL 2 FIX 11.10 — UE2 NATIVE REGISTRANT PROBE
+          // ============================================================
+
+          static bool s_postal_reg_probe_armed = false;
+          static uint32_t s_postal_reg_bp[3] = {0, 0, 0};
+          static uint8_t s_postal_reg_orig[3] = {0, 0, 0};
+          static uint64_t s_postal_reg_hits = 0;
+          static uint32_t s_postal_reg_last_this = 0;
+          static uint32_t s_postal_reg_same_this = 0;
+
+          static const char *s_postal_reg_names[3] = {
+              "UObject::Register",
+              "UField::Register",
+              "UStruct::Register"
+          };
+
+          static const char *s_postal_reg_exports[3] = {
+              "?Register@UObject@@UAEXXZ",
+              "?Register@UField@@UAEXXZ",
+              "?Register@UStruct@@UAEXXZ"
+          };
+
+          static void postal_arm_reg_probe_1110(
+              WGEngine *engine
           ) {
-              if (!engine || !engine->blink || !m || !m->in_use) {
-                  return;
-              }
-
-              const char *expected = NULL;
-
-              if (strcmp(m->name, "core.dll") == 0) {
-                  expected = "Core";
-              } else if (strcmp(m->name, "engine.dll") == 0) {
-                  expected = "Engine";
-              } else {
-                  return;
-              }
-
-              uint32_t addr =
-                  wg_module_export(
-                      m->base,
-                      "GPackage"
-                  );
-
-              if (!addr) {
-                  WG_LOGW(
-                      TAG,
-                      "POSTAL FIX11.9.1 GPackage export missing for %s base=0x%X",
-                      m->name,
-                      m->base
-                  );
-                  return;
-              }
-
-              uint8_t raw[64] = {0};
-
-              if (!wg_blink_read_mem(
-                      engine->blink,
-                      addr,
-                      raw,
-                      sizeof(raw)
-                  )) {
-                  WG_LOGW(
-                      TAG,
-                      "POSTAL FIX11.9.1 GPackage read failed for %s addr=0x%X",
-                      m->name,
-                      addr
-                  );
-                  return;
-              }
-
-              char ansi[32] = {0};
-              char wide[32] = {0};
-
-              for (int i = 0; i < 31; i++) {
-                  uint8_t c = raw[i];
-
-                  if (!c) {
-                      break;
-                  }
-
-                  ansi[i] =
-                      (c >= 32 && c < 127) ?
-                      (char)c :
-                      '?';
-              }
-
-              for (int i = 0; i < 31; i++) {
-                  uint8_t lo = raw[i * 2];
-                  uint8_t hi = raw[i * 2 + 1];
-
-                  if (!lo && !hi) {
-                      break;
-                  }
-
-                  wide[i] =
-                      (!hi && lo >= 32 && lo < 127) ?
-                      (char)lo :
-                      '?';
-              }
-
-              WG_LOGI(
-                  TAG,
-                  "POSTAL FIX11.9.1 GPackage BEFORE %s base=0x%X addr=0x%X ansi='%s' wide='%s' raw=%02X %02X %02X %02X %02X %02X %02X %02X",
-                  m->name,
-                  m->base,
-                  addr,
-                  ansi,
-                  wide,
-                  raw[0],
-                  raw[1],
-                  raw[2],
-                  raw[3],
-                  raw[4],
-                  raw[5],
-                  raw[6],
-                  raw[7]
-              );
-
               if (
-                  strcmp(ansi, expected) == 0 ||
-                  strcmp(wide, expected) == 0
+                  s_postal_reg_probe_armed ||
+                  !engine ||
+                  !engine->blink
               ) {
-                  WG_LOGI(
-                      TAG,
-                      "POSTAL FIX11.9.1 GPackage already correct for %s",
-                      m->name
-                  );
                   return;
               }
 
-              bool looks_wide =
-                  raw[1] == 0 &&
-                  raw[3] == 0 &&
-                  raw[5] == 0 &&
-                  raw[7] == 0;
-
-              bool all_zero = true;
+              uint32_t core_base = 0;
 
               for (int i = 0; i < 16; i++) {
-                  if (raw[i] != 0) {
-                      all_zero = false;
+                  if (
+                      s_modules[i].in_use &&
+                      strcmp(s_modules[i].name, "core.dll") == 0
+                  ) {
+                      core_base = s_modules[i].base;
                       break;
                   }
               }
 
-              bool write_wide =
-                  looks_wide ||
-                  all_zero;
-
-              if (write_wide) {
-                  uint16_t fixed[16] = {0};
-                  size_t chars = strlen(expected);
-
-                  if (chars >= 15) {
-                      return;
-                  }
-
-                  for (size_t i = 0; i < chars; i++) {
-                      fixed[i] =
-                          (uint8_t)expected[i];
-                  }
-
-                  if (!wg_blink_write_mem(
-                          engine->blink,
-                          addr,
-                          fixed,
-                          (chars + 1) * sizeof(uint16_t)
-                      )) {
-                      WG_LOGE(
-                          TAG,
-                          "POSTAL FIX11.9.1 GPackage UTF16 write failed for %s",
-                          m->name
-                      );
-                      return;
-                  }
-
-              } else {
-                  char fixed[16] = {0};
-                  size_t chars = strlen(expected);
-
-                  if (chars >= sizeof(fixed)) {
-                      return;
-                  }
-
-                  memcpy(
-                      fixed,
-                      expected,
-                      chars
-                  );
-
-                  if (!wg_blink_write_mem(
-                          engine->blink,
-                          addr,
-                          fixed,
-                          chars + 1
-                      )) {
-                      WG_LOGE(
-                          TAG,
-                          "POSTAL FIX11.9.1 GPackage ANSI write failed for %s",
-                          m->name
-                      );
-                      return;
-                  }
-              }
-
-              memset(raw, 0, sizeof(raw));
-
-              if (!wg_blink_read_mem(
-                      engine->blink,
-                      addr,
-                      raw,
-                      sizeof(raw)
-                  )) {
+              if (!core_base) {
                   WG_LOGW(
                       TAG,
-                      "POSTAL FIX11.9.1 GPackage reread failed for %s",
-                      m->name
+                      "POSTAL FIX11.10 core.dll not loaded; registrant probe not armed"
                   );
                   return;
               }
 
-              memset(ansi, 0, sizeof(ansi));
-              memset(wide, 0, sizeof(wide));
+              int armed = 0;
 
-              for (int i = 0; i < 31; i++) {
-                  uint8_t c = raw[i];
+              for (int i = 0; i < 3; i++) {
+                  uint32_t addr =
+                      wg_module_export(
+                          core_base,
+                          s_postal_reg_exports[i]
+                      );
 
-                  if (!c) {
-                      break;
+                  if (!addr) {
+                      WG_LOGW(
+                          TAG,
+                          "POSTAL FIX11.10 export missing: %s",
+                          s_postal_reg_names[i]
+                      );
+                      continue;
                   }
 
-                  ansi[i] =
-                      (c >= 32 && c < 127) ?
-                      (char)c :
-                      '?';
-              }
+                  uint8_t orig = 0;
 
-              for (int i = 0; i < 31; i++) {
-                  uint8_t lo = raw[i * 2];
-                  uint8_t hi = raw[i * 2 + 1];
-
-                  if (!lo && !hi) {
-                      break;
+                  if (!wg_blink_read_mem(
+                          engine->blink,
+                          addr,
+                          &orig,
+                          1
+                      )) {
+                      WG_LOGW(
+                          TAG,
+                          "POSTAL FIX11.10 cannot read breakpoint byte for %s @0x%X",
+                          s_postal_reg_names[i],
+                          addr
+                      );
+                      continue;
                   }
 
-                  wide[i] =
-                      (!hi && lo >= 32 && lo < 127) ?
-                      (char)lo :
-                      '?';
+                  uint8_t hlt = 0xF4;
+
+                  if (!wg_blink_write_mem(
+                          engine->blink,
+                          addr,
+                          &hlt,
+                          1
+                      )) {
+                      WG_LOGW(
+                          TAG,
+                          "POSTAL FIX11.10 cannot arm %s @0x%X",
+                          s_postal_reg_names[i],
+                          addr
+                      );
+                      continue;
+                  }
+
+                  s_postal_reg_bp[i] = addr;
+                  s_postal_reg_orig[i] = orig;
+                  armed++;
+
+                  WG_LOGI(
+                      TAG,
+                      "POSTAL FIX11.10 ARMED %s @0x%X orig=0x%02X",
+                      s_postal_reg_names[i],
+                      addr,
+                      orig
+                  );
               }
+
+              s_postal_reg_probe_armed = armed > 0;
 
               WG_LOGI(
                   TAG,
-                  "POSTAL FIX11.9.1 GPackage AFTER %s base=0x%X addr=0x%X ansi='%s' wide='%s'",
-                  m->name,
-                  m->base,
-                  addr,
-                  ansi,
-                  wide
+                  "POSTAL FIX11.10 REG PROBE READY armed=%d core=0x%X",
+                  armed,
+                  core_base
               );
+          }
+
+          static bool postal_handle_reg_probe_1110(
+              WGEngine *engine,
+              uint64_t rip
+          ) {
+              if (
+                  !s_postal_reg_probe_armed ||
+                  !engine ||
+                  !engine->blink
+              ) {
+                  return false;
+              }
+
+              for (int i = 0; i < 3; i++) {
+                  if (
+                      !s_postal_reg_bp[i] ||
+                      rip != s_postal_reg_bp[i]
+                  ) {
+                      continue;
+                  }
+
+                  uint32_t eax =
+                      (uint32_t)wg_blink_get_reg(
+                          engine->blink,
+                          0
+                      );
+
+                  uint32_t ecx =
+                      (uint32_t)wg_blink_get_reg(
+                          engine->blink,
+                          1
+                      );
+
+                  uint32_t edx =
+                      (uint32_t)wg_blink_get_reg(
+                          engine->blink,
+                          2
+                      );
+
+                  uint32_t ebx =
+                      (uint32_t)wg_blink_get_reg(
+                          engine->blink,
+                          3
+                      );
+
+                  uint32_t esp =
+                      (uint32_t)wg_blink_get_reg(
+                          engine->blink,
+                          4
+                      );
+
+                  uint32_t ebp =
+                      (uint32_t)wg_blink_get_reg(
+                          engine->blink,
+                          5
+                      );
+
+                  uint32_t esi =
+                      (uint32_t)wg_blink_get_reg(
+                          engine->blink,
+                          6
+                      );
+
+                  uint32_t edi =
+                      (uint32_t)wg_blink_get_reg(
+                          engine->blink,
+                          7
+                      );
+
+                  uint32_t stack[8] = {0};
+                  uint32_t object[16] = {0};
+
+                  if (esp) {
+                      wg_blink_read_mem(
+                          engine->blink,
+                          esp,
+                          stack,
+                          sizeof(stack)
+                      );
+                  }
+
+                  bool object_ok = false;
+
+                  if (
+                      ecx >= 0x10000u &&
+                      ecx < 0xFFF00000u
+                  ) {
+                      object_ok =
+                          wg_blink_read_mem(
+                              engine->blink,
+                              ecx,
+                              object,
+                              sizeof(object)
+                          );
+                  }
+
+                  s_postal_reg_hits++;
+
+                  if (
+                      ecx &&
+                      ecx == s_postal_reg_last_this
+                  ) {
+                      s_postal_reg_same_this++;
+                  } else {
+                      s_postal_reg_last_this = ecx;
+                      s_postal_reg_same_this = 1;
+                  }
+
+                  WG_LOGW(
+                      TAG,
+                      "POSTAL FIX11.10 REG ENTER #%llu %s this=0x%08X same=%u ret=0x%08X",
+                      (unsigned long long)s_postal_reg_hits,
+                      s_postal_reg_names[i],
+                      ecx,
+                      s_postal_reg_same_this,
+                      stack[0]
+                  );
+
+                  WG_LOGW(
+                      TAG,
+                      "POSTAL FIX11.10 REG REGS eax=%08X ecx=%08X edx=%08X ebx=%08X esp=%08X ebp=%08X esi=%08X edi=%08X",
+                      eax,
+                      ecx,
+                      edx,
+                      ebx,
+                      esp,
+                      ebp,
+                      esi,
+                      edi
+                  );
+
+                  WG_LOGW(
+                      TAG,
+                      "POSTAL FIX11.10 REG STACK %08X %08X %08X %08X  %08X %08X %08X %08X",
+                      stack[0],
+                      stack[1],
+                      stack[2],
+                      stack[3],
+                      stack[4],
+                      stack[5],
+                      stack[6],
+                      stack[7]
+                  );
+
+                  if (object_ok) {
+                      WG_LOGW(
+                          TAG,
+                          "POSTAL FIX11.10 REG OBJ+00 %08X %08X %08X %08X  %08X %08X %08X %08X",
+                          object[0],
+                          object[1],
+                          object[2],
+                          object[3],
+                          object[4],
+                          object[5],
+                          object[6],
+                          object[7]
+                      );
+
+                      WG_LOGW(
+                          TAG,
+                          "POSTAL FIX11.10 REG OBJ+20 %08X %08X %08X %08X  %08X %08X %08X %08X",
+                          object[8],
+                          object[9],
+                          object[10],
+                          object[11],
+                          object[12],
+                          object[13],
+                          object[14],
+                          object[15]
+                      );
+                  } else {
+                      WG_LOGW(
+                          TAG,
+                          "POSTAL FIX11.10 REG OBJECT READ FAILED this=0x%08X",
+                          ecx
+                      );
+                  }
+
+                  // Execute the original first instruction, then re-arm the HLT.
+                  wg_blink_write_mem(
+                      engine->blink,
+                      s_postal_reg_bp[i],
+                      &s_postal_reg_orig[i],
+                      1
+                  );
+
+                  wg_blink_set_rip(
+                      engine->blink,
+                      s_postal_reg_bp[i]
+                  );
+
+                  wg_blink_step(
+                      engine->blink
+                  );
+
+                  uint64_t after =
+                      wg_blink_get_rip(
+                          engine->blink
+                      );
+
+                  uint8_t hlt = 0xF4;
+
+                  wg_blink_write_mem(
+                      engine->blink,
+                      s_postal_reg_bp[i],
+                      &hlt,
+                      1
+                  );
+
+                  WG_LOGW(
+                      TAG,
+                      "POSTAL FIX11.10 REG STEP %s 0x%X -> 0x%llX",
+                      s_postal_reg_names[i],
+                      s_postal_reg_bp[i],
+                      (unsigned long long)after
+                  );
+
+                  return true;
+              }
+
+              return false;
           }
 
           '''
 
-              # Put the helper immediately before postal_call_dll_entry.
               s = (
-                  s[:function_pos]
+                  s[:run_pos]
                   + helper
-                  + s[function_pos:]
+                  + s[run_pos:]
               )
 
-              # Insert the call inside postal_call_dll_entry, before registers are saved.
-              function_pos = s.find(function_anchor)
-
-              next_function = s.find(
-                  "\nstatic ",
-                  function_pos + len(function_anchor)
+              run_call_anchor = (
+                  "    // DIAG: trap steam.exe's ERR_error_string_n"
               )
 
-              if next_function < 0:
-                  next_function = len(s)
-
-              function_text = s[
-                  function_pos:next_function
-              ]
-
-              save_anchor = "    uint64_t saved_regs[16];"
-              save_rel = function_text.find(save_anchor)
-
-              if save_rel < 0:
+              if run_call_anchor not in s:
                   raise SystemExit(
-                      "ERROR: FIX11.9.1 saved_regs anchor missing inside postal_call_dll_entry"
+                      "ERROR: FIX11.10 wg_engine_run insertion anchor missing"
                   )
 
-              insert_at = function_pos + save_rel
+              s = s.replace(
+                  run_call_anchor,
+                  "    postal_arm_reg_probe_1110(engine);\n\n"
+                  + run_call_anchor,
+                  1
+              )
 
-              call = '''    postal_fix_gpackage_1191(
-                  engine,
-                  m
-              );
+              halt_anchor = (
+                  "                uint64_t halt_rip = "
+                  "wg_blink_get_rip(engine->blink);"
+              )
 
-          '''
+              if halt_anchor not in s:
+                  raise SystemExit(
+                      "ERROR: FIX11.10 halt RIP anchor missing"
+                  )
 
-              s = (
-                  s[:insert_at]
-                  + call
-                  + s[insert_at:]
+              halt_replacement = (
+                  halt_anchor
+                  + "\n"
+                  + "                if (postal_handle_reg_probe_1110(engine, halt_rip)) break;"
+              )
+
+              s = s.replace(
+                  halt_anchor,
+                  halt_replacement,
+                  1
               )
 
               p.write_text(s)
 
           print(
-              "POSTAL FIX 11.9.1 GPackage patch installed"
+              "POSTAL FIX 11.10 native registrant probe installed"
           )
           PY
 
           ENGINE="WineGlass/Sources/Core/wg_engine.c"
 
-          grep -n \
-            "POSTAL FIX11.9.1 GPackage BEFORE" \
-            "$ENGINE"
+          grep -n "POSTAL FIX11.10 ARMED" "$ENGINE"
+          grep -n "POSTAL FIX11.10 REG PROBE READY" "$ENGINE"
+          grep -n "POSTAL FIX11.10 REG ENTER" "$ENGINE"
+          grep -n "POSTAL FIX11.10 REG OBJECT READ FAILED" "$ENGINE"
+          grep -n "postal_handle_reg_probe_1110(engine, halt_rip)" "$ENGINE"
 
-          grep -n \
-            "POSTAL FIX11.9.1 GPackage AFTER" \
-            "$ENGINE"
+          echo "POSTAL FIX 11.10 REGISTRANT PROBE VERIFY OK"
 
-          grep -n \
-            "postal_fix_gpackage_1191(" \
-            "$ENGINE"
-
-          echo \
-            "POSTAL FIX 11.9.1 GPACKAGE VERIFY OK"
-
-      - name: Verify all POSTAL FIX 11.9.1 markers
+      - name: Verify all POSTAL FIX 11.10 markers
         shell: bash
         run: |
           set -euxo pipefail
@@ -881,8 +976,8 @@ jobs:
           grep -q "POSTAL FIX11.7 GetModuleFileNameW" "$ENGINE"
           grep -q "POSTAL FIX11.8.1 %s request" "$ENGINE"
           grep -q "POSTAL FIX11.8.1 %s STRICT FAIL" "$ENGINE"
-          grep -q "POSTAL FIX11.9.1 GPackage BEFORE" "$ENGINE"
-          grep -q "POSTAL FIX11.9.1 GPackage AFTER" "$ENGINE"
+          grep -q "POSTAL FIX11.10 REG ENTER" "$ENGINE"
+          grep -q "POSTAL FIX11.10 REG PROBE READY" "$ENGINE"
           grep -q "POSTAL DLL INITIALIZATION COMPLETE" "$ENGINE"
 
           grep -q "POSTAL FIX11.6.2 System root" "$FILES"
@@ -890,7 +985,7 @@ jobs:
           grep -q "POSTAL FIX11.6.2 redirect cwd" "$FILES"
           grep -q "POSTAL FIX11.6.2 map" "$FILES"
 
-          echo "ALL POSTAL FIX 11.9.1 MARKERS VERIFIED"
+          echo "ALL POSTAL FIX 11.10 MARKERS VERIFIED"
 
       - name: Apply WineGlass project patch from successful 11.8.1
         shell: bash
@@ -908,8 +1003,8 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleName POSTAL 2" "$PLIST"
           /usr/libexec/PlistBuddy -c "Delete :CFBundleDisplayName" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string POSTAL 2" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.11.9.1" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1191" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.11.10" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1110" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :UIFileSharingEnabled true" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :LSSupportsOpeningDocumentsInPlace true" "$PLIST"
 
@@ -921,7 +1016,7 @@ jobs:
           set -euxo pipefail
           python3 .postal-base-patches/launcher.py
 
-      - name: Stamp POSTAL FIX 11.9.1 launcher
+      - name: Stamp POSTAL FIX 11.10 launcher
         shell: bash
         run: |
           set -euxo pipefail
@@ -936,10 +1031,10 @@ jobs:
           s = p.read_text()
 
           replacements = {
-              "FIX 11.2 CLEAN": "FIX 11.9.1 CLEAN",
-              "FIX11.2 CLEAN": "FIX11.9.1 CLEAN",
-              "FIX 11.8.1 CLEAN": "FIX 11.9.1 CLEAN",
-              "FIX11.8.1 CLEAN": "FIX11.9.1 CLEAN",
+              "FIX 11.2 CLEAN": "FIX 11.10 CLEAN",
+              "FIX11.2 CLEAN": "FIX11.10 CLEAN",
+              "FIX 11.8.1 CLEAN": "FIX 11.10 CLEAN",
+              "FIX11.8.1 CLEAN": "FIX11.10 CLEAN",
           }
 
           for old, new in replacements.items():
@@ -965,7 +1060,7 @@ jobs:
             exit 1
           fi
 
-      - name: Build POSTAL 2 FIX 11.9.1 CLEAN
+      - name: Build POSTAL 2 FIX 11.10 CLEAN
         shell: bash
         run: |
           set -o pipefail
@@ -1043,17 +1138,17 @@ jobs:
 
           zip \
             -qry \
-            "POSTAL-2-iOS-v11.9.1-CLEAN.ipa" \
+            "POSTAL-2-iOS-v11.10-CLEAN.ipa" \
             Payload
 
           ls -lh \
-            "POSTAL-2-iOS-v11.9.1-CLEAN.ipa"
+            "POSTAL-2-iOS-v11.10-CLEAN.ipa"
 
-      - name: Upload POSTAL 2 FIX 11.9.1 CLEAN IPA
+      - name: Upload POSTAL 2 FIX 11.10 CLEAN IPA
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-iOS-v11.9.1-CLEAN
-          path: out/POSTAL-2-iOS-v11.9.1-CLEAN.ipa
+          name: POSTAL-2-iOS-v11.10-CLEAN
+          path: out/POSTAL-2-iOS-v11.10-CLEAN.ipa
           if-no-files-found: error
           retention-days: 14
 
@@ -1061,24 +1156,24 @@ jobs:
         if: always()
         shell: bash
         run: |
-          mkdir -p debug-fix11-9-1-clean
+          mkdir -p debug-fix11-10-clean
 
-          cp WineGlass/xcodebuild.log debug-fix11-9-1-clean/ 2>/dev/null || true
-          cp blink-src/config.h debug-fix11-9-1-clean/blink-config.h 2>/dev/null || true
-          cp WineGlass/Vendor/blink/wg_blink_impl.c debug-fix11-9-1-clean/ 2>/dev/null || true
-          cp WineGlass/Sources/Core/wg_engine.c debug-fix11-9-1-clean/ 2>/dev/null || true
-          cp WineGlass/Sources/Win32/wg_win32_files.c debug-fix11-9-1-clean/ 2>/dev/null || true
-          cp WineGlass/Sources/App/WGSceneDelegate.m debug-fix11-9-1-clean/ 2>/dev/null || true
-          cp WineGlass/project.yml debug-fix11-9-1-clean/ 2>/dev/null || true
-          cp vc120-runtime/msvcr120.dll debug-fix11-9-1-clean/ 2>/dev/null || true
-          cp vc120-runtime/msvcp120.dll debug-fix11-9-1-clean/ 2>/dev/null || true
-          cp .postal-base-patches/cumulative-fix11.8.1.py debug-fix11-9-1-clean/ 2>/dev/null || true
+          cp WineGlass/xcodebuild.log debug-fix11-10-clean/ 2>/dev/null || true
+          cp blink-src/config.h debug-fix11-10-clean/blink-config.h 2>/dev/null || true
+          cp WineGlass/Vendor/blink/wg_blink_impl.c debug-fix11-10-clean/ 2>/dev/null || true
+          cp WineGlass/Sources/Core/wg_engine.c debug-fix11-10-clean/ 2>/dev/null || true
+          cp WineGlass/Sources/Win32/wg_win32_files.c debug-fix11-10-clean/ 2>/dev/null || true
+          cp WineGlass/Sources/App/WGSceneDelegate.m debug-fix11-10-clean/ 2>/dev/null || true
+          cp WineGlass/project.yml debug-fix11-10-clean/ 2>/dev/null || true
+          cp vc120-runtime/msvcr120.dll debug-fix11-10-clean/ 2>/dev/null || true
+          cp vc120-runtime/msvcp120.dll debug-fix11-10-clean/ 2>/dev/null || true
+          cp .postal-base-patches/cumulative-fix11.8.1.py debug-fix11-10-clean/ 2>/dev/null || true
 
-      - name: Upload FIX 11.9.1 CLEAN debug
+      - name: Upload FIX 11.10 CLEAN debug
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-FIX11.9.1-CLEAN-DEBUG
-          path: debug-fix11-9-1-clean
+          name: POSTAL-2-FIX11.10-CLEAN-DEBUG
+          path: debug-fix11-10-clean
           if-no-files-found: ignore
           retention-days: 7
