@@ -1,4 +1,4 @@
-name: POSTAL 2 WineGlass iOS FIX 11.10 CLEAN
+name: POSTAL 2 WineGlass iOS FIX 11.11 CLEAN
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   lint:
-    name: Validate FIX 11.10 CLEAN
+    name: Validate FIX 11.11 CLEAN
     runs-on: ubuntu-24.04
     timeout-minutes: 5
 
@@ -119,7 +119,7 @@ jobs:
               )
 
           print(
-              "FIX 11.10 validation OK:",
+              "FIX 11.11 validation OK:",
               len(blocks),
               "visible Python blocks and",
               len(found),
@@ -215,7 +215,7 @@ jobs:
 
   build:
     needs: vc120
-    name: Build POSTAL 2 FIX 11.10 CLEAN
+    name: Build POSTAL 2 FIX 11.11 CLEAN
     runs-on: macos-14
     timeout-minutes: 90
 
@@ -843,7 +843,6 @@ jobs:
                       );
                   }
 
-                  // Execute the original first instruction, then re-arm the HLT.
                   wg_blink_write_mem(
                       engine->blink,
                       s_postal_reg_bp[i],
@@ -951,7 +950,435 @@ jobs:
 
           echo "POSTAL FIX 11.10 REGISTRANT PROBE VERIFY OK"
 
-      - name: Verify all POSTAL FIX 11.10 markers
+      - name: Patch FIX 11.11 ProcessRegistrants assertion probe
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path("WineGlass/Sources/Core/wg_engine.c")
+          s = p.read_text()
+
+          marker = "POSTAL FIX11.11 FAILASSERT HIT"
+
+          if marker not in s:
+              run_anchor = "bool wg_engine_run(WGEngine *engine) {"
+              run_pos = s.find(run_anchor)
+
+              if run_pos < 0:
+                  raise SystemExit(
+                      "ERROR: FIX11.11 wg_engine_run anchor missing"
+                  )
+
+              helper = r'''// ============================================================
+          // POSTAL 2 FIX 11.11 - ProcessRegistrants / GObjRegistrants probe
+          // ============================================================
+
+          static bool s_postal_fail_probe_armed_1111 = false;
+          static uint32_t s_postal_fail_bp_1111 = 0;
+          static uint8_t s_postal_fail_orig_1111 = 0;
+
+          static void postal_read_ascii_1111(
+              WGEngine *engine,
+              uint32_t addr,
+              char *out,
+              size_t out_size
+          ) {
+              if (!out || out_size == 0) return;
+              out[0] = 0;
+              if (!engine || !engine->blink || !addr) return;
+
+              size_t n = out_size - 1;
+              if (!wg_blink_read_mem(engine->blink, addr, out, n)) {
+                  out[0] = 0;
+                  return;
+              }
+              out[n] = 0;
+
+              for (size_t i = 0; i < n; i++) {
+                  unsigned char c = (unsigned char)out[i];
+                  if (c == 0) break;
+                  if (c < 32 || c >= 127) out[i] = '?';
+              }
+          }
+
+          static void postal_dump_tarray_candidate_1111(
+              WGEngine *engine,
+              uint32_t cand,
+              uint32_t data,
+              int32_t num,
+              int32_t max,
+              int score,
+              int id
+          ) {
+              WG_LOGW(
+                  TAG,
+                  "POSTAL FIX11.11 TARRAY CAND #%d addr=0x%08X data=0x%08X num=%d max=%d score=%d",
+                  id, cand, data, num, max, score
+              );
+
+              int limit = num;
+              if (limit > 48) limit = 48;
+
+              for (int i = 0; i < limit; i++) {
+                  uint32_t obj = 0;
+
+                  if (!wg_blink_read_mem(
+                          engine->blink,
+                          data + (uint32_t)i * 4u,
+                          &obj,
+                          sizeof(obj)
+                      )) {
+                      break;
+                  }
+
+                  uint32_t raw[12] = {0};
+                  bool object_ok = false;
+
+                  if (obj >= 0x10000u && obj < 0xFFF00000u) {
+                      object_ok = wg_blink_read_mem(
+                          engine->blink,
+                          obj,
+                          raw,
+                          sizeof(raw)
+                      );
+                  }
+
+                  if (object_ok) {
+                      WG_LOGW(
+                          TAG,
+                          "POSTAL FIX11.11 CAND #%d [%d]=0x%08X OBJ %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X",
+                          id, i, obj,
+                          raw[0], raw[1], raw[2], raw[3],
+                          raw[4], raw[5], raw[6], raw[7],
+                          raw[8], raw[9], raw[10], raw[11]
+                      );
+                  } else {
+                      WG_LOGW(
+                          TAG,
+                          "POSTAL FIX11.11 CAND #%d [%d]=0x%08X",
+                          id, i, obj
+                      );
+                  }
+              }
+          }
+
+          static void postal_scan_gobjregistrants_1111(
+              WGEngine *engine,
+              uint32_t caller_ret
+          ) {
+              if (!engine || !engine->blink || !caller_ret) return;
+
+              uint32_t start = caller_ret > 256u ? caller_ret - 256u : caller_ret;
+              uint8_t code[512] = {0};
+
+              if (!wg_blink_read_mem(
+                      engine->blink,
+                      start,
+                      code,
+                      sizeof(code)
+                  )) {
+                  WG_LOGW(
+                      TAG,
+                      "POSTAL FIX11.11 caller code read failed at 0x%08X",
+                      start
+                  );
+                  return;
+              }
+
+              WG_LOGW(
+                  TAG,
+                  "POSTAL FIX11.11 CALLER WINDOW start=0x%08X ret=0x%08X",
+                  start,
+                  caller_ret
+              );
+
+              for (int row = 0; row < 16; row++) {
+                  int o = 128 + row * 16;
+                  WG_LOGW(
+                      TAG,
+                      "POSTAL FIX11.11 CODE %08X: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+                      start + (uint32_t)o,
+                      code[o+0], code[o+1], code[o+2], code[o+3],
+                      code[o+4], code[o+5], code[o+6], code[o+7],
+                      code[o+8], code[o+9], code[o+10], code[o+11],
+                      code[o+12], code[o+13], code[o+14], code[o+15]
+                  );
+              }
+
+              uint32_t seen[64] = {0};
+              int seen_count = 0;
+              int cand_id = 0;
+
+              for (int o = 0; o <= (int)sizeof(code) - 4; o++) {
+                  uint32_t cand =
+                      ((uint32_t)code[o + 0]) |
+                      ((uint32_t)code[o + 1] << 8) |
+                      ((uint32_t)code[o + 2] << 16) |
+                      ((uint32_t)code[o + 3] << 24);
+
+                  if (cand < 0x60000000u || cand >= 0x61000000u) continue;
+
+                  bool duplicate = false;
+                  for (int k = 0; k < seen_count; k++) {
+                      if (seen[k] == cand) {
+                          duplicate = true;
+                          break;
+                      }
+                  }
+                  if (duplicate) continue;
+                  if (seen_count < 64) seen[seen_count++] = cand;
+
+                  uint32_t arr[3] = {0};
+                  if (!wg_blink_read_mem(engine->blink, cand, arr, sizeof(arr))) {
+                      continue;
+                  }
+
+                  uint32_t data = arr[0];
+                  int32_t num = (int32_t)arr[1];
+                  int32_t max = (int32_t)arr[2];
+
+                  if (
+                      num <= 0 || num > 512 ||
+                      max < num || max > 2048 ||
+                      data < 0x10000u || data >= 0xFFF00000u
+                  ) {
+                      continue;
+                  }
+
+                  int sample = num;
+                  if (sample > 24) sample = 24;
+                  int score = 0;
+                  int readable = 0;
+
+                  for (int i = 0; i < sample; i++) {
+                      uint32_t obj = 0;
+                      if (!wg_blink_read_mem(
+                              engine->blink,
+                              data + (uint32_t)i * 4u,
+                              &obj,
+                              sizeof(obj)
+                          )) {
+                          break;
+                      }
+                      readable++;
+                      if (obj >= 0x60000000u && obj < 0x70000000u) score++;
+                  }
+
+                  if (readable >= 2 && score >= 2) {
+                      cand_id++;
+                      postal_dump_tarray_candidate_1111(
+                          engine,
+                          cand,
+                          data,
+                          num,
+                          max,
+                          score,
+                          cand_id
+                      );
+                  }
+              }
+
+              WG_LOGW(
+                  TAG,
+                  "POSTAL FIX11.11 TARRAY SCAN DONE candidates=%d",
+                  cand_id
+              );
+          }
+
+          static void postal_arm_failassert_probe_1111(
+              WGEngine *engine
+          ) {
+              if (
+                  s_postal_fail_probe_armed_1111 ||
+                  !engine ||
+                  !engine->blink
+              ) {
+                  return;
+              }
+
+              uint32_t core_base = 0;
+              for (int i = 0; i < 16; i++) {
+                  if (
+                      s_modules[i].in_use &&
+                      strcmp(s_modules[i].name, "core.dll") == 0
+                  ) {
+                      core_base = s_modules[i].base;
+                      break;
+                  }
+              }
+
+              if (!core_base) {
+                  WG_LOGW(TAG, "POSTAL FIX11.11 core.dll not loaded; failassert probe not armed");
+                  return;
+              }
+
+              uint32_t addr = wg_module_export(
+                  core_base,
+                  "?appFailAssert@@YAXPBD0H@Z"
+              );
+
+              if (!addr) {
+                  WG_LOGW(TAG, "POSTAL FIX11.11 appFailAssert export missing");
+                  return;
+              }
+
+              uint8_t orig = 0;
+              if (!wg_blink_read_mem(engine->blink, addr, &orig, 1)) {
+                  WG_LOGW(TAG, "POSTAL FIX11.11 appFailAssert first byte read failed @0x%X", addr);
+                  return;
+              }
+
+              uint8_t hlt = 0xF4;
+              if (!wg_blink_write_mem(engine->blink, addr, &hlt, 1)) {
+                  WG_LOGW(TAG, "POSTAL FIX11.11 appFailAssert breakpoint write failed @0x%X", addr);
+                  return;
+              }
+
+              s_postal_fail_bp_1111 = addr;
+              s_postal_fail_orig_1111 = orig;
+              s_postal_fail_probe_armed_1111 = true;
+
+              WG_LOGI(
+                  TAG,
+                  "POSTAL FIX11.11 FAILASSERT ARMED @0x%X orig=0x%02X core=0x%X",
+                  addr,
+                  orig,
+                  core_base
+              );
+          }
+
+          static bool postal_handle_failassert_probe_1111(
+              WGEngine *engine,
+              uint64_t rip
+          ) {
+              if (
+                  !s_postal_fail_probe_armed_1111 ||
+                  !engine ||
+                  !engine->blink ||
+                  rip != s_postal_fail_bp_1111
+              ) {
+                  return false;
+              }
+
+              uint32_t esp = (uint32_t)wg_blink_get_reg(engine->blink, 4);
+              uint32_t stack[16] = {0};
+              if (esp) {
+                  wg_blink_read_mem(engine->blink, esp, stack, sizeof(stack));
+              }
+
+              char expr[256] = {0};
+              char file[256] = {0};
+              postal_read_ascii_1111(engine, stack[1], expr, sizeof(expr));
+              postal_read_ascii_1111(engine, stack[2], file, sizeof(file));
+
+              uint32_t eax = (uint32_t)wg_blink_get_reg(engine->blink, 0);
+              uint32_t ecx = (uint32_t)wg_blink_get_reg(engine->blink, 1);
+              uint32_t edx = (uint32_t)wg_blink_get_reg(engine->blink, 2);
+              uint32_t ebx = (uint32_t)wg_blink_get_reg(engine->blink, 3);
+              uint32_t ebp = (uint32_t)wg_blink_get_reg(engine->blink, 5);
+              uint32_t esi = (uint32_t)wg_blink_get_reg(engine->blink, 6);
+              uint32_t edi = (uint32_t)wg_blink_get_reg(engine->blink, 7);
+
+              WG_LOGW(
+                  TAG,
+                  "POSTAL FIX11.11 FAILASSERT HIT expr='%s' file='%s' line=%u ret=0x%08X esp=0x%08X",
+                  expr, file, stack[3], stack[0], esp
+              );
+
+              WG_LOGW(
+                  TAG,
+                  "POSTAL FIX11.11 FAILASSERT REGS eax=%08X ecx=%08X edx=%08X ebx=%08X ebp=%08X esi=%08X edi=%08X",
+                  eax, ecx, edx, ebx, ebp, esi, edi
+              );
+
+              WG_LOGW(
+                  TAG,
+                  "POSTAL FIX11.11 FAILASSERT STACK %08X %08X %08X %08X  %08X %08X %08X %08X  %08X %08X %08X %08X  %08X %08X %08X %08X",
+                  stack[0], stack[1], stack[2], stack[3],
+                  stack[4], stack[5], stack[6], stack[7],
+                  stack[8], stack[9], stack[10], stack[11],
+                  stack[12], stack[13], stack[14], stack[15]
+              );
+
+              if (strstr(expr, "GObjRegistrants") != NULL) {
+                  WG_LOGW(
+                      TAG,
+                      "POSTAL FIX11.11 TARGET ASSERTION FOUND - scanning ProcessRegistrants caller"
+                  );
+                  postal_scan_gobjregistrants_1111(engine, stack[0]);
+              }
+
+              wg_blink_write_mem(
+                  engine->blink,
+                  s_postal_fail_bp_1111,
+                  &s_postal_fail_orig_1111,
+                  1
+              );
+              wg_blink_set_rip(engine->blink, s_postal_fail_bp_1111);
+              wg_blink_step(engine->blink);
+
+              uint8_t hlt = 0xF4;
+              wg_blink_write_mem(
+                  engine->blink,
+                  s_postal_fail_bp_1111,
+                  &hlt,
+                  1
+              );
+
+              return true;
+          }
+
+          '''
+
+              s = s[:run_pos] + helper + s[run_pos:]
+
+              arm_anchor = "    postal_arm_reg_probe_1110(engine);"
+              if arm_anchor not in s:
+                  raise SystemExit(
+                      "ERROR: FIX11.11 registrant arm anchor missing"
+                  )
+
+              s = s.replace(
+                  arm_anchor,
+                  arm_anchor + "\n    postal_arm_failassert_probe_1111(engine);",
+                  1
+              )
+
+              halt_anchor = (
+                  "                if (postal_handle_reg_probe_1110(engine, halt_rip)) break;"
+              )
+              if halt_anchor not in s:
+                  raise SystemExit(
+                      "ERROR: FIX11.11 registrant halt anchor missing"
+                  )
+
+              s = s.replace(
+                  halt_anchor,
+                  halt_anchor
+                  + "\n                if (postal_handle_failassert_probe_1111(engine, halt_rip)) break;",
+                  1
+              )
+
+              p.write_text(s)
+
+          print(
+              "POSTAL FIX 11.11 ProcessRegistrants assertion probe installed"
+          )
+          PY
+
+          ENGINE="WineGlass/Sources/Core/wg_engine.c"
+
+          grep -n "POSTAL FIX11.11 FAILASSERT ARMED" "$ENGINE"
+          grep -n "POSTAL FIX11.11 FAILASSERT HIT" "$ENGINE"
+          grep -n "POSTAL FIX11.11 TARRAY CAND" "$ENGINE"
+          grep -n "postal_handle_failassert_probe_1111(engine, halt_rip)" "$ENGINE"
+
+          echo "POSTAL FIX 11.11 ASSERTION PROBE VERIFY OK"
+
+      - name: Verify all POSTAL FIX 11.11 markers
         shell: bash
         run: |
           set -euxo pipefail
@@ -978,6 +1405,9 @@ jobs:
           grep -q "POSTAL FIX11.8.1 %s STRICT FAIL" "$ENGINE"
           grep -q "POSTAL FIX11.10 REG ENTER" "$ENGINE"
           grep -q "POSTAL FIX11.10 REG PROBE READY" "$ENGINE"
+          grep -q "POSTAL FIX11.11 FAILASSERT ARMED" "$ENGINE"
+          grep -q "POSTAL FIX11.11 FAILASSERT HIT" "$ENGINE"
+          grep -q "POSTAL FIX11.11 TARRAY CAND" "$ENGINE"
           grep -q "POSTAL DLL INITIALIZATION COMPLETE" "$ENGINE"
 
           grep -q "POSTAL FIX11.6.2 System root" "$FILES"
@@ -985,7 +1415,7 @@ jobs:
           grep -q "POSTAL FIX11.6.2 redirect cwd" "$FILES"
           grep -q "POSTAL FIX11.6.2 map" "$FILES"
 
-          echo "ALL POSTAL FIX 11.10 MARKERS VERIFIED"
+          echo "ALL POSTAL FIX 11.11 MARKERS VERIFIED"
 
       - name: Apply WineGlass project patch from successful 11.8.1
         shell: bash
@@ -1003,8 +1433,8 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleName POSTAL 2" "$PLIST"
           /usr/libexec/PlistBuddy -c "Delete :CFBundleDisplayName" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string POSTAL 2" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.11.10" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1110" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.11.11" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1111" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :UIFileSharingEnabled true" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :LSSupportsOpeningDocumentsInPlace true" "$PLIST"
 
@@ -1016,7 +1446,7 @@ jobs:
           set -euxo pipefail
           python3 .postal-base-patches/launcher.py
 
-      - name: Stamp POSTAL FIX 11.10 launcher
+      - name: Stamp POSTAL FIX 11.11 launcher
         shell: bash
         run: |
           set -euxo pipefail
@@ -1031,10 +1461,10 @@ jobs:
           s = p.read_text()
 
           replacements = {
-              "FIX 11.2 CLEAN": "FIX 11.10 CLEAN",
-              "FIX11.2 CLEAN": "FIX11.10 CLEAN",
-              "FIX 11.8.1 CLEAN": "FIX 11.10 CLEAN",
-              "FIX11.8.1 CLEAN": "FIX11.10 CLEAN",
+              "FIX 11.2 CLEAN": "FIX 11.11 CLEAN",
+              "FIX11.2 CLEAN": "FIX11.11 CLEAN",
+              "FIX 11.8.1 CLEAN": "FIX 11.11 CLEAN",
+              "FIX11.8.1 CLEAN": "FIX11.11 CLEAN",
           }
 
           for old, new in replacements.items():
@@ -1060,7 +1490,7 @@ jobs:
             exit 1
           fi
 
-      - name: Build POSTAL 2 FIX 11.10 CLEAN
+      - name: Build POSTAL 2 FIX 11.11 CLEAN
         shell: bash
         run: |
           set -o pipefail
@@ -1138,17 +1568,17 @@ jobs:
 
           zip \
             -qry \
-            "POSTAL-2-iOS-v11.10-CLEAN.ipa" \
+            "POSTAL-2-iOS-v11.11-CLEAN.ipa" \
             Payload
 
           ls -lh \
-            "POSTAL-2-iOS-v11.10-CLEAN.ipa"
+            "POSTAL-2-iOS-v11.11-CLEAN.ipa"
 
-      - name: Upload POSTAL 2 FIX 11.10 CLEAN IPA
+      - name: Upload POSTAL 2 FIX 11.11 CLEAN IPA
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-iOS-v11.10-CLEAN
-          path: out/POSTAL-2-iOS-v11.10-CLEAN.ipa
+          name: POSTAL-2-iOS-v11.11-CLEAN
+          path: out/POSTAL-2-iOS-v11.11-CLEAN.ipa
           if-no-files-found: error
           retention-days: 14
 
@@ -1156,24 +1586,24 @@ jobs:
         if: always()
         shell: bash
         run: |
-          mkdir -p debug-fix11-10-clean
+          mkdir -p debug-fix11-11-clean
 
-          cp WineGlass/xcodebuild.log debug-fix11-10-clean/ 2>/dev/null || true
-          cp blink-src/config.h debug-fix11-10-clean/blink-config.h 2>/dev/null || true
-          cp WineGlass/Vendor/blink/wg_blink_impl.c debug-fix11-10-clean/ 2>/dev/null || true
-          cp WineGlass/Sources/Core/wg_engine.c debug-fix11-10-clean/ 2>/dev/null || true
-          cp WineGlass/Sources/Win32/wg_win32_files.c debug-fix11-10-clean/ 2>/dev/null || true
-          cp WineGlass/Sources/App/WGSceneDelegate.m debug-fix11-10-clean/ 2>/dev/null || true
-          cp WineGlass/project.yml debug-fix11-10-clean/ 2>/dev/null || true
-          cp vc120-runtime/msvcr120.dll debug-fix11-10-clean/ 2>/dev/null || true
-          cp vc120-runtime/msvcp120.dll debug-fix11-10-clean/ 2>/dev/null || true
-          cp .postal-base-patches/cumulative-fix11.8.1.py debug-fix11-10-clean/ 2>/dev/null || true
+          cp WineGlass/xcodebuild.log debug-fix11-11-clean/ 2>/dev/null || true
+          cp blink-src/config.h debug-fix11-11-clean/blink-config.h 2>/dev/null || true
+          cp WineGlass/Vendor/blink/wg_blink_impl.c debug-fix11-11-clean/ 2>/dev/null || true
+          cp WineGlass/Sources/Core/wg_engine.c debug-fix11-11-clean/ 2>/dev/null || true
+          cp WineGlass/Sources/Win32/wg_win32_files.c debug-fix11-11-clean/ 2>/dev/null || true
+          cp WineGlass/Sources/App/WGSceneDelegate.m debug-fix11-11-clean/ 2>/dev/null || true
+          cp WineGlass/project.yml debug-fix11-11-clean/ 2>/dev/null || true
+          cp vc120-runtime/msvcr120.dll debug-fix11-11-clean/ 2>/dev/null || true
+          cp vc120-runtime/msvcp120.dll debug-fix11-11-clean/ 2>/dev/null || true
+          cp .postal-base-patches/cumulative-fix11.8.1.py debug-fix11-11-clean/ 2>/dev/null || true
 
-      - name: Upload FIX 11.10 CLEAN debug
+      - name: Upload FIX 11.11 CLEAN debug
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-FIX11.10-CLEAN-DEBUG
-          path: debug-fix11-10-clean
+          name: POSTAL-2-FIX11.11-CLEAN-DEBUG
+          path: debug-fix11-11-clean
           if-no-files-found: ignore
           retention-days: 7
