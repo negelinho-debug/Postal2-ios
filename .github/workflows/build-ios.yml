@@ -1,4 +1,4 @@
-name: POSTAL 2 WineGlass iOS FIX 11.12 CLEAN
+name: POSTAL 2 WineGlass iOS FIX 11.13 CLEAN
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   lint:
-    name: Validate FIX 11.12 CLEAN
+    name: Validate FIX 11.13 CLEAN
     runs-on: ubuntu-24.04
     timeout-minutes: 5
 
@@ -119,7 +119,7 @@ jobs:
               )
 
           print(
-              "FIX 11.12 validation OK:",
+              "FIX 11.13 validation OK:",
               len(blocks),
               "visible Python blocks and",
               len(found),
@@ -215,7 +215,7 @@ jobs:
 
   build:
     needs: vc120
-    name: Build POSTAL 2 FIX 11.12 CLEAN
+    name: Build POSTAL 2 FIX 11.13 CLEAN
     runs-on: macos-14
     timeout-minutes: 90
 
@@ -514,7 +514,116 @@ jobs:
 
           echo "SUCCESSFUL FIX 11.8.1 BASE RESTORED"
 
-      - name: Patch FIX 11.12 GObjRegistrants recovery
+      - name: Recover exact successful FIX 11.12 recovery patch from history
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          python3 <<'PY'
+          from pathlib import Path
+          import ast
+          import subprocess
+          import textwrap
+
+          workflow = ".github/workflows/build-ios.yml"
+          commits = subprocess.check_output(
+              ["git", "rev-list", "HEAD", "--", workflow],
+              text=True,
+          ).splitlines()
+
+          target_commit = None
+          target_text = None
+
+          for commit in commits[1:]:
+              try:
+                  text = subprocess.check_output(
+                      ["git", "show", f"{commit}:{workflow}"],
+                      text=True,
+                      stderr=subprocess.DEVNULL,
+                  )
+              except subprocess.CalledProcessError:
+                  continue
+
+              if text.startswith(
+                  "name: POSTAL 2 WineGlass iOS FIX 11.12 CLEAN"
+              ):
+                  target_commit = commit
+                  target_text = text
+                  break
+
+          if not target_text:
+              raise SystemExit(
+                  "ERROR: FIX 11.12 workflow not found in git history. "
+                  "Keep the successful 11.12 commit in repository history."
+              )
+
+          step_name = "- name: Patch FIX 11.12 GObjRegistrants recovery"
+          step_pos = target_text.find(step_name)
+          if step_pos < 0:
+              raise SystemExit(
+                  "ERROR: FIX 11.12 recovery step missing in historical workflow"
+              )
+
+          lines = target_text[step_pos:].splitlines()
+          body = []
+          found_python = False
+          base_indent = 0
+
+          for line in lines:
+              if not found_python:
+                  if line.strip() == "python3 <<'PY'":
+                      found_python = True
+                      base_indent = len(line) - len(line.lstrip())
+                  continue
+
+              if line.strip() == "PY":
+                  break
+
+              cur = line
+              if cur.startswith(" " * base_indent):
+                  cur = cur[base_indent:]
+              body.append(cur)
+
+          if not found_python or not body:
+              raise SystemExit(
+                  "ERROR: could not extract FIX 11.12 Python patch"
+              )
+
+          code = textwrap.dedent("\n".join(body)) + "\n"
+          ast.parse(code, filename="<POSTAL-FIX11.12-recovery>")
+
+          out = Path(".postal-base-patches/recovery-fix11.12.py")
+          out.write_text(code)
+
+          print(
+              "Recovered exact FIX 11.12 recovery patch from",
+              target_commit,
+              "->",
+              out,
+          )
+          PY
+
+          test -s .postal-base-patches/recovery-fix11.12.py
+
+      - name: Apply exact successful FIX 11.12 GObjRegistrants recovery
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          python3 .postal-base-patches/recovery-fix11.12.py
+
+          ENGINE="WineGlass/Sources/Core/wg_engine.c"
+
+          grep -n "POSTAL FIX11.12 ASSERT ARMED" "$ENGINE"
+          grep -n "POSTAL FIX11.12 TARGET ASSERTION" "$ENGINE"
+          grep -n "POSTAL FIX11.12 MISSING REGISTRANT" "$ENGINE"
+          grep -n "POSTAL FIX11.12 APPENDED" "$ENGINE"
+          grep -n "POSTAL FIX11.12 ASSERTION BYPASSED" "$ENGINE"
+          grep -n "POSTAL FIX11.12 RECOVERY COMPLETE" "$ENGINE"
+
+          echo "EXACT WORKING FIX 11.12 RECOVERY RESTORED"
+
+      - name: Patch FIX 11.13 FWindowsBitmap splash bridge
         shell: bash
         run: |
           set -euxo pipefail
@@ -522,185 +631,189 @@ jobs:
           python3 <<'PY'
           from pathlib import Path
 
-          p = Path("WineGlass/Sources/Core/wg_engine.c")
-          s = p.read_text()
-          marker = "POSTAL FIX11.12 TARGET ASSERTION"
+          mapper = Path("WineGlass/Sources/Win32/wg_dll_mapper.c")
+          ms = mapper.read_text()
 
-          if marker not in s:
-              run_anchor = "bool wg_engine_run(WGEngine *engine) {"
-              run_pos = s.find(run_anchor)
-              if run_pos < 0:
-                  raise SystemExit("ERROR: FIX11.12 wg_engine_run missing")
+          mapper_marker = "POSTAL FIX11.13 FWindowsBitmap registrations"
 
-              helper = r'''// ============================================================
-          // POSTAL 2 FIX 11.12 - GObjRegistrants recovery
-          // ============================================================
-          static bool s_postal_assert_armed_1112 = false;
-          static uint32_t s_postal_assert_bp_1112 = 0;
-          static uint8_t s_postal_assert_orig_1112 = 0;
+          if mapper_marker not in ms:
+              anchor = '    WG_LOGI(TAG, "Registered %d Win32 API stubs", m->count);'
+              if anchor not in ms:
+                  raise SystemExit(
+                      "ERROR: FIX11.13 mapper registration anchor missing"
+                  )
 
-          static void postal_read_ascii_1112(WGEngine *engine, uint32_t addr, char *out, size_t cap) {
-              if (!out || cap == 0) return;
-              out[0] = 0;
-              if (!engine || !engine->blink || !addr) return;
-              if (!wg_blink_read_mem(engine->blink, addr, out, cap - 1)) return;
-              out[cap - 1] = 0;
-              for (size_t i=0; i<cap-1 && out[i]; i++) {
-                  unsigned char c=(unsigned char)out[i];
-                  if (c < 32 || c >= 127) out[i]='?';
-              }
-          }
-
-          static bool postal_find_gobj_1112(WGEngine *engine, uint32_t ret, uint32_t *data_addr, uint32_t *num_addr, uint32_t *max_addr) {
-              if (!engine || !engine->blink || !ret) return false;
-              uint32_t start = ret > 128u ? ret - 128u : ret;
-              uint8_t code[160]={0};
-              if (!wg_blink_read_mem(engine->blink, start, code, sizeof(code))) return false;
-              for (int i=0; i <= (int)sizeof(code)-12; i++) {
-                  if (code[i]==0x8B && code[i+1]==0x0D && code[i+6]==0x8B && code[i+7]==0x15) {
-                      uint32_t n=(uint32_t)code[i+2]|((uint32_t)code[i+3]<<8)|((uint32_t)code[i+4]<<16)|((uint32_t)code[i+5]<<24);
-                      uint32_t d=(uint32_t)code[i+8]|((uint32_t)code[i+9]<<8)|((uint32_t)code[i+10]<<16)|((uint32_t)code[i+11]<<24);
-                      if (d>=0x60000000u && d<0x61000000u && n==d+4u) {
-                          *data_addr=d; *num_addr=n; *max_addr=d+8u;
-                          WG_LOGW(TAG,"POSTAL FIX11.12 GOBJ SYMBOLS data@%08X num@%08X max@%08X",d,n,d+8u);
-                          return true;
-                      }
-                  }
-              }
-              return false;
-          }
-
-          static bool postal_realloc_gobj_1112(WGEngine *engine, uint32_t old_data, int32_t num, uint32_t missing, uint32_t *new_data, int32_t *new_max) {
-              if (!engine || !engine->blink || num<0 || num>=1023) return false;
-              uint8_t page[4096]={0};
-              size_t bytes=(size_t)num*4u;
-              if (bytes > sizeof(page)-4u) return false;
-              if (num && !wg_blink_read_mem(engine->blink, old_data, page, bytes)) return false;
-              memcpy(page+bytes,&missing,4);
-              static const uint32_t cand[]={0x00B00000u,0x00B10000u,0x00B20000u,0x00B30000u,0x00B40000u,0x00B50000u,0x00B60000u,0x00B70000u};
-              for (size_t i=0;i<sizeof(cand)/sizeof(cand[0]);i++) {
-                  if (wg_blink_load_code(engine->blink,cand[i],page,sizeof(page),0)) {
-                      *new_data=cand[i]; *new_max=1024;
-                      WG_LOGW(TAG,"POSTAL FIX11.12 REALLOC old=%08X new=%08X num=%d",old_data,*new_data,num+1);
-                      return true;
-                  }
-              }
-              return false;
-          }
-
-          static bool postal_recover_gobj_1112(WGEngine *engine, uint32_t ret, uint32_t missing) {
-              uint32_t da=0,na=0,ma=0,data=0;
-              int32_t num=0,max=0;
-              if (!postal_find_gobj_1112(engine,ret,&da,&na,&ma)) return false;
-              if (!wg_blink_read_mem(engine->blink,da,&data,4) || !wg_blink_read_mem(engine->blink,na,&num,4) || !wg_blink_read_mem(engine->blink,ma,&max,4)) return false;
-              WG_LOGW(TAG,"POSTAL FIX11.12 MISSING REGISTRANT this=%08X data=%08X num=%d max=%d",missing,data,num,max);
-              if (num<0 || num>1023 || max<num || max>4096 || data<0x10000u || data>=0xFFF00000u) return false;
-              for (int32_t i=0;i<num;i++) {
-                  uint32_t obj=0;
-                  if (!wg_blink_read_mem(engine->blink,data+(uint32_t)i*4u,&obj,4)) return false;
-                  if (obj==missing) return true;
-              }
-              int32_t new_num=num+1;
-              if (num<max) {
-                  if (!wg_blink_write_mem(engine->blink,data+(uint32_t)num*4u,&missing,4)) return false;
-                  if (!wg_blink_write_mem(engine->blink,na,&new_num,4)) return false;
-                  WG_LOGW(TAG,"POSTAL FIX11.12 APPENDED index=%d newNum=%d max=%d",num,new_num,max);
-                  return true;
-              }
-              uint32_t new_data=0; int32_t new_max=0;
-              if (!postal_realloc_gobj_1112(engine,data,num,missing,&new_data,&new_max)) return false;
-              if (!wg_blink_write_mem(engine->blink,da,&new_data,4) || !wg_blink_write_mem(engine->blink,na,&new_num,4) || !wg_blink_write_mem(engine->blink,ma,&new_max,4)) return false;
-              WG_LOGW(TAG,"POSTAL FIX11.12 APPENDED AFTER REALLOC index=%d newNum=%d newMax=%d",num,new_num,new_max);
-              return true;
-          }
-
-          static bool postal_return_from_assert_1112(WGEngine *engine) {
-              uint8_t retop=0xC3;
-              if (!wg_blink_write_mem(engine->blink,s_postal_assert_bp_1112,&retop,1)) return false;
-              wg_blink_set_rip(engine->blink,s_postal_assert_bp_1112);
-              wg_blink_step(engine->blink);
-              uint64_t after=wg_blink_get_rip(engine->blink);
-              uint8_t hlt=0xF4;
-              wg_blink_write_mem(engine->blink,s_postal_assert_bp_1112,&hlt,1);
-              WG_LOGW(TAG,"POSTAL FIX11.12 ASSERTION BYPASSED returnRip=0x%llX",(unsigned long long)after);
-              return true;
-          }
-
-          static void postal_arm_assert_1112(WGEngine *engine) {
-              if (s_postal_assert_armed_1112 || !engine || !engine->blink) return;
-              uint32_t core=0;
-              for (int i=0;i<16;i++) if (s_modules[i].in_use && strcmp(s_modules[i].name,"core.dll")==0) { core=s_modules[i].base; break; }
-              if (!core) return;
-              uint32_t addr=wg_module_export(core,"?appFailAssert@@YAXPBD0H@Z");
-              if (!addr) return;
-              uint8_t orig=0;
-              if (!wg_blink_read_mem(engine->blink,addr,&orig,1)) return;
-              uint8_t hlt=0xF4;
-              if (!wg_blink_write_mem(engine->blink,addr,&hlt,1)) return;
-              s_postal_assert_bp_1112=addr;
-              s_postal_assert_orig_1112=orig;
-              s_postal_assert_armed_1112=true;
-              WG_LOGI(TAG,"POSTAL FIX11.12 ASSERT ARMED @0x%X",addr);
-          }
-
-          static bool postal_handle_assert_1112(WGEngine *engine, uint64_t rip) {
-              if (!s_postal_assert_armed_1112 || !engine || !engine->blink || rip!=s_postal_assert_bp_1112) return false;
-              uint32_t esp=(uint32_t)wg_blink_get_reg(engine->blink,4);
-              uint32_t esi=(uint32_t)wg_blink_get_reg(engine->blink,6);
-              uint32_t st[8]={0};
-              if (esp) wg_blink_read_mem(engine->blink,esp,st,sizeof(st));
-              char expr[192]={0}; char file[128]={0};
-              postal_read_ascii_1112(engine,st[1],expr,sizeof(expr));
-              postal_read_ascii_1112(engine,st[2],file,sizeof(file));
-              WG_LOGW(TAG,"POSTAL FIX11.12 ASSERT HIT expr='%s' file='%s' line=%u this=%08X ret=%08X",expr,file,st[3],esi,st[0]);
-              if (strstr(expr,"GObjRegistrants") && st[3]==380u) {
-                  WG_LOGW(TAG,"POSTAL FIX11.12 TARGET ASSERTION");
-                  if (postal_recover_gobj_1112(engine,st[0],esi) && postal_return_from_assert_1112(engine)) {
-                      WG_LOGW(TAG,"POSTAL FIX11.12 RECOVERY COMPLETE this=%08X",esi);
-                      return true;
-                  }
-                  WG_LOGW(TAG,"POSTAL FIX11.12 RECOVERY FAILED");
-              }
-              wg_blink_write_mem(engine->blink,s_postal_assert_bp_1112,&s_postal_assert_orig_1112,1);
-              wg_blink_set_rip(engine->blink,s_postal_assert_bp_1112);
-              wg_blink_step(engine->blink);
-              uint8_t hlt=0xF4;
-              wg_blink_write_mem(engine->blink,s_postal_assert_bp_1112,&hlt,1);
-              return true;
-          }
+              registrations = r'''    // POSTAL FIX11.13 FWindowsBitmap registrations
+              // MSVC x86 __thiscall: ECX carries `this`; num_args is only
+              // the explicit stack arguments. The old auto-stub used zero,
+              // so ctor/LoadFile leaked one stack word and LoadFile returned 0.
+              wg_dll_mapper_register(
+                  m,
+                  "Window.dll",
+                  "??0FWindowsBitmap@@QAE@H@Z",
+                  stub_default,
+                  1
+              );
+              wg_dll_mapper_register(
+                  m,
+                  "Window.dll",
+                  "?LoadFile@FWindowsBitmap@@QAEHPB_W@Z",
+                  stub_return_1,
+                  1
+              );
+              wg_dll_mapper_register(
+                  m,
+                  "Window.dll",
+                  "?GetBitmapHandle@FWindowsBitmap@@QAEPAUHBITMAP__@@XZ",
+                  stub_return_1,
+                  0
+              );
+              wg_dll_mapper_register(
+                  m,
+                  "Window.dll",
+                  "??1FWindowsBitmap@@QAE@XZ",
+                  stub_default,
+                  0
+              );
 
           '''
-              s=s[:run_pos]+helper+s[run_pos:]
-              arm_anchor="    // DIAG: trap steam.exe's ERR_error_string_n"
-              if arm_anchor not in s:
-                  raise SystemExit("ERROR: FIX11.12 run insertion anchor missing")
-              s=s.replace(arm_anchor,"    postal_arm_assert_1112(engine);\n\n"+arm_anchor,1)
-              halt_anchor="                uint64_t halt_rip = wg_blink_get_rip(engine->blink);"
-              if halt_anchor not in s:
-                  raise SystemExit("ERROR: FIX11.12 halt anchor missing")
-              s=s.replace(halt_anchor,halt_anchor+"\n                if (postal_handle_assert_1112(engine, halt_rip)) break;",1)
-              p.write_text(s)
 
-          print("POSTAL FIX 11.12 direct recovery installed")
+              ms = ms.replace(
+                  anchor,
+                  registrations + anchor,
+                  1,
+              )
+              mapper.write_text(ms)
 
+          engine = Path("WineGlass/Sources/Core/wg_engine.c")
+          es = engine.read_text()
+
+          engine_marker = "POSTAL FIX11.13 FWindowsBitmap::LoadFile"
+
+          if engine_marker not in es:
+              anchor = '''        const char *fn = entry->func_name;
+                  if (entry->dll_name && strcasecmp(entry->dll_name, "nsDialogs.dll") == 0) {'''
+
+              if anchor not in es:
+                  raise SystemExit(
+                      "ERROR: FIX11.13 handle_blink_thunk anchor missing"
+                  )
+
+              replacement = r'''        const char *fn = entry->func_name;
+
+                  // POSTAL FIX11.13 - minimal Window.dll FWindowsBitmap bridge.
+                  // Postal2Splash.bmp was already opened successfully by the
+                  // file layer. The Window.dll methods are auto-stubs here, so
+                  // accept the cosmetic splash and keep UE2 startup moving.
+                  if (
+                      entry->dll_name &&
+                      strcasecmp(entry->dll_name, "Window.dll") == 0 &&
+                      strcmp(fn, "??0FWindowsBitmap@@QAE@H@Z") == 0
+                  ) {
+                      uint32_t self = (uint32_t)wg_blink_get_reg(
+                          engine->blink,
+                          1
+                      );
+                      ret_val = self;
+                      WG_LOGI(
+                          TAG,
+                          "POSTAL FIX11.13 FWindowsBitmap::ctor this=0x%X -> 0x%X",
+                          self,
+                          self
+                      );
+                  } else if (
+                      entry->dll_name &&
+                      strcasecmp(entry->dll_name, "Window.dll") == 0 &&
+                      strcmp(fn, "?LoadFile@FWindowsBitmap@@QAEHPB_W@Z") == 0
+                  ) {
+                      uint16_t wide_name[260] = {0};
+                      char ascii_name[260] = {0};
+
+                      if (args[0]) {
+                          wg_blink_read_mem(
+                              engine->blink,
+                              args[0],
+                              wide_name,
+                              sizeof(wide_name) - 2
+                          );
+
+                          for (
+                              int i = 0;
+                              i < 259 && wide_name[i];
+                              i++
+                          ) {
+                              ascii_name[i] =
+                                  wide_name[i] < 128
+                                  ? (char)wide_name[i]
+                                  : '?';
+                          }
+                      }
+
+                      s_last_error = 0;
+                      ret_val = 1;
+
+                      WG_LOGI(
+                          TAG,
+                          "POSTAL FIX11.13 FWindowsBitmap::LoadFile('%s') -> TRUE (splash accepted)",
+                          ascii_name
+                      );
+                  } else if (
+                      entry->dll_name &&
+                      strcasecmp(entry->dll_name, "Window.dll") == 0 &&
+                      strcmp(
+                          fn,
+                          "?GetBitmapHandle@FWindowsBitmap@@QAEPAUHBITMAP__@@XZ"
+                      ) == 0
+                  ) {
+                      ret_val = 0xB17A0001u;
+                      s_last_error = 0;
+                      WG_LOGI(
+                          TAG,
+                          "POSTAL FIX11.13 FWindowsBitmap::GetBitmapHandle -> 0x%llX",
+                          (unsigned long long)ret_val
+                      );
+                  } else if (
+                      entry->dll_name &&
+                      strcasecmp(entry->dll_name, "Window.dll") == 0 &&
+                      strcmp(fn, "??1FWindowsBitmap@@QAE@XZ") == 0
+                  ) {
+                      ret_val = 0;
+                      WG_LOGI(
+                          TAG,
+                          "POSTAL FIX11.13 FWindowsBitmap::dtor -> OK"
+                      );
+                  } else if (entry->dll_name && strcasecmp(entry->dll_name, "nsDialogs.dll") == 0) {'''
+
+              es = es.replace(
+                  anchor,
+                  replacement,
+                  1,
+              )
+              engine.write_text(es)
+
+          print("POSTAL FIX 11.13 FWindowsBitmap splash bridge installed")
           PY
 
           ENGINE="WineGlass/Sources/Core/wg_engine.c"
-          grep -n "POSTAL FIX11.12 ASSERT ARMED" "$ENGINE"
-          grep -n "POSTAL FIX11.12 TARGET ASSERTION" "$ENGINE"
-          grep -n "POSTAL FIX11.12 MISSING REGISTRANT" "$ENGINE"
-          grep -n "POSTAL FIX11.12 APPENDED" "$ENGINE"
-          grep -n "POSTAL FIX11.12 ASSERTION BYPASSED" "$ENGINE"
-          grep -n "POSTAL FIX11.12 RECOVERY COMPLETE" "$ENGINE"
-          echo "POSTAL FIX 11.12 RECOVERY PATCH OK"
+          MAPPER="WineGlass/Sources/Win32/wg_dll_mapper.c"
 
-      - name: Verify all POSTAL FIX 11.12 markers
+          grep -n "POSTAL FIX11.13 FWindowsBitmap registrations" "$MAPPER"
+          grep -n "?LoadFile@FWindowsBitmap@@QAEHPB_W@Z" "$MAPPER"
+          grep -n "POSTAL FIX11.13 FWindowsBitmap::ctor" "$ENGINE"
+          grep -n "POSTAL FIX11.13 FWindowsBitmap::LoadFile" "$ENGINE"
+          grep -n "POSTAL FIX11.13 FWindowsBitmap::GetBitmapHandle" "$ENGINE"
+          grep -n "POSTAL FIX11.13 FWindowsBitmap::dtor" "$ENGINE"
+
+          echo "POSTAL FIX 11.13 SPLASH BRIDGE VERIFY OK"
+
+      - name: Verify all POSTAL FIX 11.13 markers
         shell: bash
         run: |
           set -euxo pipefail
 
           ENGINE="WineGlass/Sources/Core/wg_engine.c"
           FILES="WineGlass/Sources/Win32/wg_win32_files.c"
+          MAPPER="WineGlass/Sources/Win32/wg_dll_mapper.c"
 
           grep -q "POSTAL REAL DLL READY" "$ENGINE"
           grep -q "POSTAL PRELOAD BEGIN" "$ENGINE"
@@ -721,18 +834,20 @@ jobs:
           grep -q "POSTAL FIX11.8.1 %s STRICT FAIL" "$ENGINE"
           grep -q "POSTAL FIX11.12 ASSERT ARMED" "$ENGINE"
           grep -q "POSTAL FIX11.12 TARGET ASSERTION" "$ENGINE"
-          grep -q "POSTAL FIX11.12 MISSING REGISTRANT" "$ENGINE"
-          grep -q "POSTAL FIX11.12 APPENDED" "$ENGINE"
-          grep -q "POSTAL FIX11.12 ASSERTION BYPASSED" "$ENGINE"
           grep -q "POSTAL FIX11.12 RECOVERY COMPLETE" "$ENGINE"
+          grep -q "POSTAL FIX11.13 FWindowsBitmap::LoadFile" "$ENGINE"
+          grep -q "POSTAL FIX11.13 FWindowsBitmap::GetBitmapHandle" "$ENGINE"
           grep -q "POSTAL DLL INITIALIZATION COMPLETE" "$ENGINE"
+
+          grep -q "POSTAL FIX11.13 FWindowsBitmap registrations" "$MAPPER"
+          grep -q "?LoadFile@FWindowsBitmap@@QAEHPB_W@Z" "$MAPPER"
 
           grep -q "POSTAL FIX11.6.2 System root" "$FILES"
           grep -q "POSTAL FIX11.6.2 exe win path" "$FILES"
           grep -q "POSTAL FIX11.6.2 redirect cwd" "$FILES"
           grep -q "POSTAL FIX11.6.2 map" "$FILES"
 
-          echo "ALL POSTAL FIX 11.12 MARKERS VERIFIED"
+          echo "ALL POSTAL FIX 11.13 MARKERS VERIFIED"
 
       - name: Apply WineGlass project patch from successful 11.8.1
         shell: bash
@@ -750,8 +865,8 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleName POSTAL 2" "$PLIST"
           /usr/libexec/PlistBuddy -c "Delete :CFBundleDisplayName" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string POSTAL 2" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.11.12" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1112" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.11.13" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1113" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :UIFileSharingEnabled true" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :LSSupportsOpeningDocumentsInPlace true" "$PLIST"
 
@@ -763,7 +878,7 @@ jobs:
           set -euxo pipefail
           python3 .postal-base-patches/launcher.py
 
-      - name: Stamp POSTAL FIX 11.12 launcher
+      - name: Stamp POSTAL FIX 11.13 launcher
         shell: bash
         run: |
           set -euxo pipefail
@@ -778,10 +893,10 @@ jobs:
           s = p.read_text()
 
           replacements = {
-              "FIX 11.2 CLEAN": "FIX 11.12 CLEAN",
-              "FIX11.2 CLEAN": "FIX11.12 CLEAN",
-              "FIX 11.8.1 CLEAN": "FIX 11.12 CLEAN",
-              "FIX11.8.1 CLEAN": "FIX11.12 CLEAN",
+              "FIX 11.2 CLEAN": "FIX 11.13 CLEAN",
+              "FIX11.2 CLEAN": "FIX11.13 CLEAN",
+              "FIX 11.8.1 CLEAN": "FIX 11.13 CLEAN",
+              "FIX11.8.1 CLEAN": "FIX11.13 CLEAN",
           }
 
           for old, new in replacements.items():
@@ -807,7 +922,7 @@ jobs:
             exit 1
           fi
 
-      - name: Build POSTAL 2 FIX 11.12 CLEAN
+      - name: Build POSTAL 2 FIX 11.13 CLEAN
         shell: bash
         run: |
           set -o pipefail
@@ -885,17 +1000,17 @@ jobs:
 
           zip \
             -qry \
-            "POSTAL-2-iOS-v11.12-CLEAN.ipa" \
+            "POSTAL-2-iOS-v11.13-CLEAN.ipa" \
             Payload
 
           ls -lh \
-            "POSTAL-2-iOS-v11.12-CLEAN.ipa"
+            "POSTAL-2-iOS-v11.13-CLEAN.ipa"
 
-      - name: Upload POSTAL 2 FIX 11.12 CLEAN IPA
+      - name: Upload POSTAL 2 FIX 11.13 CLEAN IPA
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-iOS-v11.12-CLEAN
-          path: out/POSTAL-2-iOS-v11.12-CLEAN.ipa
+          name: POSTAL-2-iOS-v11.13-CLEAN
+          path: out/POSTAL-2-iOS-v11.13-CLEAN.ipa
           if-no-files-found: error
           retention-days: 14
 
@@ -903,24 +1018,25 @@ jobs:
         if: always()
         shell: bash
         run: |
-          mkdir -p debug-fix11-12-clean
+          mkdir -p debug-fix11-13-clean
 
-          cp WineGlass/xcodebuild.log debug-fix11-12-clean/ 2>/dev/null || true
-          cp blink-src/config.h debug-fix11-12-clean/blink-config.h 2>/dev/null || true
-          cp WineGlass/Vendor/blink/wg_blink_impl.c debug-fix11-12-clean/ 2>/dev/null || true
-          cp WineGlass/Sources/Core/wg_engine.c debug-fix11-12-clean/ 2>/dev/null || true
-          cp WineGlass/Sources/Win32/wg_win32_files.c debug-fix11-12-clean/ 2>/dev/null || true
-          cp WineGlass/Sources/App/WGSceneDelegate.m debug-fix11-12-clean/ 2>/dev/null || true
-          cp WineGlass/project.yml debug-fix11-12-clean/ 2>/dev/null || true
-          cp vc120-runtime/msvcr120.dll debug-fix11-12-clean/ 2>/dev/null || true
-          cp vc120-runtime/msvcp120.dll debug-fix11-12-clean/ 2>/dev/null || true
-          cp .postal-base-patches/cumulative-fix11.8.1.py debug-fix11-12-clean/ 2>/dev/null || true
+          cp WineGlass/xcodebuild.log debug-fix11-13-clean/ 2>/dev/null || true
+          cp blink-src/config.h debug-fix11-13-clean/blink-config.h 2>/dev/null || true
+          cp WineGlass/Vendor/blink/wg_blink_impl.c debug-fix11-13-clean/ 2>/dev/null || true
+          cp WineGlass/Sources/Core/wg_engine.c debug-fix11-13-clean/ 2>/dev/null || true
+          cp WineGlass/Sources/Win32/wg_win32_files.c debug-fix11-13-clean/ 2>/dev/null || true
+          cp WineGlass/Sources/Win32/wg_dll_mapper.c debug-fix11-13-clean/ 2>/dev/null || true
+          cp WineGlass/Sources/App/WGSceneDelegate.m debug-fix11-13-clean/ 2>/dev/null || true
+          cp WineGlass/project.yml debug-fix11-13-clean/ 2>/dev/null || true
+          cp vc120-runtime/msvcr120.dll debug-fix11-13-clean/ 2>/dev/null || true
+          cp vc120-runtime/msvcp120.dll debug-fix11-13-clean/ 2>/dev/null || true
+          cp .postal-base-patches/cumulative-fix11.8.1.py debug-fix11-13-clean/ 2>/dev/null || true
 
-      - name: Upload FIX 11.12 CLEAN debug
+      - name: Upload FIX 11.13 CLEAN debug
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: POSTAL-2-FIX11.12-CLEAN-DEBUG
-          path: debug-fix11-12-clean
+          name: POSTAL-2-FIX11.13-CLEAN-DEBUG
+          path: debug-fix11-13-clean
           if-no-files-found: ignore
           retention-days: 7
